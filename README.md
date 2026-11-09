@@ -28,6 +28,11 @@ Open the printed URL in two tabs: host in one, join with the room code in the ot
 
 The game is published by copying `packages/client/dist` into the `ancientempires/` folder of the `Gjoerk/gjoerk.github.io` site repository.
 
+## Custom sprites
+
+All art is drawn by code, but any unit, building or resource can be replaced with an image by listing it in
+`packages/client/public/sprites/manifest.json`. See `packages/client/public/sprites/README.md`.
+
 ## Status
 
 Done:

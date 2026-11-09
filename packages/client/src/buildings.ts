@@ -1,4 +1,5 @@
 import { DEFS, Kind } from '@kingsfall/shared';
+import { drawSprite, findSprite } from './assets';
 import { HH, HW, PLAYER_COLORS, shade } from './sprites';
 
 type Ctx = CanvasRenderingContext2D;
@@ -145,6 +146,10 @@ class Pen {
     for (let i = 1; i < count; i++) this.box(u0, v0 + i * stepV, u0 + w, v0 + i * stepV + w, z, z + 5, color);
     for (let i = 1; i < count; i++) this.box(u0 + i * stepU, v1 - w, u0 + i * stepU + w, v1, z, z + 5, color);
     for (let i = 1; i < count - 1; i++) this.box(u1 - w, v0 + i * stepV, u1, v0 + i * stepV + w, z, z + 5, color);
+  }
+
+  flag(base: Pt, team: string, now: number): void {
+    if (!this.shadowMode) drawRoyalFlag(this.ctx, base, team, now);
   }
 
   line(a: Pt, b: Pt, color: string, width: number): void {
@@ -314,19 +319,33 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.onU(3.6, 1.65, 2.35, 0, 17, '#3a2a1a');
     pen.crenels(3.3, 1, 3.6, 3, 24, STONE);
     tower(3.0, 3.0);
-    if (state.kingInside) {
-      const base = pen.p(2, 2, 50);
-      const top: Pt = [base[0], base[1] - 30];
-      pen.line(base, top, '#3a2a1a', 2);
-      // The royal flag ripples in the wind.
-      const wave = (k: number) => Math.sin(state.now / 180 + k) * 2;
-      pen.poly(team, [top, [top[0] + 11, top[1] + 2 + wave(0)], [top[0] + 22, top[1] + 1 + wave(1.5)],
-        [top[0] + 22, top[1] + 13 + wave(1.5)], [top[0] + 11, top[1] + 14 + wave(0)], [top[0], top[1] + 12]]);
-      pen.poly('#f2cf3a', [[top[0] + 6, top[1] + 9 + wave(0)], [top[0] + 6, top[1] + 4 + wave(0)], [top[0] + 9, top[1] + 7 + wave(0)],
-        [top[0] + 11, top[1] + 4 + wave(0)], [top[0] + 13, top[1] + 7 + wave(0)], [top[0] + 16, top[1] + 4 + wave(0)], [top[0] + 16, top[1] + 9 + wave(0)]]);
-    }
+    if (state.kingInside) pen.flag(pen.p(2, 2, 50), team, state.now);
   },
 };
+
+/** The royal flag with a crown, rippling in the wind. `base` is the foot of the pole. */
+export function drawRoyalFlag(ctx: Ctx, base: Pt, team: string, now: number): void {
+  const top: Pt = [base[0], base[1] - 30];
+  const fill = (color: string, pts: Pt[]) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
+    ctx.closePath();
+    ctx.fill();
+  };
+  ctx.strokeStyle = '#3a2a1a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(base[0], base[1]);
+  ctx.lineTo(top[0], top[1]);
+  ctx.stroke();
+  const wave = (k: number) => Math.sin(now / 180 + k) * 2;
+  fill(team, [top, [top[0] + 11, top[1] + 2 + wave(0)], [top[0] + 22, top[1] + 1 + wave(1.5)],
+    [top[0] + 22, top[1] + 13 + wave(1.5)], [top[0] + 11, top[1] + 14 + wave(0)], [top[0], top[1] + 12]]);
+  fill('#f2cf3a', [[top[0] + 6, top[1] + 9 + wave(0)], [top[0] + 6, top[1] + 4 + wave(0)], [top[0] + 9, top[1] + 7 + wave(0)],
+    [top[0] + 11, top[1] + 4 + wave(0)], [top[0] + 13, top[1] + 7 + wave(0)], [top[0] + 16, top[1] + 4 + wave(0)], [top[0] + 16, top[1] + 9 + wave(0)]]);
+}
 
 function drawFarm(pen: Pen, team: string, state: BuildingState, seed: number): void {
   const done = state.built >= 1;
@@ -377,6 +396,22 @@ function drawFarm(pen: Pen, team: string, state: BuildingState, seed: number): v
 export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, sx: number, sy: number, state: BuildingState): void {
   const team = PLAYER_COLORS[owner % PLAYER_COLORS.length];
   const s = DEFS[kind].size ?? 1;
+  // A sprite pack may provide this building; its anchor sits on the centre of the footprint.
+  const done = state.built >= 1;
+  const custom = findSprite(done
+    ? [...(state.kingInside ? [`building.${kind}.king`] : []), `building.${kind}`]
+    : [`building.${kind}.site`, 'building.site', `building.${kind}`]);
+  if (custom) {
+    const ghost = !done && custom.key === `building.${kind}`;
+    if (ghost) ctx.globalAlpha = 0.3 + 0.6 * state.built;
+    const [left, top] = drawSprite(ctx, custom, team, sx, sy + s * HH, state.now);
+    ctx.globalAlpha = 1;
+    if (done && state.kingInside && custom.def.flag && !custom.key.endsWith('.king')) {
+      const k = custom.def.scale ?? 1;
+      drawRoyalFlag(ctx, [left + custom.def.flag[0] * k, top + custom.def.flag[1] * k], team, state.now);
+    }
+    return;
+  }
   if (kind === 'farm') {
     drawFarm(new Pen(ctx, sx, sy, false), team, state, seed);
     return;

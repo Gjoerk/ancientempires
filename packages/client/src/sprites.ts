@@ -1,4 +1,5 @@
 import { Kind, Tile } from '@kingsfall/shared';
+import { drawSprite, findSprite } from './assets';
 
 export const PLAYER_COLORS = ['#3b6fd4', '#d43b3b', '#3bb85a', '#e0c12f'];
 
@@ -126,6 +127,7 @@ export interface Work {
   phase: number;
 }
 
+const WORK_NAMES = ['', 'wood', 'berries', 'gold', 'stone', 'farm', 'build'];
 const CHIP_COLORS = ['', '#d8b070', '#d43b5a', '#f2cf3a', '#c4c8cf', '#6e4f2c', '#d8cfae'];
 export const CARRY_COLORS = ['#d43b5a', '#8a5a33', '#f2cf3a', '#b4b8bf'];
 
@@ -195,9 +197,19 @@ function drawTool(ctx: Ctx, x: number, y: number, w: Work): void {
 }
 
 export function drawUnit(
-  ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1,
+  ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1, activity = 0, now = 0,
 ): void {
   const big = kind === 'king' || kind === 'rider';
+  // A sprite pack may provide this unit, optionally with separate images per activity.
+  const state = work ? `work.${WORK_NAMES[work.task]}` : ['idle', 'walk', 'work', 'attack'][activity] ?? 'idle';
+  const custom = findSprite([`unit.${kind}.${state}`, `unit.${kind}.${state.split('.')[0]}`, `unit.${kind}`]);
+  if (custom) {
+    if (custom.def.shadow !== false) shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
+    drawSprite(ctx, custom, PLAYER_COLORS[owner % PLAYER_COLORS.length], x, y - bob, now, work ? work.dir < 0 : false);
+    // Without a dedicated working image, the built-in tool is swung over the sprite.
+    if (work && !custom.key.includes('.work')) drawTool(ctx, x, y - bob, work);
+    return;
+  }
   shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
   const palette = {
     s: '#e2b48c', e: '#2a2018', l: '#6b4a2b', d: '#3a2a1a', h: '#5a3b1e', m: '#9aa0a8', w: '#e6e9ee', k: '#7a5230',
@@ -243,8 +255,17 @@ const ROCK = [
   'ssssysss',
 ];
 
+const PROP_NAMES: Record<number, string> = { [Tile.Forest]: 'tree', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold', [Tile.Stone]: 'stone' };
+
 /** Draws the thing standing on a resource tile, with (x, y) at the tile centre. */
-export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: number): void {
+export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: number, now = 0): void {
+  const name = PROP_NAMES[tile];
+  const custom = findSprite([`resource.${name}.${variant}`, `resource.${name}`]);
+  if (custom) {
+    if (custom.def.shadow !== false) shadow(ctx, x, y + 5, 12, 5);
+    drawSprite(ctx, custom, '#ffffff', x, y, now);
+    return;
+  }
   if (tile === Tile.Forest) {
     shadow(ctx, x, y + 4, 10, 5);
     const greens = [['#2f6b2c', '#3f8a37'], ['#28602f', '#37803f'], ['#356e25', '#4a9030']][variant % 3];

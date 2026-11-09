@@ -17,6 +17,7 @@ import {
   TILE_RESOURCE,
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
+import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
 
@@ -721,7 +722,7 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
     work = { task: v.task, dir, phase: ((now + v.id * 137) % period) / period };
   }
   const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) : -1;
-  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried);
+  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now);
   if (v.hp < def.hp || selected.has(v.id)) bar(sx, sy - (v.kind === 'king' ? 34 : 30), 22, v.hp / def.hp, '#4ad04a');
 }
 
@@ -786,7 +787,7 @@ function frame(now: number): void {
     const ty = Math.floor(index / map.size);
     const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
     if (sx < -40 || sy < -10 || sx > canvas.width + 40 || sy > canvas.height + 60) continue;
-    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 3)) });
+    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 3), now) });
   }
   for (const v of views.values()) {
     if (v.kind === 'farm') continue;
@@ -827,6 +828,7 @@ function frame(now: number): void {
   renderHud();
   renderMinimap();
 }
+void loadSprites();
 requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
