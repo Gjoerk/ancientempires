@@ -36,11 +36,14 @@ All art is drawn by code, but any unit, building or resource can be replaced wit
 ## Status
 
 Done:
-- Rooms for up to 4 players, seeded 64×64 map with wood, berries, gold and stone near every start.
-- Economy: villagers gather and deliver resources, farms, storehouses, houses and a population limit.
-- Buildings are placed and constructed by villagers; town centre, barracks, archery range and stable train units.
-- Combat: swordsman, spearman, archer, rider and watchtower, with counters (spear beats rider, rider beats archer, archer and sword beat spear).
-- Protect the king: a player whose king dies is out; the last king standing wins.
-- Waiting room: the host starts the game for everyone, can end it and return to the lobby, and can add a test opponent they play themselves (Tab switches sides).
+- Waiting room; the host starts and ends games and can add a test opponent they play themselves.
+- Seeded 64×64 map with wood, berries, gold and stone near every start; fog of war with explored and unexplored areas.
+- Economy: gathering and delivering, farms, storehouses, houses, population limit, market trading.
+- Three ages and ten technologies (town centre, storehouse, blacksmith) that unlock and improve units and buildings.
+- Buildings placed and built by villagers, repair, rally points, stone walls dragged out as lines.
+- Combat: spearman, swordsman, archer, rider, battering ram, watchtower and castle, with counters; attack-move, stop, control groups.
+- Protect the king: he can shelter in the castle; a player whose king dies is out and the last king standing wins.
+- Any sprite can be replaced through the sprite pack.
 
-Not yet: fog of war, unit collision, walls and gates, garrisoning, ages and technologies, sound.
+Not yet: gates, a computer opponent, healing and conversion, ships and water, trade routes, teams and diplomacy,
+unit formations and real collision, sound, game settings (map size, starting resources).

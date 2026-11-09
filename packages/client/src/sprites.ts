@@ -102,6 +102,16 @@ const UNIT_SPRITES: Partial<Record<Kind, string[]>> = {
     '..l..l....',
     '..d..d....',
   ],
+  ram: [
+    '...kkkkkkkkk....',
+    '..ktttttttttk...',
+    '.kkkkkkkkkkkkk..',
+    '.k.ooooooooommm.',
+    '.k.ooooooooommm.',
+    '.kkkkkkkkkkkkk..',
+    '..nn......nn....',
+    '..nn......nn....',
+  ],
   rider: [
     '....mmmm......',
     '....ssss......',
@@ -199,7 +209,7 @@ function drawTool(ctx: Ctx, x: number, y: number, w: Work): void {
 export function drawUnit(
   ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1, activity = 0, now = 0,
 ): void {
-  const big = kind === 'king' || kind === 'rider';
+  const big = kind === 'king' || kind === 'rider' || kind === 'ram';
   // A sprite pack may provide this unit, optionally with separate images per activity.
   const state = work ? `work.${WORK_NAMES[work.task]}` : ['idle', 'walk', 'work', 'attack'][activity] ?? 'idle';
   const custom = findSprite([`unit.${kind}.${state}`, `unit.${kind}.${state.split('.')[0]}`, `unit.${kind}`]);

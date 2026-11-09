@@ -1,4 +1,4 @@
-import { DEFS, KINDS, RESOURCES } from './defs';
+import { DEFS, isTech, KINDS, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
 import { MAX_PLAYERS } from './map';
 import type { EntitySnapshot, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
@@ -67,6 +67,8 @@ export class GameHost {
     const round = (v: number) => Math.round(v * 100) / 100;
     const ents: EntitySnapshot[] = [];
     const queues: QueueSnapshot[] = [];
+    const rallies: [number, number, number][] = [];
+    const mask = (set: Set<string>) => TECH_IDS.reduce((m, id, i) => (set.has(id) ? m | (1 << i) : m), 0);
     for (const e of s.entities.values()) {
       if (e.inside >= 0) continue;
       const building = DEFS[e.kind].building;
@@ -77,16 +79,19 @@ export class GameHost {
         task, target,
       ]);
       if (e.queue.length > 0) {
-        const pct = Math.floor((e.trainTicks / (DEFS[e.queue[0]].time * TICK_RATE)) * 100);
-        queues.push([e.id, pct, ...e.queue.map((k) => KINDS.indexOf(k))]);
+        const first = e.queue[0];
+        const time = isTech(first) ? TECHS[first].time : DEFS[first as (typeof KINDS)[number]].time;
+        queues.push([e.id, Math.floor((e.trainTicks / (time * TICK_RATE)) * 100), ...e.queue.map((k) => QUEUE_ITEMS.indexOf(k))]);
       }
+      if (e.rally) rallies.push([e.id, e.rally[0], e.rally[1]]);
     }
     return {
       t: 'snap', tick: s.tick, ents, queues,
       players: [...s.players.values()].map((p) => [
         p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
+        p.age, mask(p.techs), mask(p.researching),
       ]),
-      tiles: s.tileEvents, shots: s.shots, winner: s.winner,
+      tiles: s.tileEvents, shots: s.shots, hits: s.hits, deaths: s.deaths, rallies, winner: s.winner,
     };
   }
 }

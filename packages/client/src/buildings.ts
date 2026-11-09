@@ -295,6 +295,61 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.pyramid(0.26, 0.26, 0.74, 0.74, 46, 15, team);
   },
 
+  // Stone forge with a slate roof, a glowing hearth and an anvil outside.
+  blacksmith(pen, team) {
+    pen.box(0.25, 0.25, 1.75, 1.75, 0, 16, '#7d7468');
+    pen.onU(1.75, 0.25, 1.75, 12, 16, team);
+    pen.onU(1.75, 0.8, 1.25, 0, 11, '#22160c');
+    pen.onU(1.75, 0.9, 1.15, 0, 6, '#f5a623');
+    pen.onU(1.75, 0.97, 1.08, 0, 4, '#ffe45c');
+    pen.onV(1.75, 0.6, 0.9, 6, 12, '#39404c');
+    pen.gable(0.12, 0.12, 1.88, 1.88, 16, 13, '#3d4450', '#7d7468', false);
+    pen.box(0.45, 0.45, 0.8, 0.8, 20, 38, STONE_DARK);
+    pen.box(1.82, 1.5, 1.98, 1.8, 0, 3, TIMBER);
+    pen.box(1.8, 1.45, 2.0, 1.85, 3, 7, '#3a3d44');
+  },
+
+  // Open square with three cloth-roofed stalls and stacked goods.
+  market(pen, team) {
+    pen.ground(0.08, 0.08, 2.92, 2.92, '#c9b98f');
+    const stall = (u: number, v: number, cloth: string) => {
+      pen.box(u, v, u + 1.0, v + 0.7, 0, 7, WOOD);
+      pen.box(u + 0.1, v + 0.1, u + 0.9, v + 0.6, 7, 10, '#d8cfae');
+      for (const [a, b] of [[u, v + 0.62], [u + 0.92, v + 0.62], [u + 0.92, v]]) pen.box(a, b, a + 0.08, b + 0.08, 0, 18, TIMBER);
+      pen.gable(u - 0.08, v - 0.08, u + 1.08, v + 0.78, 18, 8, cloth, cloth, true);
+    };
+    stall(0.3, 0.3, team);
+    stall(1.7, 0.3, '#d8cfae');
+    stall(0.3, 1.7, '#b8473a');
+    pen.box(1.8, 1.7, 2.2, 2.1, 0, 9, '#b89358');
+    pen.box(2.25, 1.75, 2.6, 2.1, 0, 7, '#a8824a');
+    pen.box(1.9, 2.2, 2.3, 2.6, 0, 6, HAY);
+    pen.disc(pen.p(2.5, 2.45, 5), 5, '#7a5230');
+  },
+
+  // Timber shed with a half-built siege frame and lumber in the yard.
+  workshop(pen, team) {
+    pen.ground(0.08, 0.08, 2.92, 2.92, '#a58d62');
+    pen.box(0.2, 0.2, 2.8, 1.35, 0, 20, WOOD);
+    pen.onV(1.35, 0.5, 2.5, 0, 15, '#22160c');
+    pen.onU(2.8, 0.2, 1.35, 16, 20, team);
+    pen.gable(0.08, 0.08, 2.92, 1.5, 20, 12, '#5f4326', WOOD, true);
+    pen.box(0.4, 2.2, 1.3, 2.4, 0, 4, TIMBER);
+    pen.box(0.45, 2.42, 1.35, 2.62, 0, 4, shade(TIMBER, 1.2));
+    pen.box(0.5, 2.25, 1.25, 2.5, 4, 8, shade(TIMBER, 1.1));
+    for (const [a, b] of [[1.7, 1.8], [2.5, 1.8], [1.7, 2.5], [2.5, 2.5]]) pen.box(a, b, a + 0.08, b + 0.08, 0, 16, TIMBER);
+    pen.box(1.55, 2.1, 2.75, 2.26, 8, 12, '#7a5230');
+    pen.box(2.7, 2.08, 2.85, 2.28, 7, 13, '#55585e');
+    pen.disc(pen.p(1.8, 2.6, 4), 5, '#3a2a1a');
+    pen.disc(pen.p(2.5, 2.6, 4), 5, '#3a2a1a');
+  },
+
+  // One tile of stone wall; neighbouring tiles join into a continuous wall.
+  wall(pen) {
+    pen.box(0, 0, 1, 1, 0, 18, STONE, '#74747e');
+    pen.crenels(0, 0, 1, 1, 18, STONE);
+  },
+
   // Walled keep with four corner towers. A flag flies only while a king is inside.
   castle(pen, team, state) {
     const tower = (u: number, v: number) => {

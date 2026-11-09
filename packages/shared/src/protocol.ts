@@ -15,10 +15,13 @@ export interface PlayerInfo {
  */
 export type EntitySnapshot = [number, number, number, number, number, number, number, number, number, number];
 
-/** [slot, food, wood, gold, stone, population, housing, defeated (0/1)] */
-export type PlayerSnapshot = [number, number, number, number, number, number, number, number];
+/**
+ * [slot, food, wood, gold, stone, population, housing, defeated (0/1), age,
+ *  researched technologies as a bit mask over TECH_IDS, technologies being researched likewise]
+ */
+export type PlayerSnapshot = number[];
 
-/** [building id, progress of the first item 0-100, ...kind indices in the queue] */
+/** [building id, progress of the first item 0-100, ...indices into QUEUE_ITEMS] */
 export type QueueSnapshot = number[];
 
 /** Sent by a player to the host. */
@@ -45,6 +48,12 @@ export type ServerMessage =
       tiles: [number, number][];
       /** Ranged attacks this tick: [attacker id, target id]. */
       shots: [number, number][];
+      /** Melee blows this tick: [attacker id, target id]. */
+      hits: [number, number][];
+      /** Deaths this tick: [kind index, x, y, owner]. */
+      deaths: [number, number, number, number][];
+      /** Rally points: [building id, x, y]. */
+      rallies: [number, number, number][];
       winner: number;
     }
   | { t: 'error'; message: string };

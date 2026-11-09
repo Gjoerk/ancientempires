@@ -12,14 +12,20 @@
     #top { top: 0; padding: 6px 12px; border-bottom-width: 2px; display: flex; gap: 18px; align-items: center; white-space: nowrap; }
     #resources { display: flex; gap: 16px; }
     #resources b { color: #f1ead9; }
-    #bottom { bottom: 0; height: 140px; border-top-width: 2px; display: flex; justify-content: space-between; }
+    #bottom { bottom: 0; height: 170px; border-top-width: 2px; display: flex; justify-content: space-between; }
     #panel { padding: 8px 12px; min-width: 0; flex: 1; overflow: hidden; }
     #info { margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #actions { display: flex; flex-wrap: wrap; gap: 6px; }
-    #actions button { font: inherit; font-size: 12px; line-height: 1.25; text-align: left; padding: 4px 8px; min-width: 104px;
+    #actions button { font: inherit; font-size: 12px; line-height: 1.2; text-align: left; padding: 3px 7px; min-width: 100px;
       border: 1px solid #5a4a2a; background: #2b261c; color: inherit; cursor: pointer; }
     #actions button:hover { background: #3a3324; }
-    #actions button.poor { opacity: .45; }
+    #actions button.poor { opacity: .5; }
+    #actions button.locked { opacity: .3; cursor: default; }
+    #toast { position: fixed; top: 44px; right: 12px; padding: 6px 12px; border: 2px solid #d43b3b; background: #1d1a14; }
+    #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; border: 2px solid #5a4a2a;
+      background: #1d1a14; max-width: min(560px, calc(100vw - 32px)); line-height: 1.6; }
+    #help h2 { margin: 0 0 8px; font-size: 16px; color: #e0c12f; }
+    #help b { color: #f1ead9; }
     #actions button small { display: block; color: #9a927c; }
     #minimap { margin: 6px; border: 2px solid #5a4a2a; cursor: pointer; flex: none; background: #10140f; }
     .chip { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
@@ -56,7 +62,8 @@
       <button id="switch-btn" type="button" title="Play the other side (Tab)">Switch team (Tab)</button>
       <button id="end-btn" type="button">End game</button>
     </span>
-    <span class="dim">Room <b id="room-code"></b></span>
+    <button id="help-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Help (H)</button>
+    <span class="dim" hidden>Room <b id="room-code"></b></span>
   </div>
   <div id="bottom" class="bar" hidden>
     <div id="panel">
@@ -66,6 +73,20 @@
     <canvas id="minimap" width="232" height="116"></canvas>
   </div>
   <div id="banner" hidden></div>
+  <div id="toast" hidden></div>
+  <div id="help" hidden>
+    <h2>Controls</h2>
+    <b>Left-click / drag</b> select · <b>double-click</b> all of that kind on screen · <b>Shift</b> adds to the selection<br>
+    <b>Right-click</b> move, gather, build, repair or attack · <b>Ctrl + right-click</b> attack-move<br>
+    <b>Right-click with a building selected</b> sets where its new units gather<br>
+    <b>X</b> stop · <b>Delete</b> destroy your selected unit or building<br>
+    <b>Shift + 1–9</b> store a group · <b>1–9</b> select it<br>
+    <b>.</b> next idle villager · <b>Space</b> jump to the last attack on you<br>
+    <b>WASD / arrows / screen edge</b> scroll · click the minimap to jump<br>
+    <b>Walls</b> are dragged out as a line. They block everyone, so leave a gap to get out.<br>
+    <b>Castle</b> right-click it with your king to shelter him. Lose your king and you are out.<br>
+    <b>H</b> or <b>Esc</b> closes this.
+  </div>
   <div id="waiting" class="screen" style="display:none">
     <div class="card">
       <h1 id="room-title"></h1>
