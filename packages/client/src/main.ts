@@ -95,7 +95,7 @@ let snapTime = 0;
 let centred = false;
 const cam = { x: 0, y: 0 };
 const keys = new Set<string>();
-const mouse = { x: 0, y: 0, inside: false, onMap: false };
+const mouse = { x: 0, y: 0, inside: false, onMap: false, onButton: false };
 let drag: { x: number; y: number } | undefined;
 let marker: { x: number; y: number; t: number } | undefined;
 /** Resource tile that was just targeted, outlined for a moment. */
@@ -804,8 +804,11 @@ window.addEventListener('mousemove', (ev) => {
   mouse.y = ev.clientY;
   mouse.inside = true;
   mouse.onMap = ev.target === canvas;
+  // No edge scrolling while the cursor is on something clickable in the interface.
+  mouse.onButton = !!(ev.target as HTMLElement).closest?.('button, #minimap, input');
 });
 document.addEventListener('mouseleave', () => (mouse.inside = false));
+window.addEventListener('blur', () => (mouse.inside = false));
 canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
 window.addEventListener('keydown', (ev) => {
   if ((ev.target as HTMLElement).tagName === 'INPUT') return;
@@ -816,6 +819,7 @@ window.addEventListener('keydown', (ev) => {
     $('help').hidden = true;
   }
   if (key === 'h') $('help').hidden = !$('help').hidden;
+  if (key === 'f') toggleFullscreen();
   if (key === 'x') send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
   if (key === 'delete' || key === 'backspace') {
     for (const id of selected) if (views.get(id)?.owner === me) send({ type: 'delete', id });
@@ -853,6 +857,11 @@ window.addEventListener('keydown', (ev) => {
 window.addEventListener('keyup', (ev) => keys.delete(ev.key.toLowerCase()));
 window.addEventListener('blur', () => keys.clear());
 
+function toggleFullscreen(): void {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void document.documentElement.requestFullscreen().catch(() => undefined);
+}
+$('full-btn').addEventListener('click', toggleFullscreen);
 $('help-btn').addEventListener('click', () => ($('help').hidden = !$('help').hidden));
 $('actions').addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
@@ -872,15 +881,43 @@ function miniScale(): [number, number] {
   return [minimap.width / (2 * map!.size), minimap.height / (2 * map!.size)];
 }
 
-minimap.addEventListener('mousedown', (ev) => {
-  if (!map) return;
+function minimapTile(ev: MouseEvent): [number, number] {
   const r = minimap.getBoundingClientRect();
   const [a, b] = miniScale();
   const u = ((ev.clientX - r.left) * (minimap.width / r.width) - minimap.width / 2) / a;
   const v = ((ev.clientY - r.top) * (minimap.height / r.height)) / b;
-  [cam.x, cam.y] = tileToWorld((u + v) / 2, (v - u) / 2);
+  return [(u + v) / 2, (v - u) / 2];
+}
+
+let minimapDrag = false;
+minimap.addEventListener('mousedown', (ev) => {
+  if (!map || me < 0) return;
+  const [tx, ty] = minimapTile(ev);
+  if (ev.button === 2) {
+    // Right-click sends the selected units there (Ctrl: attack-move), or sets a building's gathering point.
+    if (tx < 0 || ty < 0 || tx >= map.size || ty >= map.size) return;
+    const ids = ownSelectedUnits().map((v) => v.id);
+    const building = [...selected].map((id) => views.get(id)).find((v) => v && v.owner === me && DEFS[v.kind].trains);
+    if (ids.length > 0) send(ev.ctrlKey || ev.metaKey ? { type: 'amove', ids, x: tx, y: ty } : { type: 'move', ids, x: tx, y: ty });
+    else if (building) send({ type: 'rally', building: building.id, x: Math.floor(tx), y: Math.floor(ty) });
+    else return;
+    minimapPing = { x: tx, y: ty, t: performance.now() };
+    return;
+  }
+  if (ev.button !== 0) return;
+  minimapDrag = true;
+  [cam.x, cam.y] = tileToWorld(tx, ty);
   clampCamera();
 });
+minimap.addEventListener('mousemove', (ev) => {
+  // Holding the left button drags the view across the minimap.
+  if (!minimapDrag || !map || !(ev.buttons & 1)) return void (minimapDrag = false);
+  [cam.x, cam.y] = tileToWorld(...minimapTile(ev));
+  clampCamera();
+});
+minimap.addEventListener('contextmenu', (ev) => ev.preventDefault());
+/** Where an order was just given on the minimap. */
+let minimapPing: { x: number; y: number; t: number } | undefined;
 
 function resize(): void {
   canvas.width = window.innerWidth;
@@ -1039,6 +1076,15 @@ function renderMinimap(): void {
     mctx.fillRect(cx - s / 2, cy - s / 2, s, s);
   }
   if (fogMini && !revealAll) mctx.drawImage(fogMini, 0, 0);
+  if (minimapPing) {
+    const k = (performance.now() - minimapPing.t) / 600;
+    if (k > 1) minimapPing = undefined;
+    else {
+      mctx.strokeStyle = `rgba(255,255,255,${1 - k})`;
+      mctx.lineWidth = 1;
+      mctx.strokeRect(minimapPing.x - 1 - k * 3, minimapPing.y - 1 - k * 3, 2 + k * 6, 2 + k * 6);
+    }
+  }
   if (alert && performance.now() - alert.t < 6000) {
     // A pulsing ring where the player was attacked.
     const k = ((performance.now() - alert.t) % 1000) / 1000;
@@ -1058,16 +1104,17 @@ function renderMinimap(): void {
 // --- render ----------------------------------------------------------------
 
 function updateCamera(dt: number): void {
-  const speed = 900 * dt;
-  const edge = 6;
-  let dx = 0;
-  let dy = 0;
-  if (keys.has('a') || keys.has('arrowleft') || (mouse.inside && mouse.x < edge)) dx--;
-  if (keys.has('d') || keys.has('arrowright') || (mouse.inside && mouse.x > canvas.width - edge)) dx++;
-  if (keys.has('w') || keys.has('arrowup') || (mouse.inside && mouse.y < edge)) dy--;
-  if (keys.has('s') || keys.has('arrowdown') || (mouse.inside && mouse.y > canvas.height - edge)) dy++;
-  cam.x += dx * speed;
-  cam.y += dy * speed;
+  // The view scrolls while the cursor rests near an edge of the window, faster the closer it is.
+  const zone = 22;
+  const push = (distance: number) => (mouse.inside && !mouse.onButton && distance < zone ? 0.35 + 0.65 * (1 - Math.max(0, distance) / zone) : 0);
+  let dx = push(canvas.width - mouse.x) - push(mouse.x);
+  let dy = push(canvas.height - mouse.y) - push(mouse.y);
+  if (keys.has('a') || keys.has('arrowleft')) dx = -1;
+  if (keys.has('d') || keys.has('arrowright')) dx = 1;
+  if (keys.has('w') || keys.has('arrowup')) dy = -1;
+  if (keys.has('s') || keys.has('arrowdown')) dy = 1;
+  cam.x += dx * 1000 * dt;
+  cam.y += dy * 1000 * dt;
   clampCamera();
 }
 
