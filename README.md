@@ -3,23 +3,30 @@
 An original medieval real-time strategy game for the browser, played with friends.
 First game mode: protect your king — you lose when your king dies.
 
+## How multiplayer works
+
+There is no game server. The player who hosts runs the game in their browser and
+the others connect to it directly over WebRTC with a room code. Only the first
+handshake goes through the public PeerJS broker. The site itself is static, so
+it runs on GitHub Pages.
+
 ## Layout
 
-- `packages/shared` — the simulation (map, pathfinding, units, commands) and the network protocol. Used by both sides.
-- `packages/server` — Node WebSocket server. Runs the simulation at 10 ticks/s per room and sends snapshots.
-- `packages/client` — isometric canvas client (Vite).
+- `packages/shared` — the simulation (map, pathfinding, units, commands), the room host logic and the message types.
+- `packages/client` — isometric canvas client (Vite) and the WebRTC networking.
 
 ## Run locally
 
     npm install
     npm run dev
 
-Open the printed Vite URL in two tabs and join the same room code.
+Open the printed URL in two tabs: host in one, join with the room code in the other.
 
 - `npm test` — simulation tests
 - `npm run typecheck`
-- `npm run build` — static client in `packages/client/dist`; set `VITE_SERVER_URL` (e.g. `wss://example.com`) to point it at the deployed server
-- `npm start` — server on `$PORT` (default 8080)
+- `npm run build` — static site in `packages/client/dist`
+
+Pushing to `main` deploys to GitHub Pages (set Pages source to "GitHub Actions" in the repo settings).
 
 ## Status
 

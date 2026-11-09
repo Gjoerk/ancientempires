@@ -1,6 +1,5 @@
 import {
   ClientMessage,
-  DEFAULT_PORT,
   GameMap,
   generateMap,
   PlayerInfo,
@@ -12,6 +11,7 @@ import {
   UNIT_STATS,
   UnitKind,
 } from '@kingsfall/shared';
+import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { drawTree, drawUnit, PLAYER_COLORS } from './sprites';
 
 // Isometric tile half-width and half-height in screen pixels.
@@ -37,7 +37,7 @@ const ctx = canvas.getContext('2d')!;
 const minimap = $<HTMLCanvasElement>('minimap');
 const mctx = minimap.getContext('2d')!;
 
-let ws: WebSocket | undefined;
+let session: Session | undefined;
 let me = -1;
 let map: GameMap | undefined;
 let terrain: HTMLCanvasElement | undefined;
@@ -129,14 +129,7 @@ function buildTerrain(m: GameMap): void {
 // --- network ---------------------------------------------------------------
 
 function send(msg: ClientMessage): void {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-}
-
-function serverUrl(): string {
-  const configured = import.meta.env.VITE_SERVER_URL as string | undefined;
-  if (configured) return configured;
-  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.hostname || 'localhost'}:${DEFAULT_PORT}`;
+  session?.send(msg);
 }
 
 function renderPlayers(players: PlayerInfo[]): void {
@@ -161,7 +154,6 @@ function onMessage(msg: ServerMessage): void {
     $('room-code').textContent = msg.room;
     history.replaceState(null, '', `?room=${msg.room}`);
     renderPlayers(msg.players);
-    $('lobby').hidden = true;
     $('lobby').style.display = 'none';
     $('top').hidden = false;
     $('bottom').hidden = false;
@@ -204,27 +196,32 @@ function onMessage(msg: ServerMessage): void {
   }
 }
 
+function showLobby(message: string): void {
+  session = undefined;
+  me = -1;
+  centred = false;
+  views.clear();
+  selected.clear();
+  $('lobby').style.display = '';
+  $('top').hidden = true;
+  $('bottom').hidden = true;
+  $('lobby-msg').textContent = message;
+}
+
 $<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
   ev.preventDefault();
+  const hosting = (ev as SubmitEvent).submitter?.id === 'host-btn';
   const name = $<HTMLInputElement>('name').value;
-  const room = $<HTMLInputElement>('room').value || Math.random().toString(36).slice(2, 6);
+  let code = normaliseCode($<HTMLInputElement>('room').value);
+  if (!hosting && !code) {
+    $('lobby-msg').textContent = 'Enter the room code your host gave you.';
+    return;
+  }
+  if (!code) code = normaliseCode(Math.random().toString(36).slice(2, 7));
   $('lobby-msg').textContent = 'Connecting…';
-  ws?.close();
-  const socket = new WebSocket(serverUrl());
-  ws = socket;
-  socket.onopen = () => send({ t: 'join', room, name });
-  socket.onmessage = (e) => onMessage(JSON.parse(e.data));
-  socket.onerror = () => ($('lobby-msg').textContent = 'Could not reach the game server.');
-  socket.onclose = () => {
-    if (me < 0) return;
-    $('lobby').style.display = '';
-    $('lobby').hidden = false;
-    $('lobby-msg').textContent = 'Connection lost.';
-    me = -1;
-    centred = false;
-    views.clear();
-    selected.clear();
-  };
+  session?.close();
+  const handlers = { onMessage, onClose: showLobby };
+  session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers);
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
 

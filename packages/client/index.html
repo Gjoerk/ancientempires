@@ -39,8 +39,10 @@
     <form id="lobby-form" autocomplete="off">
       <h1>KINGSFALL</h1>
       <input id="name" placeholder="Your name" maxlength="16" required>
-      <input id="room" placeholder="Room code (empty = new room)" maxlength="8">
-      <button>Play</button>
+      <input id="room" placeholder="Room code" maxlength="8">
+      <button id="join-btn">Join game</button>
+      <button id="host-btn">Host new game</button>
+      <p class="dim" style="margin:0">The host's browser runs the game. It ends if the host closes the tab.</p>
       <p id="lobby-msg" role="status"></p>
     </form>
   </div>
