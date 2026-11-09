@@ -1,3 +1,4 @@
+export * from './defs';
 export * from './map';
 export * from './path';
 export * from './sim';

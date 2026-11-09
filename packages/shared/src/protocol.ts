@@ -5,8 +5,18 @@ export interface PlayerInfo {
   name: string;
 }
 
-/** [id, owner, kind index into UNIT_KINDS, x, y, hp, moving (0/1)] */
-export type EntitySnapshot = [number, number, number, number, number, number, number];
+/**
+ * [id, owner, kind index into KINDS, x, y, hp, activity, extra]
+ * activity: 0 idle, 1 moving, 2 working, 3 fighting.
+ * extra: resources carried (units) or construction progress 0-100 (buildings).
+ */
+export type EntitySnapshot = [number, number, number, number, number, number, number, number];
+
+/** [slot, food, wood, gold, stone, population, housing, defeated (0/1)] */
+export type PlayerSnapshot = [number, number, number, number, number, number, number, number];
+
+/** [building id, progress of the first item 0-100, ...kind indices in the queue] */
+export type QueueSnapshot = number[];
 
 /** Sent by a player to the host. */
 export type ClientMessage =
@@ -15,7 +25,18 @@ export type ClientMessage =
 
 /** Sent by the host to players. */
 export type ServerMessage =
-  | { t: 'welcome'; you: number; room: string; seed: number; players: PlayerInfo[] }
+  | { t: 'welcome'; you: number; room: string; seed: number; players: PlayerInfo[]; tiles: [number, number][] }
   | { t: 'players'; players: PlayerInfo[] }
-  | { t: 'snap'; tick: number; ents: EntitySnapshot[] }
+  | {
+      t: 'snap';
+      tick: number;
+      ents: EntitySnapshot[];
+      players: PlayerSnapshot[];
+      queues: QueueSnapshot[];
+      /** Tiles that changed this tick: [tile index, new tile]. */
+      tiles: [number, number][];
+      /** Ranged attacks this tick: [attacker id, target id]. */
+      shots: [number, number][];
+      winner: number;
+    }
   | { t: 'error'; message: string };

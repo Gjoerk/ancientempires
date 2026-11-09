@@ -6,14 +6,25 @@
   <title>Kingsfall</title>
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #10140f; color: #e8e2d0;
-      font: 14px/1.4 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; }
+      font: 14px/1.4 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; user-select: none; }
     canvas#game { display: block; width: 100vw; height: 100vh; cursor: crosshair; image-rendering: pixelated; }
-    .bar { position: fixed; left: 0; right: 0; background: #1d1a14; border: 0 solid #5a4a2a; pointer-events: none; }
-    #top { top: 0; padding: 6px 12px; border-bottom-width: 2px; display: flex; gap: 18px; align-items: center; }
-    #bottom { bottom: 0; height: 132px; border-top-width: 2px; display: flex; justify-content: space-between; }
-    #selection { padding: 10px 14px; }
-    #minimap { margin: 6px; border: 2px solid #5a4a2a; pointer-events: auto; cursor: pointer; image-rendering: pixelated; }
+    .bar { position: fixed; left: 0; right: 0; background: #1d1a14; border: 0 solid #5a4a2a; }
+    #top { top: 0; padding: 6px 12px; border-bottom-width: 2px; display: flex; gap: 18px; align-items: center; white-space: nowrap; }
+    #resources { display: flex; gap: 16px; }
+    #resources b { color: #f1ead9; }
+    #bottom { bottom: 0; height: 140px; border-top-width: 2px; display: flex; justify-content: space-between; }
+    #panel { padding: 8px 12px; min-width: 0; flex: 1; overflow: hidden; }
+    #info { margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    #actions button { font: inherit; font-size: 12px; line-height: 1.25; text-align: left; padding: 4px 8px; min-width: 104px;
+      border: 1px solid #5a4a2a; background: #2b261c; color: inherit; cursor: pointer; }
+    #actions button:hover { background: #3a3324; }
+    #actions button.poor { opacity: .45; }
+    #actions button small { display: block; color: #9a927c; }
+    #minimap { margin: 6px; border: 2px solid #5a4a2a; cursor: pointer; flex: none; background: #10140f; }
     .chip { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
+    #banner { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 22px;
+      border: 2px solid #e0c12f; background: #1d1a14; font-size: 18px; pointer-events: none; }
     #lobby { position: fixed; inset: 0; display: grid; place-items: center; background: #10140f; }
     #lobby form { display: grid; gap: 10px; width: min(320px, calc(100vw - 32px)); padding: 24px;
       border: 2px solid #5a4a2a; background: #1d1a14; }
@@ -27,14 +38,18 @@
 <body>
   <canvas id="game"></canvas>
   <div id="top" class="bar" hidden>
-    <span>Room <b id="room-code"></b></span>
-    <span id="players"></span>
-    <span class="dim" style="margin-left:auto">Drag: select · Right-click: move · WASD: scroll</span>
+    <span id="resources"></span>
+    <span id="players" style="margin-left:auto"></span>
+    <span class="dim">Room <b id="room-code"></b></span>
   </div>
   <div id="bottom" class="bar" hidden>
-    <div id="selection"></div>
-    <canvas id="minimap" width="120" height="120"></canvas>
+    <div id="panel">
+      <div id="info"></div>
+      <div id="actions"></div>
+    </div>
+    <canvas id="minimap" width="232" height="116"></canvas>
   </div>
+  <div id="banner" hidden></div>
   <div id="lobby">
     <form id="lobby-form" autocomplete="off">
       <h1>KINGSFALL</h1>
@@ -42,7 +57,7 @@
       <input id="room" placeholder="Room code" maxlength="8">
       <button id="join-btn">Join game</button>
       <button id="host-btn">Host new game</button>
-      <p class="dim" style="margin:0">The host's browser runs the game. It ends if the host closes the tab.</p>
+      <p class="dim" style="margin:0">Protect your king. The host's browser runs the game; it ends if the host closes the tab.</p>
       <p id="lobby-msg" role="status"></p>
     </form>
   </div>

@@ -30,6 +30,11 @@ The game is published by copying `packages/client/dist` into the `ancientempires
 
 ## Status
 
-Done: rooms for up to 4 players, seeded map, king and villagers, selection, group movement with pathfinding, minimap.
+Done:
+- Rooms for up to 4 players, seeded 64×64 map with wood, berries, gold and stone near every start.
+- Economy: villagers gather and deliver resources, farms, storehouses, houses and a population limit.
+- Buildings are placed and constructed by villagers; town centre, barracks, archery range and stable train units.
+- Combat: swordsman, spearman, archer, rider and watchtower, with counters (spear beats rider, rider beats archer, archer and sword beat spear).
+- Protect the king: a player whose king dies is out; the last king standing wins.
 
-Next: resources and gathering, buildings, training, combat, king defeat condition.
+Not yet: fog of war, unit collision, walls and gates, garrisoning, ages and technologies, a pre-game lobby, sound.

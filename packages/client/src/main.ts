@@ -1,34 +1,45 @@
 import {
+  BUILDABLE,
+  canPlace,
   ClientMessage,
+  Command,
+  Cost,
+  DEFS,
   GameMap,
   generateMap,
+  Kind,
+  KINDS,
   PlayerInfo,
+  RESOURCES,
   ServerMessage,
   Tile,
   TICK_MS,
-  tileAt,
-  UNIT_KINDS,
-  UNIT_STATS,
-  UnitKind,
+  TILE_RESOURCE,
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
-import { drawTree, drawUnit, PLAYER_COLORS } from './sprites';
-
-// Isometric tile half-width and half-height in screen pixels.
-const HW = 32;
-const HH = 16;
+import { drawBuilding, drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
 
 interface View {
   id: number;
   owner: number;
-  kind: UnitKind;
+  kind: Kind;
   hp: number;
-  moving: boolean;
+  /** 0 idle, 1 moving, 2 working, 3 fighting. */
+  act: number;
+  /** Resources carried (units) or construction progress 0-100 (buildings). */
+  extra: number;
   // Position at the previous snapshot and at the latest one, for interpolation.
   px: number;
   py: number;
   x: number;
   y: number;
+}
+
+interface PlayerView {
+  res: Record<string, number>;
+  pop: number;
+  cap: number;
+  defeated: boolean;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -42,9 +53,15 @@ let me = -1;
 let map: GameMap | undefined;
 let terrain: HTMLCanvasElement | undefined;
 let miniTerrain: HTMLCanvasElement | undefined;
-let trees: [number, number][] = [];
+/** Resource tiles that have something standing on them: tile index -> tile type. */
+const props = new Map<number, number>();
 const views = new Map<number, View>();
+const players = new Map<number, PlayerView>();
+let roster: PlayerInfo[] = [];
+const queues = new Map<number, number[]>();
 const selected = new Set<number>();
+let shots: { from: [number, number]; to: [number, number]; t: number }[] = [];
+let winner = -1;
 let snapTime = 0;
 let centred = false;
 const cam = { x: 0, y: 0 };
@@ -52,6 +69,11 @@ const keys = new Set<string>();
 const mouse = { x: 0, y: 0, inside: false };
 let drag: { x: number; y: number } | undefined;
 let marker: { x: number; y: number; t: number } | undefined;
+/** Building kind the player is about to place, if any. */
+let placing: Kind | undefined;
+
+const isBuilding = (kind: Kind) => DEFS[kind].building === true;
+const sizeOf = (kind: Kind) => DEFS[kind].size ?? 1;
 
 // --- coordinates -----------------------------------------------------------
 
@@ -61,6 +83,10 @@ function tileToWorld(tx: number, ty: number): [number, number] {
 
 function worldToScreen(wx: number, wy: number): [number, number] {
   return [wx - cam.x + canvas.width / 2, wy - cam.y + canvas.height / 2];
+}
+
+function tileToScreen(tx: number, ty: number): [number, number] {
+  return worldToScreen(...tileToWorld(tx, ty));
 }
 
 function screenToTile(sx: number, sy: number): [number, number] {
@@ -73,6 +99,12 @@ function viewPos(v: View, alpha: number): [number, number] {
   return [v.px + (v.x - v.px) * alpha, v.py + (v.y - v.py) * alpha];
 }
 
+/** Centre of an entity in tile units. */
+function centreOf(v: View): [number, number] {
+  const half = isBuilding(v.kind) ? sizeOf(v.kind) / 2 : 0;
+  return [v.x + half, v.y + half];
+}
+
 // --- terrain ---------------------------------------------------------------
 
 function hash(x: number, y: number): number {
@@ -81,67 +113,81 @@ function hash(x: number, y: number): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-function buildTerrain(m: GameMap): void {
-  const n = m.size;
-  terrain = document.createElement('canvas');
-  terrain.width = n * HW * 2;
-  terrain.height = n * HH * 2;
-  const t = terrain.getContext('2d')!;
-  const grass = ['#4f8a3a', '#55913d', '#4a8436', '#5a9642'];
-  const water = ['#2f6fa8', '#2b68a0', '#3476b0'];
-  const floor = ['#3d6e2e', '#396a2b'];
-  trees = [];
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
-      const tile = tileAt(m, x, y);
-      const r = hash(x, y);
-      const palette = tile === Tile.Water ? water : tile === Tile.Forest ? floor : grass;
-      const cx = (x - y) * HW + n * HW;
-      const cy = (x + y) * HH;
-      t.fillStyle = palette[Math.floor(r * palette.length)];
-      t.beginPath();
-      t.moveTo(cx, cy);
-      t.lineTo(cx + HW, cy + HH);
-      t.lineTo(cx, cy + HH * 2);
-      t.lineTo(cx - HW, cy + HH);
-      t.closePath();
-      t.fill();
-      if (tile === Tile.Grass && r > 0.8) {
-        t.fillStyle = '#6aa64c';
-        t.fillRect(cx - 8 + Math.floor(r * 60) % 16, cy + 10 + Math.floor(r * 90) % 10, 2, 2);
-      }
-      if (tile === Tile.Forest) trees.push([x, y]);
-    }
-  }
+const MINI_COLORS: Record<number, string> = {
+  [Tile.Grass]: '#4f8a3a', [Tile.Water]: '#1c3f66', [Tile.Forest]: '#2a5a26',
+  [Tile.Berries]: '#b8506a', [Tile.Gold]: '#f2cf3a', [Tile.Stone]: '#9aa0a8',
+};
 
-  miniTerrain = document.createElement('canvas');
-  miniTerrain.width = miniTerrain.height = n;
-  const mt = miniTerrain.getContext('2d')!;
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
-      const tile = tileAt(m, x, y);
-      mt.fillStyle = tile === Tile.Water ? '#1c3f66' : tile === Tile.Forest ? '#2a5a26' : '#4f8a3a';
-      mt.fillRect(x, y, 1, 1);
-    }
+function paintTile(m: GameMap, index: number): void {
+  const n = m.size;
+  const x = index % n;
+  const y = Math.floor(index / n);
+  const tile = m.tiles[index];
+  const r = hash(x, y);
+  const grass = ['#4f8a3a', '#55913d', '#4a8436', '#5a9642'];
+  const palette = tile === Tile.Water ? ['#2f6fa8', '#2b68a0', '#3476b0'] : tile === Tile.Forest ? ['#3d6e2e', '#396a2b'] : grass;
+  const t = terrain!.getContext('2d')!;
+  const cx = (x - y) * HW + n * HW;
+  const cy = (x + y) * HH;
+  t.fillStyle = palette[Math.floor(r * palette.length)];
+  t.beginPath();
+  t.moveTo(cx, cy);
+  t.lineTo(cx + HW, cy + HH);
+  t.lineTo(cx, cy + HH * 2);
+  t.lineTo(cx - HW, cy + HH);
+  t.closePath();
+  t.fill();
+  if (tile === Tile.Grass && r > 0.8) {
+    t.fillStyle = '#6aa64c';
+    t.fillRect(cx - 8 + (Math.floor(r * 60) % 16), cy + 10 + (Math.floor(r * 90) % 10), 2, 2);
   }
+  const mt = miniTerrain!.getContext('2d')!;
+  mt.fillStyle = MINI_COLORS[tile];
+  mt.fillRect(x, y, 1, 1);
+  if (TILE_RESOURCE[tile as Tile]) props.set(index, tile);
+  else props.delete(index);
+}
+
+function buildTerrain(m: GameMap): void {
+  terrain = document.createElement('canvas');
+  terrain.width = m.size * HW * 2;
+  terrain.height = m.size * HH * 2;
+  miniTerrain = document.createElement('canvas');
+  miniTerrain.width = miniTerrain.height = m.size;
+  props.clear();
+  for (let i = 0; i < m.tiles.length; i++) paintTile(m, i);
+}
+
+function setTile(index: number, tile: number): void {
+  if (!map) return;
+  map.tiles[index] = tile;
+  paintTile(map, index);
+}
+
+function setBlocked(v: View, value: number): void {
+  if (!map || !isBuilding(v.kind)) return;
+  const s = sizeOf(v.kind);
+  for (let y = v.y; y < v.y + s; y++) for (let x = v.x; x < v.x + s; x++) map.blocked[y * map.size + x] = value;
 }
 
 // --- network ---------------------------------------------------------------
 
-function send(msg: ClientMessage): void {
+function send(cmd: Command): void {
+  const msg: ClientMessage = { t: 'cmd', cmd };
   session?.send(msg);
 }
 
-function renderPlayers(players: PlayerInfo[]): void {
+function renderPlayers(): void {
   const el = $('players');
   el.textContent = '';
-  for (const p of players) {
+  for (const p of roster) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.style.background = PLAYER_COLORS[p.slot];
     const label = document.createElement('span');
     label.textContent = p.name + (p.slot === me ? ' (you)' : '');
     label.style.marginRight = '14px';
+    if (players.get(p.slot)?.defeated) label.style.textDecoration = 'line-through';
     el.append(chip, label);
   }
 }
@@ -151,38 +197,55 @@ function onMessage(msg: ServerMessage): void {
     me = msg.you;
     map = generateMap(msg.seed);
     buildTerrain(map);
+    for (const [index, tile] of msg.tiles) setTile(index, tile);
+    roster = msg.players;
     $('room-code').textContent = msg.room;
     history.replaceState(null, '', `?room=${msg.room}`);
-    renderPlayers(msg.players);
+    renderPlayers();
     $('lobby').style.display = 'none';
     $('top').hidden = false;
     $('bottom').hidden = false;
   } else if (msg.t === 'players') {
-    renderPlayers(msg.players);
+    roster = msg.players;
+    renderPlayers();
   } else if (msg.t === 'snap') {
     const now = performance.now();
     const alpha = Math.min(1, (now - snapTime) / TICK_MS);
     const seen = new Set<number>();
-    for (const [id, owner, kindIdx, x, y, hp, moving] of msg.ents) {
+    for (const [id, owner, kindIdx, x, y, hp, act, extra] of msg.ents) {
       seen.add(id);
       const v = views.get(id);
       if (v) {
         // Continue from wherever the unit is currently drawn, so motion stays smooth.
         [v.px, v.py] = viewPos(v, alpha);
-        v.x = x;
-        v.y = y;
-        v.hp = hp;
-        v.moving = moving === 1;
+        Object.assign(v, { x, y, hp, act, extra });
       } else {
-        views.set(id, { id, owner, kind: UNIT_KINDS[kindIdx], hp, moving: moving === 1, px: x, py: y, x, y });
+        const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, px: x, py: y, x, y };
+        views.set(id, created);
+        setBlocked(created, 1);
       }
     }
-    for (const id of views.keys()) {
-      if (!seen.has(id)) {
-        views.delete(id);
-        selected.delete(id);
-      }
+    for (const [id, v] of views) {
+      if (seen.has(id)) continue;
+      setBlocked(v, 0);
+      views.delete(id);
+      selected.delete(id);
     }
+    for (const [index, tile] of msg.tiles) setTile(index, tile);
+    for (const [from, to] of msg.shots) {
+      const a = views.get(from);
+      const b = views.get(to);
+      if (a && b) shots.push({ from: centreOf(a), to: centreOf(b), t: now });
+    }
+    queues.clear();
+    for (const [id, ...rest] of msg.queues) queues.set(id, rest);
+    let defeatChanged = false;
+    for (const [slot, food, wood, gold, stone, pop, cap, defeated] of msg.players) {
+      if (players.get(slot)?.defeated !== (defeated === 1)) defeatChanged = true;
+      players.set(slot, { res: { food, wood, gold, stone }, pop, cap, defeated: defeated === 1 });
+    }
+    if (defeatChanged) renderPlayers();
+    winner = msg.winner;
     snapTime = now;
     if (!centred) {
       const king = [...views.values()].find((v) => v.owner === me && v.kind === 'king');
@@ -200,11 +263,15 @@ function showLobby(message: string): void {
   session = undefined;
   me = -1;
   centred = false;
+  placing = undefined;
+  winner = -1;
   views.clear();
+  players.clear();
   selected.clear();
   $('lobby').style.display = '';
   $('top').hidden = true;
   $('bottom').hidden = true;
+  $('banner').hidden = true;
   $('lobby-msg').textContent = message;
 }
 
@@ -225,7 +292,7 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
 
-// --- input -----------------------------------------------------------------
+// --- picking and commands --------------------------------------------------
 
 function clampCamera(): void {
   if (!map) return;
@@ -238,7 +305,8 @@ function unitAt(sx: number, sy: number): View | undefined {
   let best: View | undefined;
   let bestD = 18;
   for (const v of views.values()) {
-    const [x, y] = worldToScreen(...tileToWorld(v.x, v.y));
+    if (isBuilding(v.kind)) continue;
+    const [x, y] = tileToScreen(v.x, v.y);
     const d = Math.hypot(x - sx, y - 10 - sy);
     if (d < bestD) {
       bestD = d;
@@ -248,15 +316,80 @@ function unitAt(sx: number, sy: number): View | undefined {
   return best;
 }
 
+function buildingAt(sx: number, sy: number): View | undefined {
+  // Walls rise above the footprint, so also test points a little below the cursor.
+  for (const dy of [0, 12, 24]) {
+    const [tx, ty] = screenToTile(sx, sy + dy);
+    for (const v of views.values()) {
+      if (!isBuilding(v.kind)) continue;
+      const s = sizeOf(v.kind);
+      if (tx >= v.x && tx < v.x + s && ty >= v.y && ty < v.y + s) return v;
+    }
+  }
+  return undefined;
+}
+
+function resourceTileAt(sx: number, sy: number): number {
+  if (!map) return -1;
+  // The trunk first, then the tile in front whose crown may cover the cursor.
+  for (const dy of [0, 16]) {
+    const [tx, ty] = screenToTile(sx, sy + dy).map(Math.floor);
+    if (tx < 0 || ty < 0 || tx >= map.size || ty >= map.size) continue;
+    const index = ty * map.size + tx;
+    if (props.has(index)) return index;
+  }
+  return -1;
+}
+
+function ownSelectedUnits(): View[] {
+  return [...selected].map((id) => views.get(id)!).filter((v) => v && v.owner === me && !isBuilding(v.kind));
+}
+
+function placementSpot(): [number, number] {
+  const s = sizeOf(placing!);
+  const [tx, ty] = screenToTile(mouse.x, mouse.y);
+  return [Math.floor(tx - (s - 1) / 2), Math.floor(ty - (s - 1) / 2)];
+}
+
+function canAfford(cost: Cost): boolean {
+  const p = players.get(me);
+  return !!p && RESOURCES.every((r) => p.res[r] >= (cost[r] ?? 0));
+}
+
+function rightClick(sx: number, sy: number): void {
+  const units = ownSelectedUnits();
+  if (units.length === 0) return;
+  const ids = units.map((v) => v.id);
+  const [tx, ty] = screenToTile(sx, sy);
+  marker = { x: tx, y: ty, t: performance.now() };
+  const target = unitAt(sx, sy) ?? buildingAt(sx, sy);
+  if (target && (target.owner !== me || isBuilding(target.kind))) {
+    send({ type: 'interact', ids, target: target.id });
+    return;
+  }
+  const tile = resourceTileAt(sx, sy);
+  if (tile >= 0) send({ type: 'gather', ids, tile });
+  else send({ type: 'move', ids, x: tx, y: ty });
+}
+
 canvas.addEventListener('mousedown', (ev) => {
   if (me < 0) return;
-  if (ev.button === 0) {
-    drag = { x: ev.clientX, y: ev.clientY };
-  } else if (ev.button === 2 && selected.size > 0) {
-    const [tx, ty] = screenToTile(ev.clientX, ev.clientY);
-    send({ t: 'cmd', cmd: { type: 'move', ids: [...selected], x: tx, y: ty } });
-    marker = { x: tx, y: ty, t: performance.now() };
+  if (ev.button === 2) {
+    if (placing) placing = undefined;
+    else rightClick(ev.clientX, ev.clientY);
+    return;
   }
+  if (ev.button !== 0) return;
+  if (placing) {
+    const [x, y] = placementSpot();
+    const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
+    if (map && canPlace(map, placing, x, y) && canAfford(DEFS[placing].cost)) {
+      send({ type: 'place', ids, kind: placing, x, y });
+      if (!ev.shiftKey) placing = undefined;
+    }
+    return;
+  }
+  drag = { x: ev.clientX, y: ev.clientY };
 });
 
 window.addEventListener('mouseup', (ev) => {
@@ -267,14 +400,25 @@ window.addEventListener('mouseup', (ev) => {
   drag = undefined;
   if (!ev.shiftKey) selected.clear();
   if (isClick) {
-    const v = unitAt(ev.clientX, ev.clientY);
-    if (v && v.owner === me) selected.add(v.id);
+    const v = unitAt(ev.clientX, ev.clientY) ?? buildingAt(ev.clientX, ev.clientY);
+    if (v) selected.add(v.id);
     return;
   }
   for (const v of views.values()) {
-    if (v.owner !== me) continue;
-    const [x, y] = worldToScreen(...tileToWorld(v.x, v.y));
+    if (v.owner !== me || isBuilding(v.kind)) continue;
+    const [x, y] = tileToScreen(v.x, v.y);
     if (x >= box.x0 && x <= box.x1 && y - 10 >= box.y0 && y - 10 <= box.y1) selected.add(v.id);
+  }
+});
+
+// Double-click selects every unit of that kind on screen.
+canvas.addEventListener('dblclick', (ev) => {
+  const hit = unitAt(ev.clientX, ev.clientY);
+  if (!hit || hit.owner !== me) return;
+  for (const v of views.values()) {
+    if (v.owner !== me || v.kind !== hit.kind) continue;
+    const [x, y] = tileToScreen(v.x, v.y);
+    if (x >= 0 && y >= 0 && x <= canvas.width && y <= canvas.height) selected.add(v.id);
   }
 });
 
@@ -286,17 +430,46 @@ window.addEventListener('mousemove', (ev) => {
 document.addEventListener('mouseleave', () => (mouse.inside = false));
 canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
 window.addEventListener('keydown', (ev) => {
-  if ((ev.target as HTMLElement).tagName !== 'INPUT') keys.add(ev.key.toLowerCase());
+  if ((ev.target as HTMLElement).tagName === 'INPUT') return;
+  const key = ev.key.toLowerCase();
+  keys.add(key);
+  if (key === 'escape') placing = undefined;
+  if (key === '.') {
+    // Jump to the next villager with nothing to do.
+    const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0);
+    if (idle.length === 0) return;
+    const current = idle.findIndex((v) => selected.has(v.id));
+    const next = idle[(current + 1) % idle.length];
+    selected.clear();
+    selected.add(next.id);
+    [cam.x, cam.y] = tileToWorld(next.x, next.y);
+  }
 });
 window.addEventListener('keyup', (ev) => keys.delete(ev.key.toLowerCase()));
 window.addEventListener('blur', () => keys.clear());
 
+$('actions').addEventListener('click', (ev) => {
+  const button = (ev.target as HTMLElement).closest('button');
+  if (!button) return;
+  const { build, train, cancel } = button.dataset;
+  if (build) placing = build as Kind;
+  if (train) send({ type: 'train', building: Number(button.dataset.at), kind: train as Kind });
+  if (cancel) send({ type: 'cancel', building: Number(cancel) });
+});
+
+// The minimap shows the map as the same diamond as the main view.
+function miniScale(): [number, number] {
+  return [minimap.width / (2 * map!.size), minimap.height / (2 * map!.size)];
+}
+
 minimap.addEventListener('mousedown', (ev) => {
   if (!map) return;
   const r = minimap.getBoundingClientRect();
-  const tx = ((ev.clientX - r.left) / r.width) * map.size;
-  const ty = ((ev.clientY - r.top) / r.height) * map.size;
-  [cam.x, cam.y] = tileToWorld(tx, ty);
+  const [a, b] = miniScale();
+  const u = ((ev.clientX - r.left) * (minimap.width / r.width) - minimap.width / 2) / a;
+  const v = ((ev.clientY - r.top) * (minimap.height / r.height)) / b;
+  [cam.x, cam.y] = tileToWorld((u + v) / 2, (v - u) / 2);
+  clampCamera();
 });
 
 function resize(): void {
@@ -306,11 +479,123 @@ function resize(): void {
 window.addEventListener('resize', resize);
 resize();
 
+// --- HUD -------------------------------------------------------------------
+
+function costText(cost: Cost): string {
+  return RESOURCES.filter((r) => cost[r]).map((r) => `${cost[r]} ${r}`).join(', ') || 'free';
+}
+
+let panelSignature = '';
+function renderPanel(): void {
+  const chosen = [...selected].map((id) => views.get(id)).filter((v): v is View => !!v);
+  const mine = chosen.filter((v) => v.owner === me);
+  let info = 'Nothing selected';
+  const buttons: { label: string; cost?: Cost; data: Record<string, string> }[] = [];
+
+  if (placing) {
+    info = `Placing ${DEFS[placing].label} — click to build, hold Shift for several, Esc to cancel`;
+  } else if (chosen.length === 1) {
+    const v = chosen[0];
+    const def = DEFS[v.kind];
+    const ownerName = v.owner === me ? '' : ` · ${roster.find((p) => p.slot === v.owner)?.name ?? 'enemy'}`;
+    info = `${def.label}${ownerName} · HP ${v.hp}/${def.hp}`;
+    if (isBuilding(v.kind) && v.extra < 100) info += ` · under construction ${v.extra}%`;
+    else if (!isBuilding(v.kind) && v.extra > 0) info += ` · carrying ${v.extra}`;
+    const queue = queues.get(v.id);
+    if (queue) info += ` · training ${DEFS[KINDS[queue[1]]].label} ${queue[0]}%${queue.length > 2 ? ` (+${queue.length - 2} queued)` : ''}`;
+    if (v.owner === me && isBuilding(v.kind) && v.extra >= 100) {
+      for (const kind of def.trains ?? []) {
+        buttons.push({ label: DEFS[kind].label, cost: DEFS[kind].cost, data: { train: kind, at: String(v.id) } });
+      }
+      if (queue) buttons.push({ label: 'Cancel last', data: { cancel: String(v.id) } });
+    }
+  } else if (chosen.length > 1) {
+    const counts = new Map<Kind, number>();
+    for (const v of chosen) counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);
+    info = [...counts].map(([k, c]) => `${c} × ${DEFS[k].label}`).join(' · ');
+  }
+  if (!placing && mine.some((v) => v.kind === 'villager')) {
+    for (const kind of BUILDABLE) buttons.push({ label: DEFS[kind].label, cost: DEFS[kind].cost, data: { build: kind } });
+  }
+
+  const signature = info + '|' + buttons.map((b) => b.label + (b.cost && !canAfford(b.cost) ? '!' : '')).join(',');
+  if (signature === panelSignature) return;
+  panelSignature = signature;
+  $('info').textContent = info;
+  const actions = $('actions');
+  actions.textContent = '';
+  for (const b of buttons) {
+    const el = document.createElement('button');
+    el.textContent = b.label;
+    Object.assign(el.dataset, b.data);
+    if (b.cost) {
+      const small = document.createElement('small');
+      small.textContent = costText(b.cost);
+      el.append(small);
+      if (!canAfford(b.cost)) el.className = 'poor';
+    }
+    actions.append(el);
+  }
+}
+
+let hudSignature = '';
+function renderHud(): void {
+  const p = players.get(me);
+  if (!p) return;
+  const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0).length;
+  const signature = [p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, idle, p.defeated, winner].join();
+  if (signature === hudSignature) return;
+  hudSignature = signature;
+  const el = $('resources');
+  el.textContent = '';
+  const add = (label: string, value: string) => {
+    const span = document.createElement('span');
+    const b = document.createElement('b');
+    b.textContent = value;
+    span.append(`${label} `, b);
+    el.append(span);
+  };
+  for (const r of RESOURCES) add(r[0].toUpperCase() + r.slice(1), String(p.res[r]));
+  add('Pop', `${p.pop}/${p.cap}`);
+  if (idle > 0) add('Idle villagers (.)', String(idle));
+
+  const banner = $('banner');
+  let text = '';
+  if (winner === me) text = 'Victory! Yours is the last king standing.';
+  else if (p.defeated) text = 'Your king has fallen. You are out of the game.';
+  if (winner >= 0 && winner !== me) text += ` ${roster.find((q) => q.slot === winner)?.name ?? 'Another player'} wins.`;
+  banner.textContent = text.trim();
+  banner.hidden = !text;
+}
+
+function renderMinimap(): void {
+  if (!map || !miniTerrain) return;
+  const [a, b] = miniScale();
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  mctx.clearRect(0, 0, minimap.width, minimap.height);
+  mctx.imageSmoothingEnabled = false;
+  mctx.setTransform(a, b, -a, b, minimap.width / 2, 0);
+  mctx.drawImage(miniTerrain, 0, 0);
+  for (const v of views.values()) {
+    mctx.fillStyle = PLAYER_COLORS[v.owner];
+    const s = isBuilding(v.kind) ? sizeOf(v.kind) + 0.5 : v.kind === 'king' ? 2.2 : 1.6;
+    const [cx, cy] = centreOf(v);
+    mctx.fillRect(cx - s / 2, cy - s / 2, s, s);
+  }
+  // The visible part of the world is an upright rectangle in minimap space.
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  const sx = (a / HW) * (cam.x - canvas.width / 2) + minimap.width / 2;
+  const sy = (b / HH) * (cam.y - canvas.height / 2);
+  mctx.strokeStyle = '#fff';
+  mctx.lineWidth = 1;
+  mctx.strokeRect(sx + 0.5, sy + 0.5, (a / HW) * canvas.width, (b / HH) * canvas.height);
+}
+
 // --- render ----------------------------------------------------------------
 
 function updateCamera(dt: number): void {
   const speed = 900 * dt;
-  const edge = 10;
+  const edge = 6;
   let dx = 0;
   let dy = 0;
   if (keys.has('a') || keys.has('arrowleft') || (mouse.inside && mouse.x < edge)) dx--;
@@ -322,38 +607,53 @@ function updateCamera(dt: number): void {
   clampCamera();
 }
 
-function renderSelectionPanel(): void {
-  const el = $('selection');
-  const counts = new Map<UnitKind, number>();
-  let single: View | undefined;
-  for (const id of selected) {
-    const v = views.get(id);
-    if (!v) continue;
-    counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);
-    single = v;
-  }
-  let text = 'Nothing selected';
-  if (selected.size === 1 && single) {
-    text = `${single.kind[0].toUpperCase()}${single.kind.slice(1)} · HP ${single.hp}/${UNIT_STATS[single.kind].hp}`;
-  } else if (selected.size > 1) {
-    text = [...counts].map(([k, c]) => `${c} × ${k}`).join(' · ');
-  }
-  if (el.textContent !== text) el.textContent = text;
+function bar(x: number, y: number, w: number, fraction: number, color: string): void {
+  ctx.fillStyle = '#2a0c0c';
+  ctx.fillRect(Math.round(x - w / 2), Math.round(y), w, 3);
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x - w / 2), Math.round(y), Math.round(w * Math.max(0, Math.min(1, fraction))), 3);
 }
 
-function renderMinimap(): void {
-  if (!map || !miniTerrain) return;
-  const s = minimap.width / map.size;
-  mctx.imageSmoothingEnabled = false;
-  mctx.drawImage(miniTerrain, 0, 0, minimap.width, minimap.height);
-  for (const v of views.values()) {
-    mctx.fillStyle = PLAYER_COLORS[v.owner];
-    const size = v.kind === 'king' ? 4 : 3;
-    mctx.fillRect(v.x * s - size / 2, v.y * s - size / 2, size, size);
+function diamond(tx: number, ty: number, s: number): void {
+  const pts = [tileToScreen(tx, ty), tileToScreen(tx + s, ty), tileToScreen(tx + s, ty + s), tileToScreen(tx, ty + s)];
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
+  ctx.closePath();
+}
+
+function drawBuildingView(v: View): void {
+  const s = sizeOf(v.kind);
+  const def = DEFS[v.kind];
+  const [sx, sy] = tileToScreen(v.x, v.y);
+  if (selected.has(v.id)) {
+    diamond(v.x, v.y, s);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
-  const [cx, cy] = screenToTile(canvas.width / 2, canvas.height / 2);
-  mctx.strokeStyle = '#fff';
-  mctx.strokeRect(cx * s - 8, cy * s - 8, 16, 16);
+  drawBuilding(ctx, v.kind, v.owner, sx, sy, v.extra / 100);
+  const top = sy - 14;
+  if (v.extra < 100) bar(sx, top, 14 + s * 12, v.extra / 100, '#e0c12f');
+  else if (v.hp < def.hp || selected.has(v.id)) bar(sx, top, 14 + s * 12, v.hp / def.hp, '#4ad04a');
+  const queue = queues.get(v.id);
+  if (queue && v.owner === me) bar(sx, top + 5, 14 + s * 12, queue[0] / 100, '#6ab0ff');
+}
+
+function drawUnitView(v: View, x: number, y: number, now: number): void {
+  const [sx, sy] = tileToScreen(x, y);
+  const def = DEFS[v.kind];
+  if (selected.has(v.id)) {
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, 13, 6.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // Walking bobs up and down; working and fighting are a quicker, smaller motion.
+  const bob = v.act === 1 ? Math.abs(Math.sin(now / 90 + v.id)) * 2 : v.act >= 2 ? Math.abs(Math.sin(now / 60 + v.id)) * 1.5 : 0;
+  drawUnit(ctx, v.kind, v.owner, sx, sy, bob);
+  if (v.hp < def.hp || selected.has(v.id)) bar(sx, sy - (v.kind === 'king' ? 34 : 30), 22, v.hp / def.hp, '#4ad04a');
 }
 
 let last = performance.now();
@@ -369,11 +669,19 @@ function frame(now: number): void {
   const [ox, oy] = worldToScreen(-map.size * HW, 0);
   ctx.drawImage(terrain, Math.round(ox), Math.round(oy));
 
+  if (placing) {
+    const [px, py] = placementSpot();
+    const ok = canPlace(map, placing, px, py) && canAfford(DEFS[placing].cost);
+    diamond(px, py, sizeOf(placing));
+    ctx.fillStyle = ok ? 'rgba(120,255,120,.35)' : 'rgba(255,90,90,.4)';
+    ctx.fill();
+  }
+
   if (marker) {
     const age = (now - marker.t) / 500;
     if (age > 1) marker = undefined;
     else {
-      const [mx, my] = worldToScreen(...tileToWorld(marker.x, marker.y));
+      const [mx, my] = tileToScreen(marker.x, marker.y);
       ctx.strokeStyle = `rgba(255,255,255,${1 - age})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -382,42 +690,43 @@ function frame(now: number): void {
     }
   }
 
-  // Trees and units share one depth-sorted pass so units can walk behind trees.
+  // Everything standing on the ground shares one depth-sorted pass.
   const alpha = Math.min(1, (now - snapTime) / TICK_MS);
   const drawables: { depth: number; draw: () => void }[] = [];
-  for (const [tx, ty] of trees) {
-    const [sx, sy] = worldToScreen(...tileToWorld(tx + 0.5, ty + 0.5));
+  for (const [index, tile] of props) {
+    const tx = index % map.size;
+    const ty = Math.floor(index / map.size);
+    const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
     if (sx < -40 || sy < -10 || sx > canvas.width + 40 || sy > canvas.height + 60) continue;
-    drawables.push({ depth: tx + ty + 1, draw: () => drawTree(ctx, sx, sy + 4, Math.floor(hash(tx, ty) * 3)) });
+    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 3)) });
   }
   for (const v of views.values()) {
-    const [x, y] = viewPos(v, alpha);
-    const [sx, sy] = worldToScreen(...tileToWorld(x, y));
-    drawables.push({
-      depth: x + y,
-      draw: () => {
-        if (selected.has(v.id)) {
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.ellipse(sx, sy, 13, 6.5, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        const bob = v.moving ? Math.abs(Math.sin(now / 90 + v.id)) * 2 : 0;
-        drawUnit(ctx, v.kind, v.owner, sx, sy, bob);
-        if (selected.has(v.id)) {
-          const w = 22;
-          const top = sy - (v.kind === 'king' ? 34 : 30);
-          ctx.fillStyle = '#300';
-          ctx.fillRect(sx - w / 2, top, w, 3);
-          ctx.fillStyle = '#4ad04a';
-          ctx.fillRect(sx - w / 2, top, w * (v.hp / UNIT_STATS[v.kind].hp), 3);
-        }
-      },
-    });
+    if (isBuilding(v.kind)) {
+      drawables.push({ depth: v.x + v.y + sizeOf(v.kind), draw: () => drawBuildingView(v) });
+    } else {
+      const [x, y] = viewPos(v, alpha);
+      drawables.push({ depth: x + y, draw: () => drawUnitView(v, x, y, now) });
+    }
   }
   drawables.sort((a, b) => a.depth - b.depth);
   for (const d of drawables) d.draw();
+
+  // Arrows in flight.
+  shots = shots.filter((s) => now - s.t < 220);
+  ctx.strokeStyle = '#f1ead9';
+  ctx.lineWidth = 2;
+  for (const s of shots) {
+    const k = (now - s.t) / 220;
+    const [ax, ay] = tileToScreen(...s.from);
+    const [bx, by] = tileToScreen(...s.to);
+    const at = (f: number): [number, number] => [ax + (bx - ax) * f, ay - 16 + (by - ay) * f - Math.sin(f * Math.PI) * 14];
+    const [x0, y0] = at(Math.max(0, k - 0.15));
+    const [x1, y1] = at(k);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
 
   if (drag && (Math.abs(mouse.x - drag.x) > 4 || Math.abs(mouse.y - drag.y) > 4)) {
     ctx.strokeStyle = '#fff';
@@ -425,7 +734,13 @@ function frame(now: number): void {
     ctx.strokeRect(drag.x + 0.5, drag.y + 0.5, mouse.x - drag.x, mouse.y - drag.y);
   }
 
-  renderSelectionPanel();
+  renderPanel();
+  renderHud();
   renderMinimap();
 }
 requestAnimationFrame(frame);
+
+// Handles for automated tests in development builds.
+if (import.meta.env.DEV) {
+  Object.assign(window, { __game: { views, players, props, queues, cam, tileToScreen, getMap: () => map, getMe: () => me } });
+}

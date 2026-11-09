@@ -1,6 +1,7 @@
+import { DEFS, KINDS } from './defs';
 import { MAX_PLAYERS } from './map';
-import type { EntitySnapshot, PlayerInfo, ServerMessage } from './protocol';
-import { applyCommand, Command, createGame, GameState, removePlayer, spawnPlayer, step, UNIT_KINDS } from './sim';
+import type { EntitySnapshot, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
+import { activityOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
 
 /**
  * The authoritative game for one room. It knows nothing about networking:
@@ -23,7 +24,7 @@ export class GameHost {
     const clean = (typeof name === 'string' ? name : '').trim().slice(0, 16);
     const player = { slot, name: clean || `Player ${slot + 1}` };
     this.players.set(slot, player);
-    spawnPlayer(this.state, slot);
+    addPlayer(this.state, slot);
     return player;
   }
 
@@ -36,7 +37,10 @@ export class GameHost {
   }
 
   welcome(slot: number): ServerMessage {
-    return { t: 'welcome', you: slot, room: this.room, seed: this.state.seed, players: [...this.players.values()] };
+    return {
+      t: 'welcome', you: slot, room: this.room, seed: this.state.seed,
+      players: [...this.players.values()], tiles: [...this.state.changedTiles],
+    };
   }
 
   playersMessage(): ServerMessage {
@@ -45,11 +49,28 @@ export class GameHost {
 
   /** Advances the game one tick and returns the snapshot to send to everyone. */
   tick(): ServerMessage {
-    step(this.state);
+    const s = this.state;
+    step(s);
     const round = (v: number) => Math.round(v * 100) / 100;
-    const ents: EntitySnapshot[] = [...this.state.entities.values()].map((e) => [
-      e.id, e.owner, UNIT_KINDS.indexOf(e.kind), round(e.x), round(e.y), e.hp, e.path.length > 0 ? 1 : 0,
-    ]);
-    return { t: 'snap', tick: this.state.tick, ents };
+    const ents: EntitySnapshot[] = [];
+    const queues: QueueSnapshot[] = [];
+    for (const e of s.entities.values()) {
+      const building = DEFS[e.kind].building;
+      ents.push([
+        e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
+        building ? Math.floor(e.progress * 100) : e.carry,
+      ]);
+      if (e.queue.length > 0) {
+        const pct = Math.floor((e.trainTicks / (DEFS[e.queue[0]].time * TICK_RATE)) * 100);
+        queues.push([e.id, pct, ...e.queue.map((k) => KINDS.indexOf(k))]);
+      }
+    }
+    return {
+      t: 'snap', tick: s.tick, ents, queues,
+      players: [...s.players.values()].map((p) => [
+        p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
+      ]),
+      tiles: s.tileEvents, shots: s.shots, winner: s.winner,
+    };
   }
 }
