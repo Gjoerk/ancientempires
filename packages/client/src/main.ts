@@ -236,7 +236,7 @@ function renderPlayers(): void {
     chip.className = 'chip';
     chip.style.background = PLAYER_COLORS[p.slot];
     const label = document.createElement('span');
-    label.textContent = p.name + (p.slot === me ? ' (you)' : '');
+    label.textContent = p.name + (p.slot === me ? (p.slot === myOwnSlot ? ' (you)' : ' (playing)') : '');
     label.style.marginRight = '14px';
     if (players.get(p.slot)?.defeated) label.style.textDecoration = 'line-through';
     el.append(chip, label);
@@ -244,18 +244,27 @@ function renderPlayers(): void {
 }
 
 function onMessage(msg: ServerMessage): void {
-  if (msg.t === 'welcome') {
-    me = msg.you;
+  if (msg.t === 'lobby') {
+    resetGame();
+    roster = msg.players;
+    renderRoom(msg.room, msg.you, msg.host);
+    history.replaceState(null, '', `?room=${msg.room}`);
+    $('lobby').style.display = 'none';
+    $('waiting').style.display = '';
+  } else if (msg.t === 'start') {
+    resetGame();
+    me = myOwnSlot = msg.you;
     map = generateMap(msg.seed);
     buildTerrain(map);
-    for (const [index, tile] of msg.tiles) setTile(index, tile);
     roster = msg.players;
     $('room-code').textContent = msg.room;
-    history.replaceState(null, '', `?room=${msg.room}`);
     renderPlayers();
     $('lobby').style.display = 'none';
+    $('waiting').style.display = 'none';
     $('top').hidden = false;
     $('bottom').hidden = false;
+    $('host-tools').hidden = !session?.host;
+    $('switch-btn').hidden = !roster.some((p) => p.test);
   } else if (msg.t === 'players') {
     roster = msg.players;
     renderPlayers();
@@ -310,21 +319,91 @@ function onMessage(msg: ServerMessage): void {
   }
 }
 
-function showLobby(message: string): void {
-  session = undefined;
+/** Clears everything that belongs to a running game. */
+function resetGame(): void {
   me = -1;
   centred = false;
   placing = undefined;
   winner = -1;
+  map = undefined;
   views.clear();
   players.clear();
+  queues.clear();
   selected.clear();
-  $('lobby').style.display = '';
+  shots = [];
+  hudSignature = panelSignature = '';
   $('top').hidden = true;
   $('bottom').hidden = true;
   $('banner').hidden = true;
+}
+
+function showLobby(message: string): void {
+  session = undefined;
+  resetGame();
+  $('waiting').style.display = 'none';
+  $('lobby').style.display = '';
   $('lobby-msg').textContent = message;
 }
+
+/** The waiting room: who is in, and for the host the buttons to set up and start. */
+function renderRoom(room: string, you: number, host: number): void {
+  $('room-title').textContent = `Room ${room}`;
+  $<HTMLInputElement>('room-link').value = `${location.origin}${location.pathname}?room=${room}`;
+  const list = $('room-players');
+  list.textContent = '';
+  for (const p of roster) {
+    const li = document.createElement('li');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.background = PLAYER_COLORS[p.slot];
+    const tags = [p.slot === you ? 'you' : '', p.slot === host ? 'host' : '', p.test ? 'played by the host' : ''].filter(Boolean);
+    li.append(chip, p.name + (tags.length ? ` (${tags.join(', ')})` : ''));
+    if (p.test && session?.host) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', () => session?.host?.removeTestPlayer(p.slot));
+      li.append(' ', remove);
+    }
+    list.append(li);
+  }
+  const hosting = !!session?.host;
+  $('room-host').hidden = !hosting;
+  $('room-wait').hidden = hosting;
+  $<HTMLButtonElement>('add-test-btn').disabled = roster.length >= 4;
+  $('room-hint').textContent = roster.length < 2
+    ? 'You are alone. Share the link, or add a test opponent to play both sides yourself.'
+    : `${roster.length} players. Everyone starts at the same time.`;
+}
+
+/** The slot this browser joined as; `me` can differ while the host plays a test opponent. */
+let myOwnSlot = -1;
+
+/** Hands control to the host's next own player (themselves or a test opponent). */
+function switchTeam(): void {
+  const host = session?.host;
+  if (!host || me < 0) return;
+  const mine = roster.filter((p) => p.slot === myOwnSlot || p.test).map((p) => p.slot);
+  const next = mine[(mine.indexOf(me) + 1) % mine.length];
+  if (next === me || !host.control(next)) return;
+  me = next;
+  selected.clear();
+  placing = undefined;
+  hudSignature = panelSignature = '';
+  renderPlayers();
+  const home = [...views.values()].find((v) => v.owner === me && v.kind === 'king')
+    ?? [...views.values()].find((v) => v.owner === me && v.kind === 'castle');
+  if (home) [cam.x, cam.y] = tileToWorld(home.x, home.y);
+}
+
+$('start-btn').addEventListener('click', () => session?.host?.start());
+$('add-test-btn').addEventListener('click', () => session?.host?.addTestPlayer());
+$('leave-btn').addEventListener('click', () => session?.close());
+$('switch-btn').addEventListener('click', switchTeam);
+$('end-btn').addEventListener('click', () => {
+  if (confirm('End this game for everyone and go back to the lobby?')) session?.host?.backToLobby();
+});
+$('room-link').addEventListener('click', (ev) => (ev.target as HTMLInputElement).select());
 
 $<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
   ev.preventDefault();
@@ -489,6 +568,10 @@ window.addEventListener('keydown', (ev) => {
   const key = ev.key.toLowerCase();
   keys.add(key);
   if (key === 'escape') placing = undefined;
+  if (key === 'tab') {
+    ev.preventDefault();
+    switchTeam();
+  }
   if (key === '.') {
     // Jump to the next villager with nothing to do.
     const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0);
@@ -621,8 +704,9 @@ function renderHud(): void {
 
   const banner = $('banner');
   let text = '';
-  if (winner === me) text = 'Victory! Yours is the last king standing.';
-  else if (p.defeated) text = 'Your king has fallen. You are out of the game.';
+  const who = me === myOwnSlot ? 'Your' : `${roster.find((q) => q.slot === me)?.name ?? 'This player'}'s`;
+  if (winner === me) text = me === myOwnSlot ? 'Victory! Yours is the last king standing.' : 'This side has won.';
+  else if (p.defeated) text = `${who} king has fallen. ${me === myOwnSlot ? 'You are' : 'This side is'} out of the game.`;
   if (winner >= 0 && winner !== me) text += ` ${roster.find((q) => q.slot === winner)?.name ?? 'Another player'} wins.`;
   banner.textContent = text.trim();
   banner.hidden = !text;
@@ -833,5 +917,5 @@ requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __game: { views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me } });
+  Object.assign(window, { __game: { views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

@@ -3,6 +3,8 @@ import type { Command } from './sim';
 export interface PlayerInfo {
   slot: number;
   name: string;
+  /** A stand-in opponent that the host controls themselves, for testing. */
+  test?: boolean;
 }
 
 /**
@@ -26,8 +28,13 @@ export type ClientMessage =
 
 /** Sent by the host to players. */
 export type ServerMessage =
-  | { t: 'welcome'; you: number; room: string; seed: number; players: PlayerInfo[]; tiles: [number, number][] }
+  /** The room is waiting in the lobby. Sent whenever who is in it changes. */
+  | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[] }
+  /** The host started the game. */
+  | { t: 'start'; you: number; room: string; seed: number; players: PlayerInfo[] }
   | { t: 'players'; players: PlayerInfo[] }
+  /** Sent while nothing else is, so guests can tell the host is still there. */
+  | { t: 'ping' }
   | {
       t: 'snap';
       tick: number;

@@ -41,5 +41,6 @@ Done:
 - Buildings are placed and constructed by villagers; town centre, barracks, archery range and stable train units.
 - Combat: swordsman, spearman, archer, rider and watchtower, with counters (spear beats rider, rider beats archer, archer and sword beat spear).
 - Protect the king: a player whose king dies is out; the last king standing wins.
+- Waiting room: the host starts the game for everyone, can end it and return to the lobby, and can add a test opponent they play themselves (Tab switches sides).
 
-Not yet: fog of war, unit collision, walls and gates, garrisoning, ages and technologies, a pre-game lobby, sound.
+Not yet: fog of war, unit collision, walls and gates, garrisoning, ages and technologies, sound.

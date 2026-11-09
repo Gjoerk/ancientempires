@@ -1,5 +1,5 @@
 import { Peer, DataConnection, PeerOptions } from 'peerjs';
-import { ClientMessage, GameHost, ServerMessage, TICK_MS } from '@kingsfall/shared';
+import { ClientMessage, GameHost, ServerMessage, TICK_MS, TICK_RATE } from '@kingsfall/shared';
 
 // There is no game server. One player's browser hosts the game and the others
 // connect to it directly over WebRTC. Only the initial handshake goes through
@@ -8,9 +8,22 @@ import { ClientMessage, GameHost, ServerMessage, TICK_MS } from '@kingsfall/shar
 const ID_PREFIX = 'kingsfall-room-';
 const SILENCE_LIMIT_MS = 8000;
 
+/** What only the host of a room can do. */
+export interface HostControls {
+  start(): void;
+  backToLobby(): void;
+  /** Adds a stand-in opponent that the host plays themselves. */
+  addTestPlayer(): void;
+  removeTestPlayer(slot: number): void;
+  /** Switches which of the host's own players the host's commands go to. */
+  control(slot: number): boolean;
+}
+
 export interface Session {
   send(msg: ClientMessage): void;
   close(): void;
+  /** Present only for the host. */
+  host?: HostControls;
 }
 
 export interface Handlers {
@@ -44,16 +57,26 @@ function startTicker(ms: number, fn: () => void): () => void {
 
 export function hostGame(code: string, name: string, handlers: Handlers): Session {
   const peer = new Peer(ID_PREFIX + code, peerOptions());
-  const game = new GameHost(code, (Math.random() * 0xffffffff) >>> 0);
+  const game = new GameHost(code);
   const guests = new Map<DataConnection, number>();
   if (import.meta.env.DEV) Object.assign(window, { __host: game });
   let stopTicker: (() => void) | undefined;
   let mySlot = -1;
+  /** The player the host's commands go to: the host, or one of their test opponents. */
+  let controlSlot = -1;
+  let ticks = 0;
   let closed = false;
 
+  const toGuests = (make: (slot: number) => ServerMessage) => {
+    for (const [conn, slot] of guests) if (conn.open) conn.send(make(slot));
+  };
   const broadcast = (msg: ServerMessage) => {
     handlers.onMessage(msg);
-    for (const conn of guests.keys()) if (conn.open) conn.send(msg);
+    toGuests(() => msg);
+  };
+  const sendLobby = () => {
+    handlers.onMessage(game.lobbyMessage(mySlot, mySlot));
+    toGuests((slot) => game.lobbyMessage(slot, mySlot));
   };
   const close = (reason: string) => {
     if (closed) return;
@@ -64,9 +87,13 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   };
 
   peer.on('open', () => {
-    mySlot = game.join(name)!.slot;
-    handlers.onMessage(game.welcome(mySlot));
-    stopTicker = startTicker(TICK_MS, () => broadcast(game.tick()));
+    mySlot = controlSlot = game.join(name)!.slot;
+    sendLobby();
+    stopTicker = startTicker(TICK_MS, () => {
+      const snap = game.tick();
+      if (snap) broadcast(snap);
+      else if (++ticks % TICK_RATE === 0) toGuests(() => ({ t: 'ping' }));
+    });
     // Closing the tab should disconnect guests right away.
     window.addEventListener('pagehide', () => peer.destroy());
   });
@@ -79,12 +106,12 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       if (msg.t === 'join' && slot === undefined) {
         const player = game.join(msg.name);
         if (!player) {
-          conn.send({ t: 'error', message: 'That game is full.' } satisfies ServerMessage);
+          const message = game.state ? 'That game has already started.' : 'That game is full.';
+          conn.send({ t: 'error', message } satisfies ServerMessage);
           return;
         }
         guests.set(conn, player.slot);
-        conn.send(game.welcome(player.slot));
-        broadcast(game.playersMessage());
+        sendLobby();
       } else if (msg.t === 'cmd' && slot !== undefined) {
         game.command(slot, msg.cmd);
       }
@@ -94,7 +121,8 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       if (slot === undefined) return;
       guests.delete(conn);
       game.leave(slot);
-      broadcast(game.playersMessage());
+      if (game.state) broadcast(game.playersMessage());
+      else sendLobby();
     };
     conn.on('close', drop);
     conn.on('error', drop);
@@ -106,11 +134,41 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
     // Later errors (one guest failing to connect, a broker hiccup) do not end the game.
   });
 
+  const isMine = (slot: number) => slot === mySlot || game.players.get(slot)?.test === true;
+
   return {
     send: (msg) => {
-      if (msg.t === 'cmd' && mySlot >= 0) game.command(mySlot, msg.cmd);
+      if (msg.t === 'cmd' && controlSlot >= 0) game.command(controlSlot, msg.cmd);
     },
     close: () => close(''),
+    host: {
+      start() {
+        if (game.state || mySlot < 0) return;
+        game.start((Math.random() * 0xffffffff) >>> 0);
+        controlSlot = mySlot;
+        handlers.onMessage(game.startMessage(mySlot));
+        toGuests((slot) => game.startMessage(slot));
+      },
+      backToLobby() {
+        if (!game.state) return;
+        game.backToLobby();
+        controlSlot = mySlot;
+        sendLobby();
+      },
+      addTestPlayer() {
+        if (game.join('Test opponent', true)) sendLobby();
+      },
+      removeTestPlayer(slot) {
+        if (game.state || !game.players.get(slot)?.test) return;
+        game.leave(slot);
+        sendLobby();
+      },
+      control(slot) {
+        if (!isMine(slot)) return false;
+        controlSlot = slot;
+        return true;
+      },
+    },
   };
 }
 
@@ -120,8 +178,8 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
   let closed = false;
   let joined = false;
   let lastHeard = Date.now();
-  // The host sends a snapshot every tick, so silence means it is gone (a closed
-  // tab does not always close the connection cleanly) or was never there.
+  // The host sends something at least every second, so silence means it is gone
+  // (a closed tab does not always close the connection cleanly) or was never there.
   const watchdog = setInterval(() => {
     if (Date.now() - lastHeard < SILENCE_LIMIT_MS) return;
     close(joined ? 'The host left the game.' : 'No game with that code. Check the code or host a new game.');
@@ -139,9 +197,11 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     conn = c;
     c.on('open', () => c.send({ t: 'join', name } satisfies ClientMessage));
     c.on('data', (data) => {
-      joined = true;
+      const msg = data as ServerMessage;
       lastHeard = Date.now();
-      handlers.onMessage(data as ServerMessage);
+      if (msg.t === 'error') return close(msg.message);
+      joined = true;
+      if (msg.t !== 'ping') handlers.onMessage(msg);
     });
     c.on('close', () => close('The host left the game.'));
     c.on('error', () => close('Connection to the host failed.'));

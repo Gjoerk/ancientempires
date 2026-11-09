@@ -25,7 +25,19 @@
     .chip { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
     #banner { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 22px;
       border: 2px solid #e0c12f; background: #1d1a14; font-size: 18px; pointer-events: none; }
-    #lobby { position: fixed; inset: 0; display: grid; place-items: center; background: #10140f; }
+    #lobby, .screen { position: fixed; inset: 0; display: grid; place-items: center; background: #10140f; }
+    .card { display: grid; gap: 10px; width: min(380px, calc(100vw - 32px)); padding: 24px; border: 2px solid #5a4a2a; background: #1d1a14; }
+    .card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .12em; color: #e0c12f; }
+    .card p { margin: 0; }
+    .card input, .card button { font: inherit; padding: 8px 10px; border: 1px solid #5a4a2a; background: #10140f; color: inherit; }
+    .card button { background: #e0c12f; color: #10140f; font-weight: 700; cursor: pointer; }
+    .card button.plain, .card li button { background: #2b261c; color: inherit; font-weight: 400; }
+    .card button:disabled { opacity: .45; cursor: default; }
+    .card li button { padding: 2px 8px; font-size: 12px; margin-left: 8px; }
+    #room-host { display: grid; gap: 10px; }
+    #room-host[hidden] { display: none; }
+    #room-players { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 6px; }
+    #host-tools button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #5a4a2a; background: #2b261c; color: inherit; cursor: pointer; }
     #lobby form { display: grid; gap: 10px; width: min(320px, calc(100vw - 32px)); padding: 24px;
       border: 2px solid #5a4a2a; background: #1d1a14; }
     #lobby h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .12em; color: #e0c12f; }
@@ -40,6 +52,10 @@
   <div id="top" class="bar" hidden>
     <span id="resources"></span>
     <span id="players" style="margin-left:auto"></span>
+    <span id="host-tools" hidden>
+      <button id="switch-btn" type="button" title="Play the other side (Tab)">Switch team (Tab)</button>
+      <button id="end-btn" type="button">End game</button>
+    </span>
     <span class="dim">Room <b id="room-code"></b></span>
   </div>
   <div id="bottom" class="bar" hidden>
@@ -50,6 +66,21 @@
     <canvas id="minimap" width="232" height="116"></canvas>
   </div>
   <div id="banner" hidden></div>
+  <div id="waiting" class="screen" style="display:none">
+    <div class="card">
+      <h1 id="room-title"></h1>
+      <label class="dim" for="room-link">Invite link</label>
+      <input id="room-link" readonly>
+      <ul id="room-players"></ul>
+      <p id="room-hint" class="dim"></p>
+      <div id="room-host" hidden>
+        <button id="start-btn" type="button">Start game</button>
+        <button id="add-test-btn" type="button" class="plain">Add test opponent</button>
+      </div>
+      <p id="room-wait" class="dim" hidden>Waiting for the host to start the game…</p>
+      <button id="leave-btn" type="button" class="plain">Leave</button>
+    </div>
+  </div>
   <div id="lobby">
     <form id="lobby-form" autocomplete="off">
       <h1>KINGSFALL</h1>

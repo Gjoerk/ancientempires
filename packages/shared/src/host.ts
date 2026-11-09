@@ -9,47 +9,60 @@ import { activityOf, hasKingInside, taskOf, addPlayer, applyCommand, Command, cr
  * and forwards the messages it returns.
  */
 export class GameHost {
-  readonly state: GameState;
+  /** The running game, or undefined while the room waits in the lobby. */
+  state: GameState | undefined;
   readonly players = new Map<number, PlayerInfo>();
 
-  constructor(readonly room: string, seed: number) {
-    this.state = createGame(seed);
-  }
+  constructor(readonly room: string) {}
 
-  /** Adds a player and returns them, or undefined when the room is full. */
-  join(name: unknown): PlayerInfo | undefined {
+  /** Adds a player to the lobby. Returns undefined when the room is full or the game is running. */
+  join(name: unknown, test = false): PlayerInfo | undefined {
+    if (this.state) return undefined;
     let slot = 0;
     while (this.players.has(slot)) slot++;
     if (slot >= MAX_PLAYERS) return undefined;
     const clean = (typeof name === 'string' ? name : '').trim().slice(0, 16);
-    const player = { slot, name: clean || `Player ${slot + 1}` };
+    const player: PlayerInfo = { slot, name: clean || `Player ${slot + 1}` };
+    if (test) player.test = true;
     this.players.set(slot, player);
-    addPlayer(this.state, slot);
     return player;
   }
 
   leave(slot: number): void {
-    if (this.players.delete(slot)) removePlayer(this.state, slot);
+    if (this.players.delete(slot) && this.state) removePlayer(this.state, slot);
+  }
+
+  /** Starts a fresh game with everyone who is in the lobby. */
+  start(seed: number): void {
+    this.state = createGame(seed);
+    for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot);
+  }
+
+  /** Ends the running game and sends everyone back to the lobby. */
+  backToLobby(): void {
+    this.state = undefined;
   }
 
   command(slot: number, cmd: Command): void {
-    if (this.players.has(slot) && cmd && typeof cmd === 'object') applyCommand(this.state, slot, cmd);
+    if (this.state && this.players.has(slot) && cmd && typeof cmd === 'object') applyCommand(this.state, slot, cmd);
   }
 
-  welcome(slot: number): ServerMessage {
-    return {
-      t: 'welcome', you: slot, room: this.room, seed: this.state.seed,
-      players: [...this.players.values()], tiles: [...this.state.changedTiles],
-    };
+  lobbyMessage(you: number, host: number): ServerMessage {
+    return { t: 'lobby', you, host, room: this.room, players: [...this.players.values()] };
+  }
+
+  startMessage(you: number): ServerMessage {
+    return { t: 'start', you, room: this.room, seed: this.state!.seed, players: [...this.players.values()] };
   }
 
   playersMessage(): ServerMessage {
     return { t: 'players', players: [...this.players.values()] };
   }
 
-  /** Advances the game one tick and returns the snapshot to send to everyone. */
-  tick(): ServerMessage {
+  /** Advances the game one tick and returns the snapshot to send to everyone (nothing while in the lobby). */
+  tick(): ServerMessage | undefined {
     const s = this.state;
+    if (!s) return undefined;
     step(s);
     const round = (v: number) => Math.round(v * 100) / 100;
     const ents: EntitySnapshot[] = [];
