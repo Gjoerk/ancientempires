@@ -26,7 +26,7 @@ Open the printed URL in two tabs: host in one, join with the room code in the ot
 - `npm run typecheck`
 - `npm run build` — static site in `packages/client/dist`
 
-Pushing to `main` deploys to GitHub Pages (set Pages source to "GitHub Actions" in the repo settings).
+The game is published by copying `packages/client/dist` into the `ancientempires/` folder of the `Gjoerk/gjoerk.github.io` site repository.
 
 ## Status
 
