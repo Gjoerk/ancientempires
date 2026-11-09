@@ -46,6 +46,7 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   const peer = new Peer(ID_PREFIX + code, peerOptions());
   const game = new GameHost(code, (Math.random() * 0xffffffff) >>> 0);
   const guests = new Map<DataConnection, number>();
+  if (import.meta.env.DEV) Object.assign(window, { __host: game });
   let stopTicker: (() => void) | undefined;
   let mySlot = -1;
   let closed = false;

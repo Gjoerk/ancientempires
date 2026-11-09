@@ -14,7 +14,9 @@ export type Order =
   /** Gather from a resource tile, or from a farm when `farm` is set. */
   | { t: 'gather'; tile: number; farm: number; res: Res; phase: 'go' | 'work' | 'return'; drop: number }
   | { t: 'build'; id: number }
-  | { t: 'attack'; id: number; auto: boolean };
+  | { t: 'attack'; id: number; auto: boolean }
+  /** Walk to a castle and go inside (kings only). */
+  | { t: 'garrison'; id: number };
 
 export interface Entity {
   id: number;
@@ -37,6 +39,8 @@ export interface Entity {
   progress: number;
   queue: Kind[];
   trainTicks: number;
+  /** Id of the castle this unit is sheltering in, or -1. */
+  inside: number;
 }
 
 export interface PlayerState {
@@ -71,7 +75,9 @@ export type Command =
   | { type: 'interact'; ids: number[]; target: number }
   | { type: 'place'; ids: number[]; kind: Kind; x: number; y: number }
   | { type: 'train'; building: number; kind: Kind }
-  | { type: 'cancel'; building: number };
+  | { type: 'cancel'; building: number }
+  /** Send whoever is inside a castle back out. */
+  | { type: 'eject'; building: number };
 
 interface Rect { x: number; y: number; s: number }
 
@@ -93,7 +99,7 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
     id: state.nextId++, owner, kind,
     x: def.building ? tx : tx + 0.5, y: def.building ? ty : ty + 0.5,
     hp: built ? def.hp : 1, path: [], order: { t: 'idle' }, cooldown: 0,
-    carry: 0, carryRes: 'food', work: 0, progress: built ? 1 : 0, queue: [], trainTicks: 0,
+    carry: 0, carryRes: 'food', work: 0, progress: built ? 1 : 0, queue: [], trainTicks: 0, inside: -1,
   };
   state.entities.set(e.id, e);
   if (def.building) setBlocked(state.map, rectOf(e), 1);
@@ -106,15 +112,37 @@ function setBlocked(map: GameMap, r: Rect, value: number): void {
 
 function kill(state: GameState, e: Entity): void {
   if (!state.entities.delete(e.id)) return;
-  if (isBuilding(e)) setBlocked(state.map, rectOf(e), 0);
+  if (!isBuilding(e)) return;
+  setBlocked(state.map, rectOf(e), 0);
+  eject(state, e);
+}
+
+/** Puts everyone sheltering in a building back on the map next to it. */
+function eject(state: GameState, b: Entity): void {
+  const s = sizeOf(b);
+  for (const e of state.entities.values()) {
+    if (e.inside !== b.id) continue;
+    const [spot] = freeTilesNear(state.map, b.x + Math.floor(s / 2), b.y + s, 1);
+    e.inside = -1;
+    e.x = spot[0] + 0.5;
+    e.y = spot[1] + 0.5;
+    e.path = [];
+    e.order = { t: 'idle' };
+  }
+}
+
+export function hasKingInside(state: GameState, b: Entity): boolean {
+  for (const e of state.entities.values()) if (e.inside === b.id) return true;
+  return false;
 }
 
 /** Gives a player their town centre, king, villagers and starting resources. */
 export function addPlayer(state: GameState, slot: number): void {
   state.players.set(slot, { slot, res: { ...START_RESOURCES }, pop: 0, cap: 0, defeated: false });
   const [sx, sy] = state.map.starts[slot];
-  spawn(state, slot, 'towncenter', sx - 1, sy - 1);
-  const spots = freeTilesNear(state.map, sx, sy + 2, 5);
+  spawn(state, slot, 'towncenter', sx - 4, sy - 2);
+  spawn(state, slot, 'castle', sx + 1, sy - 2);
+  const spots = freeTilesNear(state.map, sx - 1, sy + 1, 5);
   spawn(state, slot, 'king', spots[0][0], spots[0][1]);
   for (let i = 1; i < spots.length; i++) spawn(state, slot, 'villager', spots[i][0], spots[i][1]);
   if ([...state.players.values()].filter((p) => !p.defeated).length >= 2) state.contested = true;
@@ -244,7 +272,7 @@ function ownUnits(state: GameState, player: number, ids: unknown): Entity[] {
   return ids
     .slice(0, 200)
     .map((id) => state.entities.get(id))
-    .filter((e): e is Entity => !!e && e.owner === player && !isBuilding(e));
+    .filter((e): e is Entity => !!e && e.owner === player && !isBuilding(e) && e.inside < 0);
 }
 
 function moveUnits(state: GameState, units: Entity[], x: number, y: number): void {
@@ -300,6 +328,8 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
       e.path = [];
       if (target.owner !== slot) {
         if (DEFS[e.kind].attack) e.order = { t: 'attack', id: target.id, auto: false };
+      } else if (target.kind === 'castle' && e.kind === 'king' && target.progress >= 1) {
+        e.order = { t: 'garrison', id: target.id };
       } else if (isBuilding(target) && e.kind === 'villager' && target.progress < 1) {
         e.order = { t: 'build', id: target.id };
       } else if (target.kind === 'farm' && e.kind === 'villager' && farmIsFree(state, target, e)) {
@@ -340,6 +370,9 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     const kind = b.queue.pop()!;
     pay(player, DEFS[kind].cost, 1);
     if (b.queue.length === 0) b.trainTicks = 0;
+  } else if (cmd.type === 'eject') {
+    const b = state.entities.get(cmd.building);
+    if (b && b.owner === slot) eject(state, b);
   }
 }
 
@@ -349,7 +382,7 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
   let best: Entity | undefined;
   let bestScore = Infinity;
   for (const other of state.entities.values()) {
-    if (other.owner === e.owner) continue;
+    if (other.owner === e.owner || other.inside >= 0) continue;
     const d = distance(e, other);
     if (d > reach) continue;
     // Prefer units over buildings at a similar distance.
@@ -495,7 +528,7 @@ function stepBuild(state: GameState, e: Entity, o: Extract<Order, { t: 'build' }
 function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack' }>): void {
   const def = DEFS[e.kind];
   const target = state.entities.get(o.id);
-  if (!target || target.owner === e.owner) return void (e.order = { t: 'idle' });
+  if (!target || target.owner === e.owner || target.inside >= 0) return void (e.order = { t: 'idle' });
   const d = distance(e, target);
   if (d <= (def.range ?? 0)) {
     e.path = [];
@@ -511,6 +544,19 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
       e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(target.x), Math.floor(target.y));
     }
   }
+}
+
+function stepGarrison(state: GameState, e: Entity, o: Extract<Order, { t: 'garrison' }>): void {
+  const castle = state.entities.get(o.id);
+  if (!castle || castle.owner !== e.owner || castle.progress < 1) return void (e.order = { t: 'idle' });
+  if (e.path.length > 0) return;
+  if (!isAdjacent(e, rectOf(castle))) {
+    if (!goAdjacent(state, e, rectOf(castle))) e.order = { t: 'idle' };
+    return;
+  }
+  e.inside = castle.id;
+  e.order = { t: 'idle' };
+  [e.x, e.y] = centre(castle);
 }
 
 function stepTraining(state: GameState, b: Entity): void {
@@ -565,7 +611,7 @@ export function step(state: GameState): void {
   for (const p of state.players.values()) p.cap = Math.min(POP_MAX, p.cap);
 
   for (const e of [...state.entities.values()]) {
-    if (!state.entities.has(e.id)) continue;
+    if (!state.entities.has(e.id) || e.inside >= 0) continue;
     const def = DEFS[e.kind];
     if (e.cooldown > 0) e.cooldown--;
     if (isBuilding(e) && e.progress < 1) continue;
@@ -575,6 +621,7 @@ export function step(state: GameState): void {
     if (o.t === 'gather') stepGather(state, e, o);
     else if (o.t === 'build') stepBuild(state, e, o);
     else if (o.t === 'attack') stepAttack(state, e, o);
+    else if (o.t === 'garrison') stepGarrison(state, e, o);
     else if (o.t === 'move' && e.path.length === 0) e.order = { t: 'idle' };
 
     // Soldiers and towers pick fights on their own; villagers and kings do not.
@@ -605,6 +652,20 @@ export function activityOf(e: Entity): number {
   if (e.order.t === 'attack') return 3;
   if (e.order.t === 'gather' || e.order.t === 'build') return 2;
   return 0;
+}
+
+/**
+ * What a unit is visibly busy with and where, for work animations:
+ * [task, target]. Tasks: 0 none, 1 wood, 2 berries, 3 gold, 4 stone, 5 farm, 6 build.
+ * The target is a tile index for 1-4 and an entity id for 5-6.
+ */
+export function taskOf(e: Entity): [number, number] {
+  const o = e.order;
+  if (e.path.length > 0) return [0, 0];
+  if (o.t === 'build') return [6, o.id];
+  if (o.t !== 'gather' || o.phase !== 'work') return [0, 0];
+  if (o.farm >= 0) return [5, o.farm];
+  return [1 + ['wood', 'food', 'gold', 'stone'].indexOf(o.res), o.tile];
 }
 
 export const kindIndex = (kind: Kind): number => KINDS.indexOf(kind);

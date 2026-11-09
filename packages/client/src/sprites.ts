@@ -1,4 +1,4 @@
-import { DEFS, Kind, Tile } from '@kingsfall/shared';
+import { Kind, Tile } from '@kingsfall/shared';
 
 export const PLAYER_COLORS = ['#3b6fd4', '#d43b3b', '#3bb85a', '#e0c12f'];
 
@@ -26,7 +26,7 @@ function blit(ctx: Ctx, rows: string[], palette: Record<string, string>, x: numb
 function shadow(ctx: Ctx, x: number, y: number, rx: number, ry: number): void {
   ctx.fillStyle = 'rgba(0,0,0,.28)';
   ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + rx * 0.45, y + 1, rx * 1.15, ry * 0.8, 0.12, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -117,14 +117,101 @@ const UNIT_SPRITES: Partial<Record<Kind, string[]>> = {
   ],
 };
 
-export function drawUnit(ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number): void {
+export interface Work {
+  /** 1 wood, 2 berries, 3 gold, 4 stone, 5 farm, 6 build. */
+  task: number;
+  /** -1 when the work is to the left on screen, 1 when to the right. */
+  dir: number;
+  /** 0..1 position in the swing; 0 is the moment of impact. */
+  phase: number;
+}
+
+const CHIP_COLORS = ['', '#d8b070', '#d43b5a', '#f2cf3a', '#c4c8cf', '#6e4f2c', '#d8cfae'];
+export const CARRY_COLORS = ['#d43b5a', '#8a5a33', '#f2cf3a', '#b4b8bf'];
+
+/** The tool a villager swings, drawn over the sprite. */
+function drawTool(ctx: Ctx, x: number, y: number, w: Work): void {
+  const raise = Math.sin(w.phase * Math.PI);
+  if (w.task === 2) {
+    // Picking berries: a basket at the feet and a hand reaching into the bush.
+    ctx.fillStyle = '#8a5a33';
+    ctx.fillRect(Math.round(x + w.dir * 9 - 4), Math.round(y - 5), 8, 5);
+    ctx.fillStyle = '#b07a45';
+    ctx.fillRect(Math.round(x + w.dir * 9 - 4), Math.round(y - 5), 8, 1);
+    ctx.fillStyle = '#e2b48c';
+    ctx.fillRect(Math.round(x + w.dir * (7 + 4 * raise) - 1), Math.round(y - 15 + 5 * (1 - raise)), 3, 3);
+    if (w.phase > 0.7) {
+      ctx.fillStyle = '#d43b5a';
+      ctx.fillRect(Math.round(x + w.dir * 8), Math.round(y - 12 + (w.phase - 0.7) * 20), 2, 2);
+    }
+    return;
+  }
+  const hx = x + w.dir * 5;
+  const hy = y - 12;
+  // The tool swings from raised behind the head down to the point of impact.
+  const angle = (w.task === 5 ? 0.75 : 0.45) - (w.task === 5 ? 1.7 : 2.3) * raise;
+  const len = 13;
+  const tx = hx + w.dir * Math.cos(angle) * len;
+  const ty = hy + Math.sin(angle) * len;
+  ctx.strokeStyle = '#7a5230';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(hx, hy);
+  ctx.lineTo(tx, ty);
+  ctx.stroke();
+  // Head: perpendicular to the handle.
+  const nx = -Math.sin(angle) * w.dir;
+  const ny = Math.cos(angle);
+  ctx.strokeStyle = w.task === 6 ? '#55585e' : '#b9bec6';
+  ctx.lineWidth = w.task === 1 || w.task === 6 ? 4 : 2;
+  ctx.beginPath();
+  if (w.task === 1) {
+    // Axe blade on one side.
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx + nx * 5, ty + ny * 5);
+  } else if (w.task === 5) {
+    // Hoe blade pointing down.
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx + nx * 4, ty + ny * 4);
+  } else if (w.task === 6) {
+    ctx.moveTo(tx - nx * 3, ty - ny * 3);
+    ctx.lineTo(tx + nx * 3, ty + ny * 3);
+  } else {
+    // Pickaxe: a head across the handle.
+    ctx.moveTo(tx - nx * 6, ty - ny * 6);
+    ctx.lineTo(tx + nx * 6, ty + ny * 6);
+  }
+  ctx.stroke();
+  // Chips fly off right after the blow lands.
+  if (w.phase < 0.25) {
+    const k = w.phase / 0.25;
+    ctx.fillStyle = CHIP_COLORS[w.task];
+    for (let i = 0; i < 3; i++) {
+      const fx = x + w.dir * (15 + k * (4 + i * 4));
+      const fy = y - 8 - k * (10 - i * 3) + k * k * 12;
+      ctx.fillRect(Math.round(fx), Math.round(fy), 2, 2);
+    }
+  }
+}
+
+export function drawUnit(
+  ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1,
+): void {
   const big = kind === 'king' || kind === 'rider';
   shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
   const palette = {
     s: '#e2b48c', e: '#2a2018', l: '#6b4a2b', d: '#3a2a1a', h: '#5a3b1e', m: '#9aa0a8', w: '#e6e9ee', k: '#7a5230',
     g: '#3f6b3a', c: '#7a2d8a', y: '#f2cf3a', o: '#8a5a33', n: '#4a2e18', t: PLAYER_COLORS[owner % PLAYER_COLORS.length],
   };
+  if (carry >= 0 && !work) {
+    // A bundle of whatever is being carried home, on the back.
+    ctx.fillStyle = CARRY_COLORS[carry];
+    ctx.fillRect(Math.round(x - 11), Math.round(y - 17 - bob), 6, 6);
+    ctx.fillStyle = 'rgba(0,0,0,.25)';
+    ctx.fillRect(Math.round(x - 11), Math.round(y - 12 - bob), 6, 1);
+  }
   blit(ctx, UNIT_SPRITES[kind] ?? UNIT_SPRITES.villager!, palette, x, y - bob);
+  if (work) drawTool(ctx, x, y - bob, work);
 }
 
 const TREE = [
@@ -174,106 +261,8 @@ export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: 
   }
 }
 
-interface Look {
-  wall: string;
-  roof: string;
-  /** Wall height and roof height in pixels. A roof height of 0 gives a flat top. */
-  h: number;
-  roofH: number;
-}
-
-const LOOKS: Partial<Record<Kind, Look>> = {
-  towncenter: { wall: '#b9a98a', roof: '#8a4a2f', h: 26, roofH: 26 },
-  house: { wall: '#c9b08a', roof: '#9a4a2f', h: 14, roofH: 16 },
-  storehouse: { wall: '#8a6a45', roof: '#5f4326', h: 14, roofH: 9 },
-  barracks: { wall: '#9a8f80', roof: '#5c2e2e', h: 20, roofH: 14 },
-  range: { wall: '#a89070', roof: '#3f6b3a', h: 18, roofH: 14 },
-  stable: { wall: '#a07850', roof: '#b08a3a', h: 18, roofH: 12 },
-  tower: { wall: '#9c9c9c', roof: '#7c7c7c', h: 46, roofH: 0 },
-};
-
-function shade(hex: string, f: number): string {
+export function shade(hex: string, f: number): string {
   const n = parseInt(hex.slice(1), 16);
   const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
   return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
-}
-
-function poly(ctx: Ctx, color: string, pts: number[]): void {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(pts[0], pts[1]);
-  for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
-  ctx.closePath();
-  ctx.fill();
-}
-
-/**
- * Draws a building whose footprint's top corner is at (sx, sy) on screen.
- * `built` is 0..1; unfinished buildings are drawn as a low, see-through shell.
- */
-export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, sx: number, sy: number, built: number): void {
-  const s = DEFS[kind].size ?? 1;
-  const team = PLAYER_COLORS[owner % PLAYER_COLORS.length];
-  const m = kind === 'farm' ? 0.06 : 0.14;
-  const at = (u: number, v: number): [number, number] => [sx + (u - v) * HW, sy + (u + v) * HH];
-  const T = at(m, m);
-  const R = at(s - m, m);
-  const B = at(s - m, s - m);
-  const L = at(m, s - m);
-
-  if (kind === 'farm') {
-    poly(ctx, built < 1 ? '#7a6a4a' : '#8a6a3a', [...T, ...R, ...B, ...L]);
-    ctx.strokeStyle = built < 1 ? '#6a5a3e' : '#b89a4a';
-    ctx.lineWidth = 2;
-    for (let i = 1; i < 6; i++) {
-      const a = at(m + ((s - 2 * m) * i) / 6, m);
-      const b = at(m + ((s - 2 * m) * i) / 6, s - m);
-      ctx.beginPath();
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
-      ctx.stroke();
-    }
-    ctx.fillStyle = team;
-    ctx.fillRect(T[0] - 2, T[1] - 10, 4, 12);
-    return;
-  }
-
-  const look = LOOKS[kind] ?? LOOKS.house!;
-  const done = built >= 1;
-  const h = done ? look.h : Math.max(4, look.h * built);
-  ctx.globalAlpha = done ? 1 : 0.75;
-  shadow(ctx, sx + 6, sy + s * HH + 4, s * HW * 0.9, s * HH * 0.9);
-  poly(ctx, shade(look.wall, 0.72), [...L, ...B, B[0], B[1] - h, L[0], L[1] - h]);
-  poly(ctx, shade(look.wall, 0.92), [...B, ...R, R[0], R[1] - h, B[0], B[1] - h]);
-  const top = [T[0], T[1] - h, R[0], R[1] - h, B[0], B[1] - h, L[0], L[1] - h];
-  if (!done || look.roofH === 0) {
-    poly(ctx, done ? look.roof : shade(look.wall, 1.1), top);
-  } else {
-    const ax = sx;
-    const ay = sy + s * HH - h - look.roofH;
-    poly(ctx, shade(look.roof, 0.8), [top[0], top[1], top[2], top[3], ax, ay]);
-    poly(ctx, shade(look.roof, 0.8), [top[0], top[1], top[6], top[7], ax, ay]);
-    poly(ctx, shade(look.roof, 0.78), [top[6], top[7], top[4], top[5], ax, ay]);
-    poly(ctx, look.roof, [top[4], top[5], top[2], top[3], ax, ay]);
-  }
-  ctx.globalAlpha = 1;
-  if (!done) return;
-
-  // Door on the right wall, and a flag in the owner's colour.
-  if (kind !== 'tower') {
-    const d = at(s - m, s / 2);
-    ctx.fillStyle = '#3a2a1a';
-    ctx.fillRect(d[0] - 4, d[1] - 12, 8, 12);
-  } else {
-    ctx.fillStyle = shade(look.wall, 0.6);
-    for (const [px, py] of [L, B, R]) ctx.fillRect(px - 3, py - h - 5, 6, 5);
-    ctx.fillStyle = '#2a2018';
-    ctx.fillRect(sx + 6, sy + HH - h + 14, 3, 8);
-  }
-  const fx = sx;
-  const fy = sy + s * HH - h - look.roofH;
-  ctx.fillStyle = '#3a2a1a';
-  ctx.fillRect(fx - 1, fy - 16, 2, 16);
-  ctx.fillStyle = team;
-  ctx.fillRect(fx + 1, fy - 16, 10, 7);
 }

@@ -73,10 +73,10 @@ test('building costs resources, gets built, and houses raise the population limi
   const [sx, sy] = s.map.starts[0];
   const p = s.players.get(0)!;
   const ids = owned(s, 0, 'villager').map((e) => e.id);
-  applyCommand(s, 0, { type: 'place', ids, kind: 'house', x: sx + 3, y: sy - 1 });
+  applyCommand(s, 0, { type: 'place', ids, kind: 'house', x: sx - 1, y: sy + 3 });
   assert.equal(p.res.wood, 200 - 30);
   // The same spot is taken now, and nobody can build without the resources.
-  applyCommand(s, 0, { type: 'place', ids, kind: 'house', x: sx + 3, y: sy - 1 });
+  applyCommand(s, 0, { type: 'place', ids, kind: 'house', x: sx - 1, y: sy + 3 });
   assert.equal(owned(s, 0, 'house').length, 1);
   run(s, 200);
   const house = owned(s, 0, 'house')[0];
@@ -135,4 +135,33 @@ test('commands for units of another player are ignored', () => {
   applyCommand(s, 0, { type: 'move', ids: theirs.map((e) => e.id), x: 30, y: 30 });
   run(s, 50);
   assert.deepEqual(theirs.map((e) => [e.x, e.y]), before);
+});
+
+test('a king shelters in the castle, cannot be attacked there, and comes out when told or when it falls', () => {
+  const s = createGame(21);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  const king = owned(s, 0, 'king')[0];
+  const castle = owned(s, 0, 'castle')[0];
+  applyCommand(s, 0, { type: 'interact', ids: [king.id], target: castle.id });
+  run(s, 100);
+  assert.equal(king.inside, castle.id);
+  const raider = spawn(s, 1, 'swordsman', castle.x - 1, castle.y + 4);
+  applyCommand(s, 1, { type: 'interact', ids: [raider.id], target: king.id });
+  run(s, 30);
+  assert.equal(king.hp, DEFS.king.hp);
+  s.entities.delete(raider.id);
+  applyCommand(s, 0, { type: 'eject', building: castle.id });
+  assert.equal(king.inside, -1);
+  assert.ok(isWalkable(s.map, Math.floor(king.x), Math.floor(king.y)));
+  applyCommand(s, 0, { type: 'interact', ids: [king.id], target: castle.id });
+  run(s, 100);
+  assert.equal(king.inside, castle.id);
+  castle.hp = 1;
+  const second = spawn(s, 1, 'swordsman', castle.x - 1, castle.y + 4);
+  applyCommand(s, 1, { type: 'interact', ids: [second.id], target: castle.id });
+  run(s, 40);
+  assert.equal(s.entities.has(castle.id), false);
+  assert.equal(king.inside, -1);
+  assert.equal(s.players.get(0)!.defeated, false);
 });

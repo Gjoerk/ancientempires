@@ -1,7 +1,7 @@
-import { DEFS, KINDS } from './defs';
+import { DEFS, KINDS, RESOURCES } from './defs';
 import { MAX_PLAYERS } from './map';
 import type { EntitySnapshot, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
-import { activityOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
+import { activityOf, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
 
 /**
  * The authoritative game for one room. It knows nothing about networking:
@@ -55,10 +55,13 @@ export class GameHost {
     const ents: EntitySnapshot[] = [];
     const queues: QueueSnapshot[] = [];
     for (const e of s.entities.values()) {
+      if (e.inside >= 0) continue;
       const building = DEFS[e.kind].building;
+      const [task, target] = building ? [e.kind === 'castle' && hasKingInside(s, e) ? 1 : 0, 0] : taskOf(e);
       ents.push([
         e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
-        building ? Math.floor(e.progress * 100) : e.carry,
+        building ? Math.floor(e.progress * 100) : e.carry + 100 * RESOURCES.indexOf(e.carryRes),
+        task, target,
       ]);
       if (e.queue.length > 0) {
         const pct = Math.floor((e.trainTicks / (DEFS[e.queue[0]].time * TICK_RATE)) * 100);

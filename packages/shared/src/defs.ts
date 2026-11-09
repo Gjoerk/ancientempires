@@ -5,7 +5,7 @@ export type Cost = Partial<Record<Res, number>>;
 /** Every unit and building type. The index in this list is what goes over the wire. */
 export const KINDS = [
   'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider',
-  'towncenter', 'house', 'storehouse', 'farm', 'barracks', 'range', 'stable', 'tower',
+  'towncenter', 'house', 'storehouse', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
@@ -75,10 +75,14 @@ export const DEFS: Record<Kind, KindDef> = {
     label: 'Watchtower', building: true, hp: 400, cost: { stone: 100, wood: 25 }, time: 25, size: 1, armor: 3,
     attack: 6, range: 7, cooldown: 2,
   },
+  castle: {
+    label: 'Castle', building: true, hp: 1500, cost: { stone: 450, wood: 200 }, time: 90, size: 4, armor: 4,
+    attack: 7, range: 7, cooldown: 2,
+  },
 };
 
 /** Buildings a villager can construct, in menu order. */
-export const BUILDABLE: Kind[] = ['house', 'farm', 'storehouse', 'barracks', 'range', 'stable', 'tower', 'towncenter'];
+export const BUILDABLE: Kind[] = ['house', 'farm', 'storehouse', 'barracks', 'range', 'stable', 'tower', 'towncenter', 'castle'];
 
 export const POP_MAX = 60;
 export const CARRY_CAPACITY = 10;

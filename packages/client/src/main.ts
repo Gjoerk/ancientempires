@@ -17,7 +17,8 @@ import {
   TILE_RESOURCE,
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
-import { drawBuilding, drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
+import { drawBuilding } from './buildings';
+import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
 
 interface View {
   id: number;
@@ -26,8 +27,14 @@ interface View {
   hp: number;
   /** 0 idle, 1 moving, 2 working, 3 fighting. */
   act: number;
-  /** Resources carried (units) or construction progress 0-100 (buildings). */
+  /** Units: carried amount + 100 * resource index. Buildings: construction progress 0-100. */
   extra: number;
+  /** What a unit is working on (see taskOf in the rules); 1 for a castle with a king inside. */
+  task: number;
+  target: number;
+  /** Visual offset in tiles that moves a working unit up to its work. */
+  ox: number;
+  oy: number;
   // Position at the previous snapshot and at the latest one, for interpolation.
   px: number;
   py: number;
@@ -66,9 +73,11 @@ let snapTime = 0;
 let centred = false;
 const cam = { x: 0, y: 0 };
 const keys = new Set<string>();
-const mouse = { x: 0, y: 0, inside: false };
+const mouse = { x: 0, y: 0, inside: false, onMap: false };
 let drag: { x: number; y: number } | undefined;
 let marker: { x: number; y: number; t: number } | undefined;
+/** Resource tile that was just targeted, outlined for a moment. */
+let tileFlash: { tile: number; t: number } | undefined;
 /** Building kind the player is about to place, if any. */
 let placing: Kind | undefined;
 
@@ -97,6 +106,47 @@ function screenToTile(sx: number, sy: number): [number, number] {
 
 function viewPos(v: View, alpha: number): [number, number] {
   return [v.px + (v.x - v.px) * alpha, v.py + (v.y - v.py) * alpha];
+}
+
+/** Where a unit is drawn right now, on screen. */
+function unitScreen(v: View): [number, number] {
+  return tileToScreen(v.x + v.ox, v.y + v.oy);
+}
+
+/** The point in tile units a working unit is busy at, if any. */
+function workSpot(v: View, now: number): [number, number] | undefined {
+  if (!map || v.task === 0 || isBuilding(v.kind)) return undefined;
+  if (v.task <= 4) return [(v.target % map.size) + 0.5, Math.floor(v.target / map.size) + 0.5];
+  const b = views.get(v.target);
+  if (!b) return undefined;
+  const s = sizeOf(b.kind);
+  if (v.task === 5) {
+    // Farmers wander slowly around their field.
+    return [b.x + s / 2 + Math.cos(now / 5000 + v.id) * 0.55, b.y + s / 2 + Math.sin(now / 3700 + v.id * 2) * 0.55];
+  }
+  return [Math.max(b.x, Math.min(b.x + s, v.x)), Math.max(b.y, Math.min(b.y + s, v.y))];
+}
+
+/** Eases working units towards their work so they do not stand a tile away from it. */
+function updateWorkOffsets(now: number, dt: number): void {
+  const k = 1 - Math.exp(-dt * 7);
+  for (const v of views.values()) {
+    let gx = 0;
+    let gy = 0;
+    const spot = workSpot(v, now);
+    if (spot) {
+      const dx = spot[0] - v.x;
+      const dy = spot[1] - v.y;
+      const d = Math.hypot(dx, dy);
+      const keep = v.task === 5 ? 0 : v.task === 6 ? 0.1 : 0.58;
+      if (d > keep) {
+        gx = (dx * (d - keep)) / d;
+        gy = (dy * (d - keep)) / d;
+      }
+    }
+    v.ox += (gx - v.ox) * k;
+    v.oy += (gy - v.oy) * k;
+  }
 }
 
 /** Centre of an entity in tile units. */
@@ -212,15 +262,15 @@ function onMessage(msg: ServerMessage): void {
     const now = performance.now();
     const alpha = Math.min(1, (now - snapTime) / TICK_MS);
     const seen = new Set<number>();
-    for (const [id, owner, kindIdx, x, y, hp, act, extra] of msg.ents) {
+    for (const [id, owner, kindIdx, x, y, hp, act, extra, task, target] of msg.ents) {
       seen.add(id);
       const v = views.get(id);
       if (v) {
         // Continue from wherever the unit is currently drawn, so motion stays smooth.
         [v.px, v.py] = viewPos(v, alpha);
-        Object.assign(v, { x, y, hp, act, extra });
+        Object.assign(v, { x, y, hp, act, extra, task, target });
       } else {
-        const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, px: x, py: y, x, y };
+        const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, px: x, py: y, x, y };
         views.set(id, created);
         setBlocked(created, 1);
       }
@@ -306,7 +356,7 @@ function unitAt(sx: number, sy: number): View | undefined {
   let bestD = 18;
   for (const v of views.values()) {
     if (isBuilding(v.kind)) continue;
-    const [x, y] = tileToScreen(v.x, v.y);
+    const [x, y] = unitScreen(v);
     const d = Math.hypot(x - sx, y - 10 - sy);
     if (d < bestD) {
       bestD = d;
@@ -368,8 +418,11 @@ function rightClick(sx: number, sy: number): void {
     return;
   }
   const tile = resourceTileAt(sx, sy);
-  if (tile >= 0) send({ type: 'gather', ids, tile });
-  else send({ type: 'move', ids, x: tx, y: ty });
+  if (tile >= 0) {
+    send({ type: 'gather', ids, tile });
+    tileFlash = { tile, t: performance.now() };
+    marker = undefined;
+  } else send({ type: 'move', ids, x: tx, y: ty });
 }
 
 canvas.addEventListener('mousedown', (ev) => {
@@ -406,7 +459,7 @@ window.addEventListener('mouseup', (ev) => {
   }
   for (const v of views.values()) {
     if (v.owner !== me || isBuilding(v.kind)) continue;
-    const [x, y] = tileToScreen(v.x, v.y);
+    const [x, y] = unitScreen(v);
     if (x >= box.x0 && x <= box.x1 && y - 10 >= box.y0 && y - 10 <= box.y1) selected.add(v.id);
   }
 });
@@ -426,6 +479,7 @@ window.addEventListener('mousemove', (ev) => {
   mouse.x = ev.clientX;
   mouse.y = ev.clientY;
   mouse.inside = true;
+  mouse.onMap = ev.target === canvas;
 });
 document.addEventListener('mouseleave', () => (mouse.inside = false));
 canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
@@ -451,7 +505,8 @@ window.addEventListener('blur', () => keys.clear());
 $('actions').addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
   if (!button) return;
-  const { build, train, cancel } = button.dataset;
+  const { build, train, cancel, eject } = button.dataset;
+  if (eject) send({ type: 'eject', building: Number(eject) });
   if (build) placing = build as Kind;
   if (train) send({ type: 'train', building: Number(button.dataset.at), kind: train as Kind });
   if (cancel) send({ type: 'cancel', building: Number(cancel) });
@@ -500,7 +555,11 @@ function renderPanel(): void {
     const ownerName = v.owner === me ? '' : ` · ${roster.find((p) => p.slot === v.owner)?.name ?? 'enemy'}`;
     info = `${def.label}${ownerName} · HP ${v.hp}/${def.hp}`;
     if (isBuilding(v.kind) && v.extra < 100) info += ` · under construction ${v.extra}%`;
-    else if (!isBuilding(v.kind) && v.extra > 0) info += ` · carrying ${v.extra}`;
+    else if (!isBuilding(v.kind) && v.extra % 100 > 0) info += ` · carrying ${v.extra % 100} ${RESOURCES[Math.floor(v.extra / 100)]}`;
+    if (v.kind === 'castle' && v.extra >= 100) {
+      info += v.task === 1 ? ' · the king is inside' : v.owner === me ? ' · right-click it with your king to shelter him' : '';
+      if (v.task === 1 && v.owner === me) buttons.push({ label: 'Send king out', data: { eject: String(v.id) } });
+    }
     const queue = queues.get(v.id);
     if (queue) info += ` · training ${DEFS[KINDS[queue[1]]].label} ${queue[0]}%${queue.length > 2 ? ` (+${queue.length - 2} queued)` : ''}`;
     if (v.owner === me && isBuilding(v.kind) && v.extra >= 100) {
@@ -632,8 +691,10 @@ function drawBuildingView(v: View): void {
     ctx.lineWidth = 2;
     ctx.stroke();
   }
-  drawBuilding(ctx, v.kind, v.owner, sx, sy, v.extra / 100);
-  const top = sy - 14;
+  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: v.task === 1, now: performance.now() });
+  if (v.kind === 'farm' && v.extra >= 100 && v.hp >= def.hp && !selected.has(v.id)) return;
+  // Bars sit above the roof line of tall buildings.
+  const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);
   if (v.extra < 100) bar(sx, top, 14 + s * 12, v.extra / 100, '#e0c12f');
   else if (v.hp < def.hp || selected.has(v.id)) bar(sx, top, 14 + s * 12, v.hp / def.hp, '#4ad04a');
   const queue = queues.get(v.id);
@@ -641,7 +702,7 @@ function drawBuildingView(v: View): void {
 }
 
 function drawUnitView(v: View, x: number, y: number, now: number): void {
-  const [sx, sy] = tileToScreen(x, y);
+  const [sx, sy] = tileToScreen(x + v.ox, y + v.oy);
   const def = DEFS[v.kind];
   if (selected.has(v.id)) {
     ctx.strokeStyle = '#fff';
@@ -652,7 +713,15 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   }
   // Walking bobs up and down; working and fighting are a quicker, smaller motion.
   const bob = v.act === 1 ? Math.abs(Math.sin(now / 90 + v.id)) * 2 : v.act >= 2 ? Math.abs(Math.sin(now / 60 + v.id)) * 1.5 : 0;
-  drawUnit(ctx, v.kind, v.owner, sx, sy, bob);
+  const spot = workSpot(v, now);
+  let work;
+  if (spot && v.act === 2) {
+    const dir = v.task === 5 ? (Math.floor(now / 2600 + v.id) % 2 ? 1 : -1) : tileToScreen(spot[0], spot[1])[0] >= sx ? 1 : -1;
+    const period = v.task === 2 ? 900 : 700;
+    work = { task: v.task, dir, phase: ((now + v.id * 137) % period) / period };
+  }
+  const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) : -1;
+  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried);
   if (v.hp < def.hp || selected.has(v.id)) bar(sx, sy - (v.kind === 'king' ? 34 : 30), 22, v.hp / def.hp, '#4ad04a');
 }
 
@@ -665,6 +734,7 @@ function frame(now: number): void {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!map || !terrain || me < 0) return;
   updateCamera(dt);
+  updateWorkOffsets(now, dt);
 
   const [ox, oy] = worldToScreen(-map.size * HW, 0);
   ctx.drawImage(terrain, Math.round(ox), Math.round(oy));
@@ -690,6 +760,24 @@ function frame(now: number): void {
     }
   }
 
+  // Resource tiles are outlined when pointed at, and flash when villagers are sent there.
+  const outline = (tile: number, color: string, width: number) => {
+    diamond(tile % map!.size, Math.floor(tile / map!.size), 1);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  };
+  const hovered = mouse.onMap && !placing && !drag ? resourceTileAt(mouse.x, mouse.y) : -1;
+  if (hovered >= 0) outline(hovered, ownSelectedUnits().some((v) => v.kind === 'villager') ? '#ffe45c' : 'rgba(255,255,255,.75)', 2);
+  if (tileFlash) {
+    const age = (now - tileFlash.t) / 900;
+    if (age > 1 || !props.has(tileFlash.tile)) tileFlash = undefined;
+    else outline(tileFlash.tile, `rgba(255,228,92,${1 - age * age})`, 2 + 2 * Math.abs(Math.sin(age * Math.PI * 3)));
+  }
+
+  // Fields lie flat on the ground, so they are drawn before anything that stands.
+  for (const v of views.values()) if (v.kind === 'farm') drawBuildingView(v);
+
   // Everything standing on the ground shares one depth-sorted pass.
   const alpha = Math.min(1, (now - snapTime) / TICK_MS);
   const drawables: { depth: number; draw: () => void }[] = [];
@@ -701,11 +789,12 @@ function frame(now: number): void {
     drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 3)) });
   }
   for (const v of views.values()) {
+    if (v.kind === 'farm') continue;
     if (isBuilding(v.kind)) {
       drawables.push({ depth: v.x + v.y + sizeOf(v.kind), draw: () => drawBuildingView(v) });
     } else {
       const [x, y] = viewPos(v, alpha);
-      drawables.push({ depth: x + y, draw: () => drawUnitView(v, x, y, now) });
+      drawables.push({ depth: x + v.ox + y + v.oy, draw: () => drawUnitView(v, x, y, now) });
     }
   }
   drawables.sort((a, b) => a.depth - b.depth);
@@ -742,5 +831,5 @@ requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __game: { views, players, props, queues, cam, tileToScreen, getMap: () => map, getMe: () => me } });
+  Object.assign(window, { __game: { views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me } });
 }
