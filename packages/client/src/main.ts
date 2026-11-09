@@ -163,7 +163,8 @@ function unitScreen(v: View): [number, number] {
 
 /** The point in tile units a working unit is busy at, if any. */
 function workSpot(v: View, now: number): [number, number] | undefined {
-  if (!map || v.task === 0 || isBuilding(v.kind)) return undefined;
+  // Only real work (tasks 1-6) pulls a unit towards a spot; an attacker walks there itself.
+  if (!map || v.task === 0 || v.task > 6 || isBuilding(v.kind)) return undefined;
   if (v.task <= 4) return [(v.target % map.size) + 0.5, Math.floor(v.target / map.size) + 0.5];
   const b = views.get(v.target);
   if (!b) return undefined;
@@ -1168,7 +1169,7 @@ function drawImpact(x: number, y: number, k: number): void {
   ctx.stroke();
 }
 
-/** Marks what is being attacked: a red square around a unit, a red outline around a building. */
+/** Marks what is being attacked: a red ring under a unit's feet, a red outline around a building. */
 function drawTargetMark(v: View, alpha: number, width: number): void {
   ctx.strokeStyle = `rgba(255,60,50,${alpha})`;
   ctx.lineWidth = width;
@@ -1179,8 +1180,9 @@ function drawTargetMark(v: View, alpha: number, width: number): void {
   }
   const [x, y] = unitScreen(v);
   const big = v.kind === 'rider' || v.kind === 'ram';
-  const w = big ? 34 : 26;
-  ctx.strokeRect(Math.round(x - w / 2) + 0.5, Math.round(y - 30) + 0.5, w, 34);
+  ctx.beginPath();
+  ctx.ellipse(x, y, big ? 17 : 13, big ? 8.5 : 6.5, 0, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function drawUnitView(v: View, x: number, y: number, now: number): void {
@@ -1285,6 +1287,25 @@ function frame(now: number): void {
     else outline(tileFlash.tile, `rgba(255,228,92,${1 - age * age})`, 2 + 2 * Math.abs(Math.sin(age * Math.PI * 3)));
   }
 
+  // Red rings on the ground under whatever the selected units are attacking, were just sent
+  // to attack, or would attack. Drawn before the units so the ring lies under their feet.
+  const marked = new Set<number>();
+  for (const v of ownSelectedUnits()) if (v.task === 7) marked.add(v.target);
+  for (const id of marked) {
+    const t = views.get(id);
+    if (t && canSee(t)) drawTargetMark(t, 0.85, 2);
+  }
+  if (attackFlash) {
+    const age = (now - attackFlash.t) / 800;
+    const t = views.get(attackFlash.id);
+    if (age > 1 || !t) attackFlash = undefined;
+    else if (canSee(t)) drawTargetMark(t, 1 - age * 0.5, 2 + 3 * Math.abs(Math.sin(age * Math.PI * 3)));
+  }
+  if (mouse.onMap && !placing && !drag && ownSelectedUnits().some((v) => DEFS[v.kind].attack)) {
+    const over = unitAt(mouse.x, mouse.y) ?? buildingAt(mouse.x, mouse.y);
+    if (over && over.owner !== me && !marked.has(over.id)) drawTargetMark(over, 0.6, 1.5);
+  }
+
   // Fields lie flat on the ground, so they are drawn before anything that stands.
   const shown = [...views.values()].filter(canSee);
   for (const [id, ghost] of remembered) if (!shown.some((v) => v.id === id)) shown.push(ghost);
@@ -1345,24 +1366,6 @@ function frame(now: number): void {
   }
 
   drawFog();
-
-  // Red marks on whatever the selected units are attacking, were just sent to attack, or would attack.
-  const marked = new Set<number>();
-  for (const v of ownSelectedUnits()) if (v.task === 7) marked.add(v.target);
-  for (const id of marked) {
-    const t = views.get(id);
-    if (t && canSee(t)) drawTargetMark(t, 0.85, 2);
-  }
-  if (attackFlash) {
-    const age = (now - attackFlash.t) / 800;
-    const t = views.get(attackFlash.id);
-    if (age > 1 || !t) attackFlash = undefined;
-    else if (canSee(t)) drawTargetMark(t, 1 - age * 0.5, 2 + 3 * Math.abs(Math.sin(age * Math.PI * 3)));
-  }
-  if (mouse.onMap && !placing && !drag && ownSelectedUnits().some((v) => DEFS[v.kind].attack)) {
-    const over = unitAt(mouse.x, mouse.y) ?? buildingAt(mouse.x, mouse.y);
-    if (over && over.owner !== me && !marked.has(over.id)) drawTargetMark(over, 0.6, 1.5);
-  }
 
   if (drag && (Math.abs(mouse.x - drag.x) > 4 || Math.abs(mouse.y - drag.y) > 4)) {
     ctx.strokeStyle = '#fff';

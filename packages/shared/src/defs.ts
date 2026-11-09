@@ -42,7 +42,8 @@ export interface KindDef {
   dropoff?: boolean;
 }
 
-const MELEE = 1.5;
+/** Melee fighters must stand right next to their target. */
+const MELEE = 1.0;
 
 export const DEFS: Record<Kind, KindDef> = {
   villager: { label: 'Villager', hp: 25, cost: { food: 50 }, time: 12, speed: 2.2, attack: 3, range: MELEE, cooldown: 1.5, sight: 5 },
