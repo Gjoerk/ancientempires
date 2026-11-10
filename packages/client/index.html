@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Kingsfall</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya:wght@500;700&family=Cinzel:wght@600;700&family=Cormorant+Garamond:wght@500;700&family=IM+Fell+English&family=MedievalSharp&family=UnifrakturMaguntia&display=swap">
   <style>
     /* Carved oak: dark wood, gold trim. Everything below is styled through these variables. */
     body {
@@ -66,6 +69,51 @@
     #menu[hidden], #host-tools[hidden] { display: none; }
     #host-tools { display: grid; gap: 6px; }
 
+    /* Numbers always use full-height, even-width digits, whatever the font, so amounts are easy to read. */
+    .stat b, .res, .st, #hpbar span, #d-cost, #d-stats, #queue, #sel-sub, .stat small { font-variant-numeric: lining-nums tabular-nums;
+      font-family: var(--num-font, var(--font)); }
+
+    /* ---------- Skins for layout A: button style and lettering. body[data-skin] picks one. ---------- */
+    /* 1 Gilded: carved wood with a double gold frame; engraved capitals. */
+    body[data-skin="1"] { --num-font: Cinzel, Georgia, serif; --font: "Cormorant Garamond", Georgia, serif; --title-font: Cinzel, "Times New Roman", serif;
+      --btn: linear-gradient(180deg, #6e4b2a, #3f2915); --btn-edge: #c79a3a; --btn-ink: #fbeecb;
+      --btn-hi: rgba(255, 220, 150, .35); --btn-lo: rgba(0, 0, 0, .55); font-weight: 600; font-size: 16px; }
+    body[data-skin="1"] button { box-shadow: inset 0 0 0 1px #2a1a0a, inset 0 0 0 2px rgba(240, 200, 90, .55), inset 0 -3px 0 rgba(0, 0, 0, .4); }
+    body[data-skin="1"] #actions button { border-radius: 3px; }
+    body[data-skin="1"] #actions button:hover { filter: none; box-shadow: inset 0 0 0 1px #2a1a0a, inset 0 0 0 2px #ffe08a, 0 0 8px rgba(255, 200, 80, .55); }
+    body[data-skin="1"] #actions button.focus { outline: 2px solid #ffe08a; outline-offset: 1px; }
+    body[data-skin="1"] #sel-name, body[data-skin="1"] #d-title { letter-spacing: .04em; font-weight: 700; }
+    body[data-skin="1"] #d-body { font-size: 15px; line-height: 1.3; }
+
+    /* 2 Forged iron: hammered steel plates with rivets; hand-lettered names. */
+    body[data-skin="2"] { --font: Alegreya, Georgia, serif; --title-font: MedievalSharp, Georgia, serif;
+      --btn: linear-gradient(160deg, #8d939b, #5b6067 45%, #3e4247); --btn-edge: #1a1c1f; --btn-ink: #f4f1ea;
+      --btn-hi: rgba(255, 255, 255, .45); --btn-lo: rgba(0, 0, 0, .6); --accent: #f2c25a; }
+    body[data-skin="2"] button { border-radius: 2px; text-shadow: 0 1px 1px #000; }
+    body[data-skin="2"] #actions button { border-radius: 2px;
+      background:
+        radial-gradient(circle at 5px 5px, #d8dbe0 0 1.4px, #2b2e32 1.8px, transparent 2.4px),
+        radial-gradient(circle at calc(100% - 5px) 5px, #d8dbe0 0 1.4px, #2b2e32 1.8px, transparent 2.4px),
+        radial-gradient(circle at 5px calc(100% - 5px), #d8dbe0 0 1.4px, #2b2e32 1.8px, transparent 2.4px),
+        radial-gradient(circle at calc(100% - 5px) calc(100% - 5px), #d8dbe0 0 1.4px, #2b2e32 1.8px, transparent 2.4px),
+        radial-gradient(ellipse at 30% 20%, rgba(255, 255, 255, .18), transparent 60%), var(--btn);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -2px 0 rgba(0, 0, 0, .55), 0 2px 3px rgba(0, 0, 0, .6); }
+    body[data-skin="2"] #actions button:hover { filter: brightness(1.18); }
+    body[data-skin="2"] #actions button.focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    body[data-skin="2"] #sel-name, body[data-skin="2"] #d-title { font-size: 19px; }
+
+    /* 3 Illuminated manuscript: parchment tiles with red ink and gold; blackletter names. */
+    body[data-skin="3"] { --num-font: Alegreya, Georgia, serif; --font: "IM Fell English", Georgia, serif; --title-font: UnifrakturMaguntia, "IM Fell English", serif;
+      --btn: linear-gradient(180deg, #f6ecd2, #e2cf9f); --btn-edge: #8c2f1b; --btn-ink: #3a2410;
+      --btn-hi: rgba(255, 255, 255, .7); --btn-lo: rgba(120, 80, 30, .35); --accent: #f0c046; }
+    body[data-skin="3"] button { box-shadow: inset 0 0 0 1px #f6ecd2, inset 0 0 0 2px #c79a3a, inset 0 -2px 0 rgba(120, 80, 30, .35); }
+    body[data-skin="3"] #actions button { border-radius: 2px; border-width: 2px; }
+    body[data-skin="3"] #actions button:hover { filter: none; background: linear-gradient(180deg, #fff6df, #ecdcb0); }
+    body[data-skin="3"] #actions button.focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    body[data-skin="3"] #sel-name, body[data-skin="3"] #d-title { font-size: 22px; letter-spacing: .02em; }
+    body[data-skin="3"] #d-body { font-size: 14px; }
+    body[data-skin="3"] #d-title::first-letter, body[data-skin="3"] #sel-name::first-letter { color: #e0503a; }
+
     /* ---------- Bottom bar ----------------------------------------------------------------------
        The same pieces in every layout: a selection card (#sel), the command buttons (#actions),
        a details box (#details) and the minimap. body[data-bar] arranges them. */
@@ -80,6 +128,7 @@
     #portrait { flex: none; width: 84px; height: 84px; background: rgba(0, 0, 0, .3); border: 2px solid var(--edge);
       box-shadow: inset 0 0 0 1px var(--trim); border-radius: 4px; }
     #sel-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    #sel-name, #d-title, .card h1, #help h2, #banner { font-family: var(--title-font, var(--font)); }
     #sel-name { font-size: 18px; line-height: 21px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #sel-sub { font-size: 12.5px; line-height: 15px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 15px; }
     #hpbar { position: relative; height: 15px; background: #2a0c0c; border: 1px solid #000; border-radius: 3px; overflow: hidden; flex: none; }

@@ -1990,6 +1990,9 @@ function frame(now: number): void {
 document.documentElement.style.setProperty('--lock-icon', `url(${icon('lock')})`);
 document.body.dataset.bar = ['a', 'b', 'c'].includes(new URLSearchParams(location.search).get('bar') ?? '') ? new URLSearchParams(location.search).get('bar')! : 'a';
 
+// Button style and lettering, for choosing between the skins: ?skin=1, 2 or 3.
+document.body.dataset.skin = ['1', '2', '3'].includes(new URLSearchParams(location.search).get('skin') ?? '') ? new URLSearchParams(location.search).get('skin')! : '1';
+
 void loadSprites().then(() => {
   // Icons may come from the sprite pack, so draw them again once it is in.
   clearIcons();
