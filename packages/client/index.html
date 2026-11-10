@@ -6,7 +6,7 @@
   <title>Kingsfall</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600&family=PT+Sans:wght@400;700&family=Source+Sans+3:wght@400;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap">
   <style>
     /* Carved oak: dark wood, gold trim. Everything below is styled through these variables. */
     body {
@@ -73,7 +73,7 @@
     .stat b, .res, .st, #hpbar span, #d-cost, #d-stats, #queue, #sel-sub, .stat small { font-variant-numeric: lining-nums tabular-nums;
       font-family: var(--num-font, var(--font)); }
 
-    /* ---------- Skins for layout A: calm, readable, buttons that sit in the panel. body[data-skin] picks one. ---------- */
+    /* ---------- Lettering and buttons: a plain readable font, buttons recessed into the panel. ---------- */
     body[data-skin] { --title-font: var(--font); --num-font: var(--font); font-variant: normal; }
     body[data-skin] #sel-name, body[data-skin] #d-title { font-weight: 600; letter-spacing: 0; }
     body[data-skin] #d-body { font-size: 14px; line-height: 1.4; }
@@ -81,19 +81,9 @@
     body[data-skin] #actions button { border-radius: 4px; transition: background-color .12s, box-shadow .12s, border-color .12s; }
     body[data-skin] #actions button:active { transform: none; }
 
-    /* 1 Flush: slightly darker squares, no frame. */
-    body[data-skin="1"] { --font: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-size: 15px; }
-    body[data-skin="1"] #actions button { background: rgba(0, 0, 0, .32); border: 0; box-shadow: inset 0 1px 0 rgba(255, 230, 180, .06); }
-    body[data-skin="1"] #actions button:hover { filter: none; background: rgba(255, 220, 160, .1); }
-    body[data-skin="1"] #actions button.focus { outline: 0; background: rgba(255, 220, 160, .12); box-shadow: inset 0 -2px 0 var(--accent); }
 
-    /* 2 Outline: see-through with a faint line around. */
-    body[data-skin="2"] { --font: "Fira Sans", "Segoe UI", system-ui, sans-serif; font-size: 14.5px; }
-    body[data-skin="2"] #actions button { background: transparent; border: 1px solid rgba(220, 180, 110, .22); box-shadow: none; }
-    body[data-skin="2"] #actions button:hover { filter: none; background: rgba(255, 220, 160, .06); border-color: rgba(240, 200, 120, .55); }
-    body[data-skin="2"] #actions button.focus { outline: 0; border-color: var(--accent); background: rgba(240, 192, 70, .08); }
 
-    /* 3 Recessed: slots pressed into the panel that lift a little when pointed at. */
+    /* Buttons are slots pressed into the panel that lift a little when pointed at. */
     body[data-skin="3"] { --font: "PT Sans", "Segoe UI", system-ui, sans-serif; font-size: 15px; }
     body[data-skin="3"] #actions button { background: #1d130b; border: 0;
       box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 rgba(255, 220, 160, .08); }
@@ -104,8 +94,7 @@
     body[data-skin] button:not(#actions button):not(#group button) { box-shadow: inset 0 1px 0 rgba(255, 220, 150, .15); }
 
     /* ---------- Bottom bar ----------------------------------------------------------------------
-       The same pieces in every layout: a selection card (#sel), the command buttons (#actions),
-       a details box (#details) and the minimap. body[data-bar] arranges them. */
+       Command tiles (#actions), the selection card (#sel), a details box (#details) and the minimap. */
     #bottom { bottom: 0; height: var(--bar-h, 236px); display: grid; gap: 10px; padding: 8px 10px; box-sizing: border-box;
       border: 9px solid transparent; border-bottom-width: 7px;
       background: linear-gradient(var(--plain), var(--plain)) padding-box, var(--bar) border-box;
@@ -163,7 +152,7 @@
     #map-frame { grid-area: map; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
     #minimap { width: var(--map-w, 300px); height: calc(var(--map-w, 300px) / 2); cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
 
-    /* A — Command board: square command tiles on the left, the selection in the middle, details, then the map. */
+    /* Square command tiles on the left, the selection in the middle, details, then the map. */
     body[data-bar="a"] #bottom { --bar-h: 236px; --map-w: 300px;
       grid-template-columns: auto minmax(230px, 290px) minmax(220px, 1fr) auto; grid-template-areas: "actions sel details map"; }
     body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(6, 58px); grid-auto-rows: 58px; gap: 4px; }
@@ -178,54 +167,9 @@
     body[data-bar="a"] #sel > .head { display: flex; gap: 10px; }
     body[data-bar="a"] #portrait { width: 64px; height: 64px; }
 
-    /* B — Ledger: the selection as a narrow column, labelled buttons in the middle, a tall details page, the map. */
-    body[data-bar="b"] #bottom { --bar-h: 248px; --map-w: 280px;
-      grid-template-columns: 172px minmax(300px, 1fr) minmax(220px, 270px) auto; grid-template-areas: "sel actions details map"; }
-    body[data-bar="b"] #actions { padding: 4px; }
-    body[data-bar="b"] #sel { flex-direction: column; align-items: stretch; gap: 5px; }
-    body[data-bar="b"] #sel > .head { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
-    body[data-bar="b"] #portrait { width: 70px; height: 70px; }
-    body[data-bar="b"] #sel-stats, body[data-bar="b"] #queue { justify-content: center; }
     /* 64px = 2 + 2 + icon 26 + name 14 + cost 16 + 2 + 2: three full rows fit. */
-    body[data-bar="b"] #actions button { width: 84px; height: 64px; padding: 2px 3px 2px; }
-    body[data-bar="b"] #actions button img.pic { width: 26px; height: 26px; }
-    body[data-bar="b"] #details { background: linear-gradient(180deg, rgba(0, 0, 0, .22), rgba(0, 0, 0, .34)); }
 
-    /* C — Royal desk: a ribbon with the selection across the top, round medallion buttons, a parchment scroll, a gilded map. */
-    body[data-bar="c"] #bottom { --bar-h: 252px; --map-w: 300px; grid-template-columns: minmax(0, 1fr) minmax(240px, 330px) auto;
-      grid-template-rows: 58px minmax(0, 1fr); grid-template-areas: "sel sel map" "actions details map"; }
-    body[data-bar="c"] #sel { flex-direction: row; align-items: center; padding: 4px 10px;
-      background: linear-gradient(180deg, #5a1f1a, #3d1410); border-color: #1c0a07; box-shadow: inset 0 1px 0 rgba(255, 190, 140, .25), 0 0 0 1px var(--trim); }
-    body[data-bar="c"] #sel > .head { display: flex; align-items: center; gap: 10px; flex: none; width: 300px; }
-    body[data-bar="c"] #portrait { width: 46px; height: 46px; }
-    body[data-bar="c"] #sel-text { gap: 2px; }
-    body[data-bar="c"] #sel-name { font-size: 16px; line-height: 19px; }
-    body[data-bar="c"] #sel-sub { display: none; }
-    body[data-bar="c"] #hpbar { width: 100%; }
-    body[data-bar="c"] #sel-stats { align-items: center; margin-left: 14px; font-size: 14px; }
-    body[data-bar="c"] #queue, body[data-bar="c"] #group { margin-left: auto; flex-wrap: nowrap; }
-    body[data-bar="c"] #actions { background: none; box-shadow: none; border: 0; padding: 2px 0; gap: 6px; }
     /* 70px = 2 + icon disc 36 + 2 + name 14 + cost 16, with no box drawn around it: two full rows fit. */
-    body[data-bar="c"] #actions button { width: 74px; height: 70px; padding: 2px 0 0; background: none; border: 0; box-shadow: none; color: var(--ink); }
-    body[data-bar="c"] #actions button img.pic { width: 36px; height: 36px; padding: 3px; box-sizing: border-box; border-radius: 50%; margin-bottom: 2px;
-      background: radial-gradient(circle at 50% 35%, #7a5634, #3a2614); border: 2px solid var(--trim); box-shadow: 0 2px 3px rgba(0, 0, 0, .6), inset 0 0 0 1px #1c120a; }
-    body[data-bar="c"] #actions button:hover img.pic { border-color: #ffe08a; }
-    body[data-bar="c"] #actions button.focus { outline: none; }
-    body[data-bar="c"] #actions button.focus img.pic { border-color: #fff3c0; box-shadow: 0 0 0 2px var(--accent), 0 2px 3px rgba(0, 0, 0, .6); }
-    body[data-bar="c"] #details { color: #3a2610; border: 0; border-radius: 2px; padding: 10px 18px;
-      background: radial-gradient(ellipse at 50% 40%, #f6ead0, #e6d1a3 70%, #d3b57c);
-      box-shadow: inset 0 0 18px rgba(120, 80, 30, .45), 0 2px 6px rgba(0, 0, 0, .5); position: relative; }
-    body[data-bar="c"] #details::before, body[data-bar="c"] #details::after { content: ""; position: absolute; left: 0; right: 0; height: 9px;
-      background: linear-gradient(180deg, #b98f4e, #f1dfb4 45%, #9a7238); border-radius: 5px; }
-    body[data-bar="c"] #details::before { top: 0; }
-    body[data-bar="c"] #details::after { bottom: 0; }
-    body[data-bar="c"] #d-title { color: #7a1f12; }
-    body[data-bar="c"] #d-stats { color: #6a4e2a; }
-    body[data-bar="c"] #d-body p.warn { color: #a3221a; }
-    body[data-bar="c"] #details .res img { background: none; }
-    body[data-bar="c"] #details .res.short { color: #b0261b; }
-    body[data-bar="c"] #map-frame { padding: 6px; border-radius: 4px;
-      background: linear-gradient(135deg, #f4d77a, #a87b26 40%, #f1cf6a 60%, #8c6119); box-shadow: 0 0 0 2px #2a1a08, 0 3px 6px rgba(0, 0, 0, .6); }
 
     #touch-tools { position: fixed; right: 8px; bottom: calc(var(--bottom-h, 236px) + 8px); display: flex; gap: 6px; }
     #touch-tools[hidden] { display: none; }
@@ -264,17 +208,12 @@
     /* Narrower PC windows: a smaller minimap leaves room for six buttons per row. */
     @media (max-width: 1300px) {
       body[data-bar] #bottom { --map-w: 240px; }
-      body[data-bar="b"] #bottom { grid-template-columns: 170px minmax(260px, 1fr) minmax(200px, 240px) auto; }
-      body[data-bar="c"] #sel > .head { width: 240px; }
     }
     @media (max-width: 1100px) {
       /* Narrow windows: the selection sits above the details. */
       body[data-bar="a"] #bottom { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr);
         grid-template-areas: "actions sel map" "actions details map"; }
       body[data-bar="a"] #sel { flex-direction: row; }
-      body[data-bar="b"] #bottom { grid-template-columns: 160px minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr) 74px;
-        grid-template-areas: "sel actions map" "sel details map"; }
-      body[data-bar="c"] #bottom { grid-template-columns: minmax(0, 1fr) 230px auto; }
     }
 
     /* Phones and small windows: tighter bars, buttons in one scrolling row. */
@@ -312,7 +251,7 @@
     }
   </style>
 </head>
-<body>
+<body data-bar="a" data-skin="3">
   <canvas id="game"></canvas>
   <div id="top" class="bar" hidden>
     <div id="resources"></div>

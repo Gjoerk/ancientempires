@@ -44,7 +44,8 @@ Done:
 - Combat: spearman, swordsman, archer, rider, battering ram, watchtower and castle, with counters; attack-move, stop, control groups.
 - Protect the king: he can shelter in the castle; a player whose king dies is out and the last team with a king wins.
 - Chat, resign, a game clock and villager counts per resource.
-- Carved-oak interface with icon buttons, zoom, and touch controls for phones.
+- Carved-oak interface: command tiles, a selection card with health, stats and queue, a details box that explains every
+  unit, building and upgrade, zoom, and touch controls for phones (press and hold a button for its details).
 - Synthesised sound effects; any sprite can be replaced through the sprite pack.
 
 Deliberately left out to keep the game quick to learn: ships, monks, trade carts, hunting, civilizations,
