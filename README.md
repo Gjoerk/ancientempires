@@ -37,13 +37,14 @@ All art is drawn by code, but any unit, building or resource can be replaced wit
 
 Done:
 - Waiting room with teams, computer opponents, a quick-start option and a test opponent the host plays themselves.
-- Seeded 64×64 map with wood, berries, gold and stone near every start; fog of war shared between allies.
+- Seeded 80×80 map with wood, berries, gold and stone near every start; fog of war shared between allies.
 - Economy with four resources (food, wood, gold, stone): gathering, farms that need re-sowing, mill, lumber camp and mining camp as drop-off points, houses, population limit, market.
 - Three ages; economy upgrades at the town centre and storehouse; army-wide and per-unit upgrades at the blacksmith.
 - Buildings placed and built by villagers, repair, rally points, walls dragged out as lines, gates for the owner's team.
 - Combat: spearman, swordsman, archer, rider, battering ram, watchtower and castle, with counters; attack-move, stop, control groups.
 - Protect the king: he can shelter in the castle; a player whose king dies is out and the last team with a king wins.
 - Chat, resign, a game clock and villager counts per resource.
+- Three interface looks (parchment, carved oak, castle stone), icon buttons, zoom, and touch controls for phones.
 - Synthesised sound effects; any sprite can be replaced through the sprite pack.
 
 Deliberately left out to keep the game quick to learn: ships, monks, trade carts, hunting, civilizations,

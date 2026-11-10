@@ -64,3 +64,16 @@ Without a site sprite the finished sprite fades in as construction progresses.
 Optional variants `resource.tree.0`, `.1`, `.2` are picked per tile for variety.
 
 Terrain tiles, the minimap, health bars and the interface are not part of the sprite pack yet.
+
+## Icons
+
+The pictures on buttons, in the top bar and next to costs are icons. Each has a built-in drawing and
+can be replaced the same way, with the key `icon.<id>`. Icons are shown square; 48 × 48 px or a multiple works best.
+
+- **Resources:** `icon.food`, `icon.wood`, `icon.gold`, `icon.stone`
+- **Units and buildings:** `icon.<kind>`, for example `icon.villager`, `icon.barracks` (used on build and train buttons and as the portrait)
+- **Upgrades:** `icon.<id>` with id one of `age2`, `age3`, `loom`, `handcart`, `ploughs`, `axes`, `picks`, `weapons`, `armour`,
+  `pikes`, `jacks`, `blades`, `shields`, `longbows`, `quickdraw`, `lances`, `barding`, `ironhead`, `arrowslits`
+- **Actions:** `icon.cancel`, `icon.eject`, `icon.sell.food`, `icon.sell.wood`, `icon.sell.stone`, `icon.buy.food`, `icon.buy.wood`, `icon.buy.stone`
+
+Example: `"icon.gold": { "src": "icons/gold.png" }`

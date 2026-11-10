@@ -35,6 +35,7 @@ import {
 import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
+import { clearIcons, icon } from './icons';
 import { isMuted, play, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
 
@@ -110,6 +111,12 @@ let marker: { x: number; y: number; t: number } | undefined;
 let tileFlash: { tile: number; t: number } | undefined;
 /** Building kind the player is about to place, if any. */
 let placing: Kind | undefined;
+/** Resource tile the player clicked to see how much is left, or -1. */
+let selectedTile = -1;
+/** How much the map is magnified. The canvas has fewer pixels than the window and is stretched. */
+let zoom = window.innerWidth >= 1200 ? 1.5 : window.innerWidth >= 820 ? 1.25 : 1;
+/** On touch screens: the next drag draws a selection box instead of scrolling. */
+let boxMode = false;
 /** First tile of a wall being dragged out. */
 let wallStart: [number, number] | undefined;
 const rallies = new Map<number, [number, number]>();
@@ -444,6 +451,7 @@ function onMessage(msg: ServerMessage): void {
       selected.delete(id);
     }
     for (const [index, tile] of msg.tiles) setTile(index, tile);
+    for (const [index, amount] of msg.amounts) if (map) map.amount[index] = amount;
     for (const [from, to] of msg.shots) {
       const a = views.get(from);
       const b = views.get(to);
@@ -551,6 +559,9 @@ function resetGame(): void {
   puffs = [];
   alert = attackFlash = undefined;
   $('toast').hidden = true;
+  $('menu').hidden = true;
+  $('touch-tools').hidden = true;
+  selectedTile = -1;
   $('chat-log').textContent = '';
   $('chat-input').hidden = true;
   hudSignature = panelSignature = '';
@@ -786,58 +797,44 @@ function ageAllows(kind: Kind): boolean {
   return (DEFS[kind].age ?? 1) <= (players.get(me)?.age ?? 1);
 }
 
-canvas.addEventListener('mousedown', (ev) => {
-  if (me < 0) return;
-  if (ev.button === 2) {
-    if (placing) placing = wallStart = undefined;
-    else rightClick(ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey);
-    return;
-  }
-  if (ev.button !== 0) return;
-  if (placing === 'wall') {
-    // Walls are dragged out as a line and placed on release.
-    wallStart = placementSpot();
-    return;
-  }
-  if (placing) {
-    const [x, y] = placementSpot();
-    const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
-    if (map && canPlace(map, placing, x, y) && canAfford(DEFS[placing].cost)) {
-      send({ type: 'place', ids, kind: placing, x, y });
-      if (!ev.shiftKey) placing = undefined;
-    }
-    return;
-  }
-  drag = { x: ev.clientX, y: ev.clientY };
-});
+function placeAtCursor(keep: boolean): void {
+  if (!placing || !map) return;
+  const [x, y] = placementSpot();
+  const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
+  if (!canPlace(map, placing, x, y) || !canAfford(DEFS[placing].cost)) return;
+  send({ type: 'place', ids, kind: placing, x, y });
+  play('order');
+  if (!keep) placing = undefined;
+}
 
-window.addEventListener('mouseup', (ev) => {
-  if (ev.button === 0 && wallStart && placing === 'wall' && map) {
-    const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
-    for (const [x, y] of lineTiles(wallStart, placementSpot())) {
-      if (canPlace(map, 'wall', x, y)) send({ type: 'place', ids, kind: 'wall', x, y });
-    }
-    wallStart = undefined;
-    if (!ev.shiftKey) placing = undefined;
+/** Places the wall line that was dragged out. */
+function finishWall(keep: boolean): void {
+  if (!wallStart || !map) return;
+  const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
+  for (const [x, y] of lineTiles(wallStart, placementSpot())) {
+    if (canPlace(map, 'wall', x, y)) send({ type: 'place', ids, kind: 'wall', x, y });
+  }
+  wallStart = undefined;
+  if (!keep) placing = undefined;
+}
+
+/** Selects whatever is at a point: a unit, a building, or a resource to see what is left of it. */
+function clickSelect(sx: number, sy: number): void {
+  const v = unitAt(sx, sy) ?? buildingAt(sx, sy);
+  if (!v) {
+    if (selected.size === 0) selectedTile = resourceTileAt(sx, sy);
     return;
   }
-  if (ev.button !== 0 || !drag) return;
-  const box = { x0: Math.min(drag.x, ev.clientX), y0: Math.min(drag.y, ev.clientY),
-    x1: Math.max(drag.x, ev.clientX), y1: Math.max(drag.y, ev.clientY) };
-  const isClick = box.x1 - box.x0 < 5 && box.y1 - box.y0 < 5;
-  drag = undefined;
-  if (!ev.shiftKey) selected.clear();
-  if (isClick) {
-    const v = unitAt(ev.clientX, ev.clientY) ?? buildingAt(ev.clientX, ev.clientY);
-    if (v) selected.add(v.id);
-    // Selecting something of a test opponent hands control to that side.
-    if (v && v.owner !== me && controllable().includes(v.owner)) {
-      selected.clear();
-      selected.add(v.id);
-      switchTeam(v.owner, true);
-    }
-    return;
+  selected.add(v.id);
+  // Selecting something of a test opponent hands control to that side.
+  if (v.owner !== me && controllable().includes(v.owner)) {
+    selected.clear();
+    selected.add(v.id);
+    switchTeam(v.owner, true);
   }
+}
+
+function boxSelect(box: { x0: number; y0: number; x1: number; y1: number }): void {
   const inBox = (owner: number) => [...views.values()].filter((v) => {
     if (v.owner !== owner || isBuilding(v.kind)) return false;
     const [x, y] = unitScreen(v);
@@ -856,11 +853,158 @@ window.addEventListener('mouseup', (ev) => {
     }
   }
   for (const v of picked) selected.add(v.id);
+}
+
+canvas.addEventListener('mousedown', (ev) => {
+  if (me < 0) return;
+  $('menu').hidden = true;
+  const x = ev.clientX / zoom;
+  const y = ev.clientY / zoom;
+  if (ev.button === 2) {
+    if (placing) placing = wallStart = undefined;
+    else rightClick(x, y, ev.ctrlKey || ev.metaKey);
+    return;
+  }
+  if (ev.button !== 0) return;
+  if (placing === 'wall') {
+    // Walls are dragged out as a line and placed on release.
+    wallStart = placementSpot();
+    return;
+  }
+  if (placing) return placeAtCursor(ev.shiftKey);
+  drag = { x, y };
+});
+
+window.addEventListener('mouseup', (ev) => {
+  if (ev.button === 0 && wallStart && placing === 'wall') return finishWall(ev.shiftKey);
+  if (ev.button !== 0 || !drag) return;
+  const x = ev.clientX / zoom;
+  const y = ev.clientY / zoom;
+  const box = { x0: Math.min(drag.x, x), y0: Math.min(drag.y, y), x1: Math.max(drag.x, x), y1: Math.max(drag.y, y) };
+  const isClick = box.x1 - box.x0 < 5 && box.y1 - box.y0 < 5;
+  drag = undefined;
+  if (!ev.shiftKey) {
+    selected.clear();
+    selectedTile = -1;
+  }
+  if (isClick) clickSelect(x, y);
+  else boxSelect(box);
+});
+
+// --- touch -----------------------------------------------------------------
+// One finger: tap to select or to send the selected units, drag to scroll, hold to inspect.
+// Two fingers: pinch to zoom.
+
+const finger = { x0: 0, y0: 0, x: 0, y: 0, moved: false, hold: 0, pinch: undefined as { d: number; zoom: number } | undefined };
+
+function touchPoint(t: Touch): [number, number] {
+  return [t.clientX / zoom, t.clientY / zoom];
+}
+
+function tap(x: number, y: number): void {
+  if (placing) return placeAtCursor(false);
+  const hit = unitAt(x, y) ?? buildingAt(x, y);
+  const canOrder = ownSelectedUnits().length > 0 || [...selected].some((id) => views.get(id)?.owner === me && DEFS[views.get(id)!.kind].trains);
+  if (hit && controllable().includes(hit.owner) && !(canOrder && isBuilding(hit.kind) && hit.owner === me && ownSelectedUnits().length > 0)) {
+    // Something of your own: select it. (A building is an order target while units are selected.)
+    selected.clear();
+    selectedTile = -1;
+    clickSelect(x, y);
+  } else if (canOrder) {
+    rightClick(x, y, false);
+  } else {
+    selected.clear();
+    selectedTile = -1;
+    clickSelect(x, y);
+  }
+}
+
+canvas.addEventListener('touchstart', (ev) => {
+  ev.preventDefault();
+  if (me < 0) return;
+  unlockSound();
+  $('touch-tools').hidden = false;
+  $('menu').hidden = true;
+  clearTimeout(finger.hold);
+  if (ev.touches.length >= 2) {
+    const [a, b] = [ev.touches[0], ev.touches[1]];
+    finger.pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom };
+    finger.moved = true;
+    drag = wallStart = undefined;
+    return;
+  }
+  const [x, y] = touchPoint(ev.touches[0]);
+  Object.assign(finger, { x0: x, y0: y, x, y, moved: false, pinch: undefined });
+  Object.assign(mouse, { x, y, onMap: true });
+  if (placing === 'wall') wallStart = placementSpot();
+  else if (boxMode && !placing) drag = { x, y };
+  else {
+    finger.hold = window.setTimeout(() => {
+      // Press and hold: look at what is there without giving an order.
+      if (finger.moved) return;
+      finger.moved = true;
+      selected.clear();
+      selectedTile = -1;
+      clickSelect(x, y);
+    }, 550);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (ev) => {
+  ev.preventDefault();
+  if (me < 0) return;
+  if (ev.touches.length >= 2 && finger.pinch) {
+    const [a, b] = [ev.touches[0], ev.touches[1]];
+    setZoom((finger.pinch.zoom * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)) / finger.pinch.d);
+    return;
+  }
+  const [x, y] = touchPoint(ev.touches[0]);
+  if (Math.hypot(x - finger.x0, y - finger.y0) > 9) {
+    finger.moved = true;
+    clearTimeout(finger.hold);
+  }
+  if (wallStart || drag || placing) Object.assign(mouse, { x, y });
+  else if (finger.moved && !finger.pinch) {
+    cam.x -= x - finger.x;
+    cam.y -= y - finger.y;
+    clampCamera();
+  }
+  finger.x = x;
+  finger.y = y;
+}, { passive: false });
+
+canvas.addEventListener('touchend', (ev) => {
+  ev.preventDefault();
+  clearTimeout(finger.hold);
+  if (me < 0 || ev.touches.length > 0) return;
+  const { x, y } = finger;
+  if (finger.pinch) finger.pinch = undefined;
+  else if (wallStart && placing === 'wall') finishWall(false);
+  else if (drag) {
+    const box = { x0: Math.min(drag.x, x), y0: Math.min(drag.y, y), x1: Math.max(drag.x, x), y1: Math.max(drag.y, y) };
+    drag = undefined;
+    selected.clear();
+    selectedTile = -1;
+    boxSelect(box);
+    boxMode = false;
+    $('box-btn').classList.remove('on');
+  } else if (!finger.moved) tap(x, y);
+  mouse.onMap = false;
+}, { passive: false });
+
+$('box-btn').addEventListener('click', () => {
+  boxMode = !boxMode;
+  $('box-btn').classList.toggle('on', boxMode);
+});
+$('deselect-btn').addEventListener('click', () => {
+  selected.clear();
+  selectedTile = -1;
+  placing = wallStart = undefined;
 });
 
 // Double-click selects every unit of that kind on screen.
 canvas.addEventListener('dblclick', (ev) => {
-  const hit = unitAt(ev.clientX, ev.clientY);
+  const hit = unitAt(ev.clientX / zoom, ev.clientY / zoom);
   if (!hit || hit.owner !== me) return;
   for (const v of views.values()) {
     if (v.owner !== me || v.kind !== hit.kind) continue;
@@ -870,8 +1014,8 @@ canvas.addEventListener('dblclick', (ev) => {
 });
 
 window.addEventListener('mousemove', (ev) => {
-  mouse.x = ev.clientX;
-  mouse.y = ev.clientY;
+  mouse.x = ev.clientX / zoom;
+  mouse.y = ev.clientY / zoom;
   mouse.inside = true;
   mouse.onMap = ev.target === canvas;
   // No edge scrolling while the cursor is on something clickable in the interface.
@@ -947,6 +1091,36 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+$('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
+$('help-close').addEventListener('click', () => ($('help').hidden = true));
+$('chat-btn').addEventListener('click', () => {
+  $('menu').hidden = true;
+  const box = $<HTMLInputElement>('chat-input');
+  box.hidden = false;
+  box.focus();
+});
+
+/** Switches the look of the interface and remembers the choice. */
+function setTheme(name: string): void {
+  if (!['parchment', 'oak', 'stone'].includes(name)) name = 'parchment';
+  document.body.dataset.theme = name;
+  $<HTMLSelectElement>('theme-select').value = name;
+  for (const b of document.querySelectorAll<HTMLElement>('.looks button')) b.classList.toggle('on', b.dataset.look === name);
+  try {
+    localStorage.setItem('kingsfall-look', name);
+  } catch {
+    // Not remembered, but applied.
+  }
+}
+$('theme-select').addEventListener('change', (ev) => setTheme((ev.target as HTMLSelectElement).value));
+for (const b of document.querySelectorAll<HTMLElement>('.looks button')) b.addEventListener('click', () => setTheme(b.dataset.look!));
+let savedLook = new URLSearchParams(location.search).get('look') ?? '';
+try {
+  savedLook ||= localStorage.getItem('kingsfall-look') ?? '';
+} catch {
+  // Storage unavailable: start with the default look.
+}
+setTheme(savedLook);
 $('resign-btn').addEventListener('click', () => {
   if (confirm('Give up? Your king dies and you are out of the game.')) send({ type: 'resign' });
 });
@@ -967,10 +1141,13 @@ window.addEventListener('keydown', unlockSound);
 // Pointing at an upgrade or trade button explains it in the info line.
 $('actions').addEventListener('mouseover', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
-  if (button?.title) $('info').textContent = `${button.firstChild?.textContent ?? ''} — ${button.title}`;
+  if (button?.title) $('info').textContent = button.title;
 });
 $('actions').addEventListener('mouseout', () => (panelSignature = ''));
-$('help-btn').addEventListener('click', () => ($('help').hidden = !$('help').hidden));
+$('help-btn').addEventListener('click', () => {
+  $('menu').hidden = true;
+  $('help').hidden = !$('help').hidden;
+});
 $('actions').addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
   if (!button) return;
@@ -1028,10 +1205,19 @@ minimap.addEventListener('contextmenu', (ev) => ev.preventDefault());
 let minimapPing: { x: number; y: number; t: number } | undefined;
 
 function resize(): void {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  canvas.width = Math.ceil(window.innerWidth / zoom);
+  canvas.height = Math.ceil(window.innerHeight / zoom);
+}
+function setZoom(value: number): void {
+  zoom = Math.max(0.6, Math.min(3, value));
+  resize();
+  clampCamera();
 }
 window.addEventListener('resize', resize);
+canvas.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  setZoom(zoom * (ev.deltaY < 0 ? 1.1 : 1 / 1.1));
+}, { passive: false });
 resize();
 
 // --- HUD -------------------------------------------------------------------
@@ -1046,8 +1232,14 @@ interface PanelButton {
   cost?: Cost;
   /** Not available yet; `sub` says why. */
   locked?: boolean;
+  /** What pressing it brings in (market sales). */
+  gain?: Cost;
+  /** Icon id, see icons.ts. */
+  icon: string;
   data: Record<string, string>;
 }
+
+const TILE_NAMES: Record<number, string> = { [Tile.Forest]: 'Tree', [Tile.Berries]: 'Berry bush', [Tile.Gold]: 'Gold ore', [Tile.Stone]: 'Stone' };
 
 let panelSignature = '';
 function renderPanel(): void {
@@ -1057,15 +1249,23 @@ function renderPanel(): void {
   const age = my?.age ?? 1;
   const has = hasOf(me);
   let info = 'Nothing selected';
+  let portrait = '';
   const buttons: PanelButton[] = [];
+  if (selected.size > 0 || (selectedTile >= 0 && !props.has(selectedTile))) selectedTile = -1;
 
   if (placing) {
     info = placing === 'wall'
       ? 'Placing Wall — drag a line and release, hold Shift for more, Esc to cancel'
       : `Placing ${DEFS[placing].label} — click to build, hold Shift for several, Esc to cancel`;
+  } else if (selectedTile >= 0 && map) {
+    // A resource: what it is and how much is left.
+    const res = TILE_RESOURCE[map.tiles[selectedTile] as Tile]!.res;
+    info = `${TILE_NAMES[map.tiles[selectedTile]]} · ${map.amount[selectedTile]} ${res} left`;
+    portrait = icon(res);
   } else if (chosen.length === 1) {
     const v = chosen[0];
     const def = DEFS[v.kind];
+    portrait = icon(v.kind, v.owner);
     const theirs = hasOf(v.owner);
     const ownerName = v.owner === me ? '' : ` · ${roster.find((p) => p.slot === v.owner)?.name ?? 'enemy'}`;
     info = `${def.label}${ownerName} · HP ${v.hp}/${maxHp(v)}`;
@@ -1076,7 +1276,7 @@ function renderPanel(): void {
     else if (!isBuilding(v.kind) && v.extra % 100 > 0) info += ` · carrying ${v.extra % 100} ${RESOURCES[Math.floor(v.extra / 100)]}`;
     if (v.kind === 'castle' && v.extra >= 100) {
       info += v.task === 1 ? ' · the king is inside' : v.owner === me ? ' · right-click it with your king to shelter him' : '';
-      if (v.task === 1 && v.owner === me) buttons.push({ label: 'Send king out', data: { eject: String(v.id) } });
+      if (v.task === 1 && v.owner === me) buttons.push({ label: 'Send king out', icon: 'eject', data: { eject: String(v.id) } });
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
     if (queue) {
@@ -1088,48 +1288,78 @@ function renderPanel(): void {
       const at = String(v.id);
       for (const kind of def.trains ?? []) {
         const locked = !ageAllows(kind);
-        buttons.push({ label: DEFS[kind].label, cost: DEFS[kind].cost, locked, sub: locked ? `needs ${AGE_NAMES[DEFS[kind].age ?? 1]}` : undefined, data: { train: kind, at } });
+        buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked, sub: locked ? AGE_NAMES[DEFS[kind].age ?? 1] : undefined, data: { train: kind, at } });
       }
       for (const id of TECH_IDS) {
         const tech = TECHS[id];
         if (tech.at !== v.kind || has(id) || ((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) continue;
         if (id === 'age3' && age < 2) continue;
-        const missing = tech.age > age ? `needs ${AGE_NAMES[tech.age]}` : tech.requires && !has(tech.requires) ? `needs ${TECHS[tech.requires].label}` : '';
-        buttons.push({ label: tech.label, cost: tech.cost, locked: !!missing, sub: missing || tech.effect, data: { train: id, at } });
+        const missing = tech.age > age ? AGE_NAMES[tech.age] : tech.requires && !has(tech.requires) ? `needs ${TECHS[tech.requires].label}` : '';
+        buttons.push({ label: tech.label, icon: id, cost: tech.cost, locked: !!missing, sub: missing || tech.effect, data: { train: id, at } });
       }
       if (v.kind === 'market') {
-        for (const r of TRADE_GOODS) buttons.push({ label: `Sell 100 ${r}`, sub: `for ${TRADE_SELL} gold`, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
-        for (const r of TRADE_GOODS) buttons.push({ label: `Buy 100 ${r}`, sub: `for ${TRADE_BUY} gold`, locked: (my?.res.gold ?? 0) < TRADE_BUY, data: { buy: r, at } });
+        for (const r of TRADE_GOODS) buttons.push({ label: `Sell 100 ${r}`, icon: `sell.${r}`, sub: `for ${TRADE_SELL} gold`, gain: { gold: TRADE_SELL }, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
+        for (const r of TRADE_GOODS) buttons.push({ label: `Buy 100 ${r}`, icon: `buy.${r}`, sub: `for ${TRADE_BUY} gold`, cost: { gold: TRADE_BUY }, data: { buy: r, at } });
       }
-      if (queue) buttons.push({ label: 'Cancel last', data: { cancel: at } });
+      if (queue) buttons.push({ label: 'Cancel last', icon: 'cancel', data: { cancel: at } });
       if (def.trains && !queue) info += ' · right-click the map to set a gathering point';
     }
   } else if (chosen.length > 1) {
     const counts = new Map<Kind, number>();
     for (const v of chosen) counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);
     info = [...counts].map(([k, c]) => `${c} × ${DEFS[k].label}`).join(' · ');
+    portrait = icon([...counts].sort((a, b) => b[1] - a[1])[0][0], chosen[0].owner);
   }
   if (!placing && mine.some((v) => v.kind === 'villager')) {
     for (const kind of BUILDABLE) {
       const locked = !ageAllows(kind);
-      buttons.push({ label: DEFS[kind].label, cost: DEFS[kind].cost, locked, sub: locked ? `needs ${AGE_NAMES[DEFS[kind].age ?? 1]}` : undefined, data: { build: kind } });
+      buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked, sub: locked ? AGE_NAMES[DEFS[kind].age ?? 1] : undefined, data: { build: kind } });
     }
   }
 
-  const signature = info + '|' + buttons.map((b) => b.label + (b.locked ? '#' : '') + (b.cost && !canAfford(b.cost) ? '!' : '')).join(',');
+  const signature = info + '|' + me + '|' + buttons.map((b) => b.label + (b.locked ? '#' : '') + (b.cost && !canAfford(b.cost) ? '!' : '')).join(',');
   if (signature === panelSignature) return;
   panelSignature = signature;
   $('info').textContent = info;
+  const pic = $<HTMLImageElement>('portrait');
+  pic.style.visibility = portrait ? 'visible' : 'hidden';
+  if (portrait) pic.src = portrait;
   const actions = $('actions');
   actions.textContent = '';
+  const costRow = (cost: Cost, sign: string): HTMLElement => {
+    const row = document.createElement('span');
+    row.className = 'cost';
+    for (const r of RESOURCES) {
+      if (!cost[r]) continue;
+      const part = document.createElement('span');
+      const img = document.createElement('img');
+      img.src = icon(r);
+      img.alt = r;
+      part.append(img, `${sign}${cost[r]}`);
+      row.append(part);
+    }
+    return row;
+  };
   for (const b of buttons) {
     const el = document.createElement('button');
-    el.textContent = b.label;
+    el.type = 'button';
     Object.assign(el.dataset, b.data);
-    const small = document.createElement('small');
-    small.textContent = b.locked && b.sub ? b.sub : b.cost ? costText(b.cost) : b.sub ?? '';
-    if (b.sub && !b.locked) el.title = b.sub;
-    if (small.textContent) el.append(small);
+    const img = document.createElement('img');
+    img.className = 'pic';
+    img.src = icon(b.icon, me);
+    img.alt = '';
+    const label = document.createElement('span');
+    label.className = 'lbl';
+    // "Spearman: Pikes" is shown as "Pikes"; the icon already shows the spearman.
+    label.textContent = b.label.split(': ').pop()!;
+    let last: HTMLElement;
+    if (b.locked && b.sub) {
+      last = document.createElement('span');
+      last.className = 'cost';
+      last.textContent = b.sub;
+    } else last = costRow(b.gain ?? b.cost ?? {}, b.gain ? '+' : '');
+    el.append(img, label, last);
+    el.title = [b.label, b.locked && b.sub ? `needs ${b.sub.replace(/^needs /, '')}` : b.sub, b.cost ? costText(b.cost) : ''].filter(Boolean).join(' — ');
     if (b.locked) el.className = 'locked';
     else if (b.cost && !canAfford(b.cost)) el.className = 'poor';
     actions.append(el);
@@ -1148,27 +1378,34 @@ function renderHud(): void {
   hudSignature = signature;
   const el = $('resources');
   el.textContent = '';
-  const add = (label: string, value: string) => {
-    const span = document.createElement('span');
+  const stat = (iconId: string, value: string, title: string, note = ''): HTMLElement => {
+    const box = document.createElement('span');
+    box.className = 'stat';
+    box.title = title;
+    if (iconId) {
+      const img = document.createElement('img');
+      img.src = icon(iconId, me);
+      img.alt = title;
+      box.append(img);
+    }
     const b = document.createElement('b');
     b.textContent = value;
-    span.append(`${label} `, b);
-    el.append(span);
+    box.append(b);
+    if (note) {
+      const small = document.createElement('small');
+      small.textContent = note;
+      box.append(small);
+    }
+    el.append(box);
+    return box;
   };
-  for (const r of RESOURCES) {
-    add(r[0].toUpperCase() + r.slice(1), String(p.res[r]));
-    // Villagers working on this resource.
-    const note = document.createElement('small');
-    note.textContent = ` ${p.workers[r] ?? 0}`;
-    note.title = `Villagers gathering ${r}`;
-    el.lastElementChild!.append(note);
-  }
-  add('Pop', `${p.pop}/${p.cap}`);
+  for (const r of RESOURCES) stat(r, String(p.res[r]), `${r[0].toUpperCase()}${r.slice(1)} — ${p.workers[r] ?? 0} villagers gathering it`, String(p.workers[r] ?? 0));
   // Housing is full: nothing more can be trained until a house is built.
-  if (p.pop >= p.cap && p.cap < 60) (el.lastElementChild!.lastElementChild as HTMLElement).style.color = '#ff6a5a';
-  add('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
-  add('', AGE_NAMES[p.age] ?? '');
-  if (idle > 0) add('Idle villagers (.)', String(idle));
+  const pop = stat('house', `${p.pop}/${p.cap}`, 'Population / housing');
+  if (p.pop >= p.cap && p.cap < 60) pop.classList.add('warn');
+  if (idle > 0) stat('villager', String(idle), 'Idle villagers — press . to find them');
+  stat('', AGE_NAMES[p.age] ?? '', 'Your age').classList.add('age');
+  stat('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Game time');
 
   const banner = $('banner');
   let text = '';
@@ -1455,6 +1692,7 @@ function frame(now: number): void {
     ctx.stroke();
   };
   const hovered = mouse.onMap && !placing && !drag ? resourceTileAt(mouse.x, mouse.y) : -1;
+  if (selectedTile >= 0 && props.has(selectedTile)) outline(selectedTile, '#ffffff', 2);
   if (hovered >= 0) outline(hovered, ownSelectedUnits().some((v) => v.kind === 'villager') ? '#ffe45c' : 'rgba(255,255,255,.75)', 2);
   if (tileFlash) {
     const age = (now - tileFlash.t) / 900;
@@ -1552,10 +1790,14 @@ function frame(now: number): void {
   renderHud();
   renderMinimap();
 }
-void loadSprites();
+void loadSprites().then(() => {
+  // Icons may come from the sprite pack, so draw them again once it is in.
+  clearIcons();
+  panelSignature = hudSignature = '';
+});
 requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __spawn: spawn, __game: { getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
+  Object.assign(window, { __spawn: spawn, __game: { getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

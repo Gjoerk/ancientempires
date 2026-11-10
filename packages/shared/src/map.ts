@@ -1,6 +1,6 @@
 import type { Res } from './defs';
 
-export const MAP_SIZE = 64;
+export const MAP_SIZE = 80;
 export const MAX_PLAYERS = 4;
 /** Radius around each start tile kept free for the town centre and castle. */
 const BASE_RADIUS = 6.5;
@@ -79,10 +79,10 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
     }
   };
 
-  for (let i = 0; i < 6; i++) blob(Tile.Water, rand() * size, rand() * size, 3 + rand() * 3, 1, 15);
-  for (let i = 0; i < 34; i++) blob(Tile.Forest, rand() * size, rand() * size, 2 + rand() * 3, 0.8, 9);
-  for (let i = 0; i < 7; i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
-  for (let i = 0; i < 6; i++) blob(Tile.Stone, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
+  for (let i = 0; i < 9; i++) blob(Tile.Water, rand() * size, rand() * size, 3 + rand() * 3, 1, 15);
+  for (let i = 0; i < 52; i++) blob(Tile.Forest, rand() * size, rand() * size, 2 + rand() * 3, 0.8, 9);
+  for (let i = 0; i < 10; i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
+  for (let i = 0; i < 9; i++) blob(Tile.Stone, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
 
   // A connected patch of exactly `count` tiles, grown outwards from a centre.
   const patch = (tile: Tile, cx: number, cy: number, count: number) => {

@@ -76,6 +76,8 @@ export interface GameState {
   changedTiles: Map<number, number>;
   /** Tile changes and ranged shots of the current tick, for the snapshot. */
   tileEvents: [number, number][];
+  /** What is left in the resource tiles that were worked this tick: tile index -> amount. */
+  amountEvents: Map<number, number>;
   shots: [number, number][];
   /** Melee blows of the current tick: [attacker id, target id]. */
   hits: [number, number][];
@@ -118,7 +120,7 @@ const tileRect = (map: GameMap, tile: number): Rect => ({ x: tile % map.size, y:
 export function createGame(seed: number): GameState {
   return {
     tick: 0, seed, map: generateMap(seed), entities: new Map(), players: new Map(), nextId: 1,
-    changedTiles: new Map(), tileEvents: [], shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(),
+    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(),
   };
 }
 
@@ -624,9 +626,12 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
     e.work -= 1;
     e.carry++;
     if (farm && --farm.carry <= 0) break;
-    if (o.farm < 0 && --map.amount[o.tile] <= 0) {
-      depleteTile(state, o.tile);
-      break;
+    if (o.farm < 0) {
+      state.amountEvents.set(o.tile, --map.amount[o.tile]);
+      if (map.amount[o.tile] <= 0) {
+        depleteTile(state, o.tile);
+        break;
+      }
     }
   }
   if (e.carry >= capacity) {
@@ -787,6 +792,7 @@ function moveAlongPath(e: Entity): void {
 export function step(state: GameState): void {
   state.tick++;
   state.tileEvents = [];
+  state.amountEvents = new Map();
   state.shots = [];
   state.hits = [];
   state.deaths = [];

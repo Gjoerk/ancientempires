@@ -282,13 +282,13 @@ test('gates let their own team through and nobody else', () => {
   addPlayer(s, 1, 1);
   addPlayer(s, 2, 0);
   // A wall right across the map with a single gate of team 0.
-  const y = 32;
+  const y = 40;
   for (let x = 0; x < s.map.size; x++) {
     s.map.tiles[y * s.map.size + x] = Tile.Grass;
     if (x !== 20) spawn(s, 0, 'wall', x, y);
   }
   spawn(s, 0, 'gate', 20, y);
-  for (const tile of [(y - 1) * 64 + 20, (y + 1) * 64 + 20]) s.map.tiles[tile] = Tile.Grass;
+  for (const tile of [(y - 1) * s.map.size + 20, (y + 1) * s.map.size + 20]) s.map.tiles[tile] = Tile.Grass;
   const reaches = (owner: number) => {
     const path = findPath(s.map, 20, y - 1, 20, y + 1, s.players.get(owner)!.team);
     return path.length > 0 && path[path.length - 1] === y + 1;

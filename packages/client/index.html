@@ -2,108 +2,252 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Kingsfall</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #10140f; color: #e8e2d0;
-      font: 14px/1.4 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; user-select: none; }
-    canvas#game { display: block; width: 100vw; height: 100vh; cursor: crosshair; image-rendering: pixelated; }
-    .bar { position: fixed; left: 0; right: 0; background: #1d1a14; border: 0 solid #5a4a2a; }
-    #top { top: 0; padding: 6px 12px; border-bottom-width: 2px; display: flex; gap: 18px; align-items: center; white-space: nowrap; }
-    #resources { display: flex; gap: 16px; }
-    #resources b { color: #f1ead9; }
-    #bottom { bottom: 0; height: 170px; border-top-width: 2px; display: flex; justify-content: space-between; }
-    #panel { padding: 8px 12px; min-width: 0; flex: 1; overflow: hidden; }
-    #info { margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #actions { display: flex; flex-wrap: wrap; gap: 6px; }
-    #actions button { font: inherit; font-size: 12px; line-height: 1.2; text-align: left; padding: 3px 7px; min-width: 100px;
-      border: 1px solid #5a4a2a; background: #2b261c; color: inherit; cursor: pointer; }
-    #actions button:hover { background: #3a3324; }
-    #actions button.poor { opacity: .5; }
-    #actions button.locked { opacity: .3; cursor: default; }
-    #resources small { color: #9a927c; font-size: 11px; }
-    #chat-log { position: fixed; top: 48px; left: 12px; display: grid; gap: 2px; pointer-events: none; text-shadow: 0 1px 2px #000; max-width: 60vw; }
-    #chat-log div { background: rgba(16,20,15,.6); padding: 1px 6px; }
-    #chat-input { position: fixed; bottom: 182px; left: 12px; width: min(460px, calc(100vw - 24px)); font: inherit; padding: 6px 8px;
-      border: 2px solid #5a4a2a; background: #1d1a14; color: inherit; }
-    #toast { position: fixed; top: 44px; right: 12px; padding: 6px 12px; border: 2px solid #d43b3b; background: #1d1a14; }
-    #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; border: 2px solid #5a4a2a;
-      background: #1d1a14; max-width: min(560px, calc(100vw - 32px)); line-height: 1.6; }
-    #help h2 { margin: 0 0 8px; font-size: 16px; color: #e0c12f; }
-    #help b { color: #f1ead9; }
-    #actions button small { display: block; color: #9a927c; }
-    #minimap { margin: 6px; border: 2px solid #5a4a2a; cursor: pointer; flex: none; background: #10140f; }
-    .chip { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
-    #banner { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 22px;
-      border: 2px solid #e0c12f; background: #1d1a14; font-size: 18px; pointer-events: none; }
-    #lobby, .screen { position: fixed; inset: 0; display: grid; place-items: center; background: #10140f; }
-    .card { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 24px; border: 2px solid #5a4a2a; background: #1d1a14; }
-    .card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .12em; color: #e0c12f; }
+    /* Three looks. Everything below is styled through these variables only. */
+    body, body[data-theme="parchment"] {
+      --font: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+      --page: #2b2114;
+      --bar: linear-gradient(180deg, #f1e4c0, #dcc892);
+      --grain: radial-gradient(circle at 30% 40%, rgba(120, 90, 40, .13) 0 1.5px, transparent 2.5px);
+      --grain-size: 23px 29px;
+      --edge: #5d4023;
+      --trim: #a8873f;
+      --ink: #33230f;
+      --dim: #7a6646;
+      --accent: #8c2f1b;
+      --btn: linear-gradient(180deg, #fbf1d2, #e7d6a6);
+      --btn-edge: #7a5a34;
+      --btn-ink: #33230f;
+      --btn-hi: rgba(255, 255, 255, .7);
+      --btn-lo: rgba(90, 60, 20, .35);
+      --slot: rgba(90, 60, 20, .14);
+      --caps: normal;
+    }
+    body[data-theme="oak"] {
+      --font: Georgia, "Times New Roman", serif;
+      --page: #150e08;
+      --bar: repeating-linear-gradient(91deg, #4d351f 0 7px, #43301c 7px 15px, #573c23 15px 22px, #3d2916 22px 26px);
+      --grain: radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, .22) 0 3px, transparent 7px);
+      --grain-size: 97px 53px;
+      --edge: #1c120a;
+      --trim: #c79a3a;
+      --ink: #f6e6c0;
+      --dim: #c2a77a;
+      --accent: #f0c046;
+      --btn: linear-gradient(180deg, #86603a, #543a21);
+      --btn-edge: #1c120a;
+      --btn-ink: #fbeecb;
+      --btn-hi: rgba(255, 220, 150, .4);
+      --btn-lo: rgba(0, 0, 0, .5);
+      --slot: rgba(0, 0, 0, .28);
+      --caps: normal;
+    }
+    body[data-theme="stone"] {
+      --font: "Times New Roman", Times, Georgia, serif;
+      --page: #16171b;
+      --bar: linear-gradient(180deg, #878992, #63656d);
+      --grain: radial-gradient(circle at 40% 60%, rgba(0, 0, 0, .2) 0 1.5px, transparent 2.5px), radial-gradient(circle at 70% 20%, rgba(255, 255, 255, .13) 0 1px, transparent 2px);
+      --grain-size: 19px 17px, 31px 27px;
+      --edge: #26272c;
+      --trim: #d4af37;
+      --ink: #fbfbfd;
+      --dim: #d6d7dd;
+      --accent: #ffd95a;
+      --btn: linear-gradient(180deg, #2f4f96, #213769);
+      --btn-edge: #121a33;
+      --btn-ink: #fdfdff;
+      --btn-hi: rgba(255, 255, 255, .35);
+      --btn-lo: rgba(0, 0, 0, .5);
+      --slot: rgba(0, 0, 0, .25);
+      --caps: small-caps;
+    }
+
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--page); color: var(--ink);
+      font: 15px/1.35 var(--font); font-variant: var(--caps); user-select: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+    canvas#game { display: block; width: 100vw; height: 100vh; height: 100dvh; cursor: crosshair; image-rendering: pixelated; touch-action: none; }
+    img { image-rendering: pixelated; }
+
+    /* A framed panel: textured face, dark edge, a thin trim line inside it. */
+    .bar, .frame, .card { background: var(--grain), var(--bar); background-size: var(--grain-size), auto; color: var(--ink);
+      border: 3px solid var(--edge); box-shadow: inset 0 0 0 1px var(--trim), 0 3px 10px rgba(0, 0, 0, .45); }
+    .bar { position: fixed; left: 0; right: 0; }
+    .dim { color: var(--dim); }
+
+    button { font: inherit; font-variant: var(--caps); color: var(--btn-ink); background: var(--btn); border: 2px solid var(--btn-edge);
+      border-radius: 4px; padding: 5px 12px; cursor: pointer; box-shadow: inset 0 1px 0 var(--btn-hi), inset 0 -2px 0 var(--btn-lo); }
+    button:hover { filter: brightness(1.12); }
+    button:active { transform: translateY(1px); box-shadow: inset 0 2px 3px var(--btn-lo); }
+    button:disabled { opacity: .45; cursor: default; filter: none; }
+    input, select { font: inherit; color: var(--ink); background: var(--slot); border: 2px solid var(--btn-edge); border-radius: 4px; padding: 6px 8px; }
+    select option { color: #222; background: #fff; }
+
+    /* Top bar: what you have. */
+    #top { top: 0; border-width: 0 0 3px; padding: 4px 8px; display: flex; gap: 10px; align-items: center; white-space: nowrap;
+      overflow-x: auto; scrollbar-width: none; }
+    #top::-webkit-scrollbar { display: none; }
+    #resources { display: flex; gap: 6px; align-items: center; }
+    .stat { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 3px; background: var(--slot); border-radius: 4px;
+      border: 1px solid var(--btn-lo); }
+    .stat img { width: 24px; height: 24px; }
+    .stat b { font-size: 16px; min-width: 2ch; }
+    .stat small { color: var(--dim); font-size: 11px; }
+    .stat.warn b { color: #d8301f; }
+    .stat.age b { color: var(--accent); min-width: 0; }
+    #players { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    .chip { display: inline-block; width: 11px; height: 11px; margin-right: 5px; border: 1px solid var(--edge); }
+    #menu-btn { flex: none; position: sticky; right: 0; }
+    #menu { position: fixed; top: 44px; right: 8px; padding: 10px; display: grid; gap: 6px; z-index: 5; min-width: 190px; }
+    #menu[hidden], #host-tools[hidden] { display: none; }
+    #host-tools { display: grid; gap: 6px; }
+
+    /* Bottom bar: what is selected, what it can do, and the map. */
+    #bottom { bottom: 0; border-width: 3px 0 0; height: 176px; display: flex; gap: 8px; padding: 6px 8px; box-sizing: border-box; }
+    #portrait { flex: none; width: 96px; height: 96px; align-self: center; background: var(--slot); border: 2px solid var(--edge);
+      box-shadow: inset 0 0 0 1px var(--trim); border-radius: 4px; }
+    #panel { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+    #info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; min-height: 1.35em; }
+    #actions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow-y: auto; flex: 1; scrollbar-width: thin; }
+    #actions button { width: 76px; height: 64px; padding: 2px; display: grid; grid-template-rows: 34px 13px 13px; justify-items: center;
+      font-size: 10.5px; line-height: 13px; }
+    #actions button img.pic { width: 34px; height: 34px; }
+    #actions button .lbl { max-width: 70px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    #actions button .cost { display: flex; gap: 4px; align-items: center; opacity: .95; white-space: nowrap; max-width: 72px; overflow: hidden; }
+    #actions button .cost img { width: 13px; height: 13px; margin-right: 1px; vertical-align: -2px; }
+    #actions button.poor .cost { color: #ff7b6b; }
+    #actions button.poor img.pic { filter: saturate(.4) brightness(.8); }
+    #actions button.locked { opacity: .38; cursor: default; }
+    #map-frame { flex: none; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
+    #minimap { width: 248px; height: 124px; cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
+
+    #touch-tools { position: fixed; right: 8px; bottom: 184px; display: flex; gap: 6px; }
+    #touch-tools[hidden] { display: none; }
+    #touch-tools button.on { outline: 3px solid var(--accent); }
+
+    #banner { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 24px; font-size: 19px; pointer-events: none;
+      text-align: center; max-width: calc(100vw - 32px); }
+    #toast { position: fixed; top: 52px; right: 10px; padding: 6px 12px; border-color: #b3261a; }
+    #chat-log { position: fixed; top: 52px; left: 10px; display: grid; gap: 2px; pointer-events: none; max-width: 60vw; color: #fff;
+      text-shadow: 0 1px 2px #000; font-variant: normal; }
+    #chat-log div { background: rgba(0, 0, 0, .5); padding: 1px 8px; border-radius: 3px; }
+    #chat-input { position: fixed; bottom: 186px; left: 10px; width: min(460px, calc(100vw - 20px)); box-sizing: border-box;
+      background: var(--page); color: #fff; font-variant: normal; }
+    #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; line-height: 1.6;
+      width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; box-sizing: border-box; z-index: 6; }
+    #help h2 { margin: 0 0 8px; font-size: 19px; color: var(--accent); }
+    [hidden] { display: none !important; }
+
+    /* Start screen and waiting room. */
+    #lobby, .screen { position: fixed; inset: 0; display: grid; place-items: center; background: var(--page); overflow-y: auto; z-index: 4; }
+    .card { display: grid; gap: 10px; width: min(440px, calc(100vw - 24px)); padding: 22px; box-sizing: border-box; margin: 12px 0; }
+    .card h1 { margin: 0 0 2px; font-size: 28px; letter-spacing: .14em; color: var(--accent); text-align: center;
+      text-shadow: 0 1px 0 rgba(0, 0, 0, .25); }
     .card p { margin: 0; }
-    .card input, .card button { font: inherit; padding: 8px 10px; border: 1px solid #5a4a2a; background: #10140f; color: inherit; }
-    .card button { background: #e0c12f; color: #10140f; font-weight: 700; cursor: pointer; }
-    .card button.plain, .card li button { background: #2b261c; color: inherit; font-weight: 400; }
-    .card button:disabled { opacity: .45; cursor: default; }
-    .card li button { padding: 2px 8px; font-size: 12px; margin-left: 8px; }
+    .card button { padding: 9px 12px; font-size: 16px; }
+    .card button.plain { opacity: .85; font-size: 14px; }
+    .card li button { padding: 2px 8px; font-size: 12px; }
+    .card select { padding: 2px 4px; font-size: 13px; }
+    .card .check { display: flex; align-items: center; gap: 8px; }
     #room-host { display: grid; gap: 10px; }
-    #room-host[hidden] { display: none; }
     #room-players { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 6px; }
     #room-players li { display: flex; align-items: center; gap: 6px; }
     #room-players .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .card select { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid #5a4a2a; background: #10140f; color: inherit; }
-    .card .check { display: flex; align-items: center; gap: 8px; }
-    .card .check input { width: auto; padding: 0; }
-    #host-tools button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #5a4a2a; background: #2b261c; color: inherit; cursor: pointer; }
-    #lobby form { display: grid; gap: 10px; width: min(320px, calc(100vw - 32px)); padding: 24px;
-      border: 2px solid #5a4a2a; background: #1d1a14; }
-    #lobby h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .12em; color: #e0c12f; }
-    #lobby input, #lobby button { font: inherit; padding: 8px 10px; border: 1px solid #5a4a2a; background: #10140f; color: inherit; }
-    #lobby button { background: #e0c12f; color: #10140f; font-weight: 700; cursor: pointer; }
-    #lobby-msg { min-height: 1.4em; color: #e07a5f; margin: 0; }
-    .dim { color: #9a927c; }
+    #lobby-msg { min-height: 1.4em; color: var(--accent); margin: 0; }
+    .looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .looks button { font-size: 13px; padding: 6px 2px; }
+    .looks button.on { outline: 3px solid var(--accent); }
+
+    /* Phones and small windows: tighter bars, buttons in one scrolling row. */
+    @media (max-width: 820px), (max-height: 520px) {
+      html, body { font-size: 13px; }
+      #top { padding: 3px 6px; gap: 6px; }
+      .stat { padding: 0 5px 0 2px; }
+      .stat img { width: 18px; height: 18px; }
+      .stat b { font-size: 13px; }
+      .stat small { display: none; }
+      #players { display: none; }
+      #menu-btn { margin-left: auto; padding: 3px 9px; }
+      #bottom { height: 112px; padding: 4px 6px; gap: 6px; }
+      #portrait { width: 56px; height: 56px; }
+      #info { font-size: 12px; }
+      #actions { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+      #actions button { flex: none; width: 70px; height: 66px; }
+      #minimap { width: 132px; height: 66px; }
+      #touch-tools { bottom: 118px; }
+      #chat-input { bottom: 120px; }
+      #banner { font-size: 15px; top: 48px; }
+    }
+    @media (max-width: 480px) {
+      #portrait { display: none; }
+      #minimap { width: 112px; height: 56px; }
+    }
   </style>
 </head>
-<body>
+<body data-theme="parchment">
   <canvas id="game"></canvas>
   <div id="top" class="bar" hidden>
-    <span id="resources"></span>
-    <span id="players" style="margin-left:auto"></span>
+    <div id="resources"></div>
+    <div id="players"></div>
+    <button id="menu-btn" type="button">Menu</button>
+  </div>
+  <div id="menu" class="frame" hidden>
     <span id="host-tools" hidden>
       <button id="switch-btn" type="button" title="Play the other side (Tab)">Switch team (Tab)</button>
       <button id="end-btn" type="button">End game</button>
     </span>
-    <button id="mute-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Sound on (M)</button>
-    <button id="resign-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Resign</button>
-    <button id="full-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Fullscreen (F)</button>
-    <button id="help-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Help (H)</button>
-    <span class="dim" hidden>Room <b id="room-code"></b></span>
+    <button id="chat-btn" type="button">Chat (Enter)</button>
+    <button id="mute-btn" type="button">Sound on (M)</button>
+    <button id="full-btn" type="button">Fullscreen (F)</button>
+    <button id="help-btn" type="button">Help (H)</button>
+    <button id="resign-btn" type="button">Resign</button>
+    <label class="dim">Look
+      <select id="theme-select">
+        <option value="parchment">Parchment</option>
+        <option value="oak">Carved oak</option>
+        <option value="stone">Castle stone</option>
+      </select>
+    </label>
+    <span class="dim">Room <b id="room-code"></b></span>
   </div>
   <div id="bottom" class="bar" hidden>
+    <img id="portrait" alt="">
     <div id="panel">
       <div id="info"></div>
       <div id="actions"></div>
     </div>
-    <canvas id="minimap" width="232" height="116"></canvas>
+    <div id="map-frame"><canvas id="minimap" width="248" height="124"></canvas></div>
   </div>
-  <div id="banner" hidden></div>
-  <div id="toast" hidden></div>
+  <div id="touch-tools" hidden>
+    <button id="box-btn" type="button">Select area</button>
+    <button id="deselect-btn" type="button">Deselect</button>
+  </div>
+  <div id="banner" class="frame" hidden></div>
+  <div id="toast" class="frame" hidden></div>
   <div id="chat-log"></div>
-  <input id="chat-input" maxlength="140" placeholder="Message to everyone — Enter to send, Esc to cancel" hidden>
-  <div id="help" hidden>
+  <input id="chat-input" maxlength="140" placeholder="Message to everyone — Enter to send" enterkeyhint="send" hidden>
+  <div id="help" class="frame" hidden>
     <h2>Controls</h2>
-    <b>Left-click / drag</b> select · <b>double-click</b> all of that kind on screen · <b>Shift</b> adds to the selection<br>
-    <b>Right-click</b> move, gather, build, repair or attack · <b>Ctrl + right-click</b> attack-move<br>
-    <b>Right-click with a building selected</b> sets where its new units gather<br>
-    <b>X</b> stop · <b>Delete</b> destroy your selected unit or building<br>
-    <b>Shift + 1–9</b> store a group · <b>1–9</b> select it<br>
-    <b>.</b> next idle villager · <b>,</b> all idle soldiers · <b>Space</b> jump to the last attack on you<br>
-    <b>Enter</b> chat with the other players<br>
-    <b>Mill, lumber camp, mining camp</b> build them next to food, wood, gold or stone so villagers walk less.<br>
-    <b>WASD / arrows / cursor at the window edge</b> scroll · <b>F</b> fullscreen · <b>M</b> sound on/off<br>
-    <b>Minimap</b> left-click or drag to look there · right-click to send the selected units there<br>
-    <b>Walls</b> are dragged out as a line and block everyone. A <b>gate</b> lets you and your allies through.<br>
-    <b>Castle</b> right-click it with your king to shelter him. Lose your king and you are out.<br>
-    <b>H</b> or <b>Esc</b> closes this.
+    <b>Mouse</b><br>
+    Left-click or drag selects · double-click selects all of that kind on screen · Shift adds<br>
+    Right-click moves, gathers, builds, repairs or attacks · Ctrl + right-click attack-moves<br>
+    Right-click with a building selected sets where its new units gather<br>
+    Mouse wheel zooms · cursor at the window edge, WASD or arrows scroll<br>
+    Minimap: left-click or drag to look there, right-click to send the selected units there<br>
+    <b>Touch</b><br>
+    Tap selects · with units selected, tap the map, a resource or an enemy to send them there<br>
+    Drag scrolls the map · pinch zooms · “Select area” lets you drag a box · “Deselect” lets go<br>
+    Press and hold to look at something without giving an order<br>
+    <b>Keys</b><br>
+    X stop · Delete destroys your selection · Shift + 1–9 stores a group, 1–9 selects it<br>
+    . next idle villager · , all idle soldiers · Space jumps to the last attack on you<br>
+    Enter chat · F fullscreen · M sound · H or Esc closes this<br>
+    <b>Good to know</b><br>
+    Build a mill, lumber camp or mining camp next to food, wood, gold or stone so villagers walk less.<br>
+    Walls are dragged out as a line and block everyone; a gate lets you and your allies through.<br>
+    Right-click the castle with your king to shelter him. Lose your king and you are out.<br>
+    <button id="help-close" type="button" style="margin-top:10px">Close</button>
   </div>
   <div id="waiting" class="screen" style="display:none">
     <div class="card">
@@ -123,13 +267,19 @@
     </div>
   </div>
   <div id="lobby">
-    <form id="lobby-form" autocomplete="off">
+    <form id="lobby-form" class="card" autocomplete="off">
       <h1>KINGSFALL</h1>
       <input id="name" placeholder="Your name" maxlength="16" required>
       <input id="room" placeholder="Room code" maxlength="8">
       <button id="join-btn">Join game</button>
       <button id="host-btn">Host new game</button>
-      <p class="dim" style="margin:0">Protect your king. The host's browser runs the game; it ends if the host closes the tab.</p>
+      <p class="dim">Protect your king. The host's browser runs the game; it ends if the host closes the tab.</p>
+      <span class="dim">Look</span>
+      <div class="looks">
+        <button type="button" data-look="parchment">Parchment</button>
+        <button type="button" data-look="oak">Carved oak</button>
+        <button type="button" data-look="stone">Castle stone</button>
+      </div>
       <p id="lobby-msg" role="status"></p>
     </form>
   </div>

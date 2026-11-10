@@ -58,6 +58,8 @@ export type ServerMessage =
       queues: QueueSnapshot[];
       /** Tiles that changed this tick: [tile index, new tile]. */
       tiles: [number, number][];
+      /** Resource tiles that were gathered from this tick: [tile index, amount left]. */
+      amounts: [number, number][];
       /** Ranged attacks this tick: [attacker id, target id]. */
       shots: [number, number][];
       /** Melee blows this tick: [attacker id, target id]. */
