@@ -15,9 +15,9 @@ function octile(ax: number, ay: number, bx: number, by: number): number {
  * A* over the tile grid, 8 directions, no cutting corners around blocked tiles.
  * Returns a flat list of tile coordinates [x0, y0, x1, y1, ...] excluding the
  * start tile. If the goal cannot be reached, the path leads to the reachable
- * tile closest to it.
+ * tile closest to it. Gates of the given team count as open.
  */
-export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: number): number[] {
+export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: number, team = -1): number[] {
   const n = map.size;
   if (sx === gx && sy === gy) return [];
   const g = new Float32Array(n * n).fill(Infinity);
@@ -79,8 +79,8 @@ export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: n
     for (const [dx, dy, cost] of DIRS) {
       const nx = cx + dx;
       const ny = cy + dy;
-      if (!isWalkable(map, nx, ny)) continue;
-      if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy) || !isWalkable(map, cx, cy + dy))) continue;
+      if (!isWalkable(map, nx, ny, team)) continue;
+      if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy, team) || !isWalkable(map, cx, cy + dy, team))) continue;
       const ni = ny * n + nx;
       if (closed[ni]) continue;
       const ng = g[cur] + cost;

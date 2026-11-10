@@ -129,7 +129,7 @@ const UNIT_SPRITES: Partial<Record<Kind, string[]>> = {
 };
 
 export interface Work {
-  /** 1 wood, 2 berries, 3 gold, 4 stone, 5 farm, 6 build. */
+  /** 1 wood, 2 berries, 3 gold, 5 farm, 6 build. */
   task: number;
   /** -1 when the work is to the left on screen, 1 when to the right. */
   dir: number;
@@ -137,7 +137,7 @@ export interface Work {
   phase: number;
 }
 
-const WORK_NAMES = ['', 'wood', 'berries', 'gold', 'stone', 'farm', 'build'];
+const WORK_NAMES = ['', 'wood', 'berries', 'gold', 'gold', 'farm', 'build'];
 const CHIP_COLORS = ['', '#d8b070', '#d43b5a', '#f2cf3a', '#c4c8cf', '#6e4f2c', '#d8cfae'];
 export const CARRY_COLORS = ['#d43b5a', '#8a5a33', '#f2cf3a', '#b4b8bf'];
 
@@ -265,7 +265,7 @@ const ROCK = [
   'ssssysss',
 ];
 
-const PROP_NAMES: Record<number, string> = { [Tile.Forest]: 'tree', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold', [Tile.Stone]: 'stone' };
+const PROP_NAMES: Record<number, string> = { [Tile.Forest]: 'tree', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold' };
 
 /** Draws the thing standing on a resource tile, with (x, y) at the tile centre. */
 export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: number, now = 0): void {
@@ -286,9 +286,6 @@ export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: 
   } else if (tile === Tile.Gold) {
     shadow(ctx, x, y + 5, 13, 5);
     blit(ctx, ROCK, { s: '#7a6f5a', y: '#f2cf3a' }, x, y + 7, 3);
-  } else if (tile === Tile.Stone) {
-    shadow(ctx, x, y + 5, 13, 5);
-    blit(ctx, ROCK, { s: '#85898f', y: '#c4c8cf' }, x, y + 7, 3);
   }
 }
 

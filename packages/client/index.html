@@ -32,7 +32,7 @@
     #banner { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 22px;
       border: 2px solid #e0c12f; background: #1d1a14; font-size: 18px; pointer-events: none; }
     #lobby, .screen { position: fixed; inset: 0; display: grid; place-items: center; background: #10140f; }
-    .card { display: grid; gap: 10px; width: min(380px, calc(100vw - 32px)); padding: 24px; border: 2px solid #5a4a2a; background: #1d1a14; }
+    .card { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 24px; border: 2px solid #5a4a2a; background: #1d1a14; }
     .card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .12em; color: #e0c12f; }
     .card p { margin: 0; }
     .card input, .card button { font: inherit; padding: 8px 10px; border: 1px solid #5a4a2a; background: #10140f; color: inherit; }
@@ -43,6 +43,11 @@
     #room-host { display: grid; gap: 10px; }
     #room-host[hidden] { display: none; }
     #room-players { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 6px; }
+    #room-players li { display: flex; align-items: center; gap: 6px; }
+    #room-players .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card select { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid #5a4a2a; background: #10140f; color: inherit; }
+    .card .check { display: flex; align-items: center; gap: 8px; }
+    .card .check input { width: auto; padding: 0; }
     #host-tools button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid #5a4a2a; background: #2b261c; color: inherit; cursor: pointer; }
     #lobby form { display: grid; gap: 10px; width: min(320px, calc(100vw - 32px)); padding: 24px;
       border: 2px solid #5a4a2a; background: #1d1a14; }
@@ -62,6 +67,7 @@
       <button id="switch-btn" type="button" title="Play the other side (Tab)">Switch team (Tab)</button>
       <button id="end-btn" type="button">End game</button>
     </span>
+    <button id="mute-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Sound on (M)</button>
     <button id="full-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Fullscreen (F)</button>
     <button id="help-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Help (H)</button>
     <span class="dim" hidden>Room <b id="room-code"></b></span>
@@ -83,9 +89,9 @@
     <b>X</b> stop · <b>Delete</b> destroy your selected unit or building<br>
     <b>Shift + 1–9</b> store a group · <b>1–9</b> select it<br>
     <b>.</b> next idle villager · <b>Space</b> jump to the last attack on you<br>
-    <b>WASD / arrows / cursor at the window edge</b> scroll · <b>F</b> fullscreen<br>
+    <b>WASD / arrows / cursor at the window edge</b> scroll · <b>F</b> fullscreen · <b>M</b> sound on/off<br>
     <b>Minimap</b> left-click or drag to look there · right-click to send the selected units there<br>
-    <b>Walls</b> are dragged out as a line. They block everyone, so leave a gap to get out.<br>
+    <b>Walls</b> are dragged out as a line and block everyone. A <b>gate</b> lets you and your allies through.<br>
     <b>Castle</b> right-click it with your king to shelter him. Lose your king and you are out.<br>
     <b>H</b> or <b>Esc</b> closes this.
   </div>
@@ -95,10 +101,12 @@
       <label class="dim" for="room-link">Invite link</label>
       <input id="room-link" readonly>
       <ul id="room-players"></ul>
+      <label class="check"><input id="quick-box" type="checkbox"> Quick start (more resources and villagers)</label>
       <p id="room-hint" class="dim"></p>
       <div id="room-host" hidden>
         <button id="start-btn" type="button">Start game</button>
-        <button id="add-test-btn" type="button" class="plain">Add test opponent</button>
+        <button id="add-ai-btn" type="button" class="plain">Add computer opponent</button>
+        <button id="add-test-btn" type="button" class="plain">Add test opponent (you play both sides)</button>
       </div>
       <p id="room-wait" class="dim" hidden>Waiting for the host to start the game…</p>
       <button id="leave-btn" type="button" class="plain">Leave</button>

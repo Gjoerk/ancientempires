@@ -42,7 +42,7 @@ The map is isometric. One tile is a diamond 64 px wide and 32 px high.
   Custom building sprites get no automatic shadow, so paint it into the image.
 
 Footprints: house, farm, storehouse, blacksmith 2 × 2 · town centre, barracks, archery range, stable,
-market, siege workshop 3 × 3 · watchtower, wall 1 × 1 · castle 4 × 4.
+market, siege workshop 3 × 3 · watchtower, wall, gate 1 × 1 · castle 4 × 4.
 
 ## Keys
 
@@ -50,17 +50,17 @@ The most specific key that exists is used.
 
 **Units** — `unit.<kind>` with kind one of `villager`, `king`, `swordsman`, `spearman`, `archer`, `rider`, `ram`.
 Optional per activity: `unit.<kind>.idle`, `.walk`, `.attack`, `.work`, and for villagers
-`.work.wood`, `.work.berries`, `.work.gold`, `.work.stone`, `.work.farm`, `.work.build`.
+`.work.wood`, `.work.berries`, `.work.gold`, `.work.farm`, `.work.build`.
 Work sprites should face right; they are mirrored when the work is on the left.
 If a villager has no `.work` sprite, the built-in tool animation is drawn over the sprite.
 
 **Buildings** — `building.<kind>` with kind one of `towncenter`, `house`, `storehouse`, `farm`,
-`barracks`, `range`, `stable`, `tower`, `castle`, `blacksmith`, `market`, `workshop`, `wall`.
+`barracks`, `range`, `stable`, `tower`, `castle`, `blacksmith`, `market`, `workshop`, `wall`, `gate`.
 Optional: `building.<kind>.site` (under construction), `building.site` (any building under
 construction), `building.castle.king` (castle with a king inside; replaces the `flag` option).
 Without a site sprite the finished sprite fades in as construction progresses.
 
-**Resources** — `resource.tree`, `resource.berries`, `resource.gold`, `resource.stone`.
+**Resources** — `resource.tree`, `resource.berries`, `resource.gold`.
 Optional variants `resource.tree.0`, `.1`, `.2` are picked per tile for variety.
 
 Terrain tiles, the minimap, health bars and the interface are not part of the sprite pack yet.

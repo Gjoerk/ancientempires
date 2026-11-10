@@ -1,6 +1,7 @@
 import { DEFS, isTech, KINDS, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
 import { MAX_PLAYERS } from './map';
-import type { EntitySnapshot, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
+import { runAi } from './ai';
+import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
 
 /**
@@ -12,18 +13,23 @@ export class GameHost {
   /** The running game, or undefined while the room waits in the lobby. */
   state: GameState | undefined;
   readonly players = new Map<number, PlayerInfo>();
+  readonly settings: GameSettings = { quick: false };
 
   constructor(readonly room: string) {}
 
-  /** Adds a player to the lobby. Returns undefined when the room is full or the game is running. */
-  join(name: unknown, test = false): PlayerInfo | undefined {
+  /**
+   * Adds a player to the lobby. Returns undefined when the room is full or the game is running.
+   * `kind` makes a stand-in the host plays themselves ('test') or a computer opponent ('ai').
+   */
+  join(name: unknown, kind?: 'test' | 'ai'): PlayerInfo | undefined {
     if (this.state) return undefined;
     let slot = 0;
     while (this.players.has(slot)) slot++;
     if (slot >= MAX_PLAYERS) return undefined;
     const clean = (typeof name === 'string' ? name : '').trim().slice(0, 16);
-    const player: PlayerInfo = { slot, name: clean || `Player ${slot + 1}` };
-    if (test) player.test = true;
+    const player: PlayerInfo = { slot, name: clean || `Player ${slot + 1}`, team: slot };
+    if (kind === 'test') player.test = true;
+    if (kind === 'ai') player.ai = true;
     this.players.set(slot, player);
     return player;
   }
@@ -32,10 +38,15 @@ export class GameHost {
     if (this.players.delete(slot) && this.state) removePlayer(this.state, slot);
   }
 
+  setTeam(slot: number, team: number): void {
+    const player = this.players.get(slot);
+    if (player && !this.state && Number.isInteger(team) && team >= 0 && team < MAX_PLAYERS) player.team = team;
+  }
+
   /** Starts a fresh game with everyone who is in the lobby. */
   start(seed: number): void {
     this.state = createGame(seed);
-    for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot);
+    for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot, this.players.get(slot)!.team, this.settings.quick);
   }
 
   /** Ends the running game and sends everyone back to the lobby. */
@@ -48,7 +59,7 @@ export class GameHost {
   }
 
   lobbyMessage(you: number, host: number): ServerMessage {
-    return { t: 'lobby', you, host, room: this.room, players: [...this.players.values()] };
+    return { t: 'lobby', you, host, room: this.room, players: [...this.players.values()], settings: { ...this.settings } };
   }
 
   startMessage(you: number): ServerMessage {
@@ -63,6 +74,8 @@ export class GameHost {
   tick(): ServerMessage | undefined {
     const s = this.state;
     if (!s) return undefined;
+    // Computer opponents think about once a second, each on its own tick.
+    for (const player of this.players.values()) if (player.ai && (s.tick + player.slot * 3) % 10 === 0) runAi(s, player.slot);
     step(s);
     const round = (v: number) => Math.round(v * 100) / 100;
     const ents: EntitySnapshot[] = [];
@@ -88,7 +101,7 @@ export class GameHost {
     return {
       t: 'snap', tick: s.tick, ents, queues,
       players: [...s.players.values()].map((p) => [
-        p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
+        p.slot, p.res.food, p.res.wood, p.res.gold, p.pop, p.cap, p.defeated ? 1 : 0,
         p.age, mask(p.techs), mask(p.researching),
       ]),
       tiles: s.tileEvents, shots: s.shots, hits: s.hits, deaths: s.deaths, rallies, winner: s.winner,

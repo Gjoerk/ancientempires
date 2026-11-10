@@ -4,3 +4,4 @@ export * from './path';
 export * from './sim';
 export * from './protocol';
 export * from './host';
+export * from './ai';

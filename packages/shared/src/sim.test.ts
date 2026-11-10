@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addPlayer, applyCommand, createGame, DEFS, Entity, findPath, GameState, generateMap, isWalkable, spawn, step, Tile,
+  addPlayer, applyCommand, createGame, DEFS, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
   TILE_RESOURCE,
 } from './index';
 
@@ -28,7 +28,7 @@ test('map generation is deterministic and every start has all four resources nea
   assert.deepEqual(a.tiles, generateMap(42).tiles);
   for (const [sx, sy] of a.starts) {
     assert.ok(isWalkable(a, sx, sy));
-    for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold, Tile.Stone]) {
+    for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold]) {
       let found = false;
       for (let y = sy - 12; y <= sy + 12; y++) for (let x = sx - 12; x <= sx + 12; x++) if (a.tiles[y * a.size + x] === tile) found = true;
       assert.ok(found, `tile ${tile} near start`);
@@ -45,7 +45,7 @@ test('paths only cross walkable tiles and end at the goal', () => {
 });
 
 test('villagers gather every resource and deliver it to the town centre', () => {
-  for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold, Tile.Stone]) {
+  for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold]) {
     const s = createGame(5);
     addPlayer(s, 0);
     const res = TILE_RESOURCE[tile as Tile]!.res;
@@ -170,7 +170,7 @@ test('ages gate buildings and units, and research unlocks and improves things', 
   const s = createGame(31);
   addPlayer(s, 0);
   const p = s.players.get(0)!;
-  Object.assign(p.res, { food: 5000, wood: 5000, gold: 5000, stone: 5000 });
+  Object.assign(p.res, { food: 5000, wood: 5000, gold: 5000 });
   const [sx, sy] = s.map.starts[0];
   const ids = owned(s, 0, 'villager').map((e) => e.id);
   const tc = owned(s, 0, 'towncenter')[0];
@@ -188,14 +188,12 @@ test('ages gate buildings and units, and research unlocks and improves things', 
   run(s, 100);
   const smith = owned(s, 0, 'blacksmith')[0];
   assert.equal(smith.progress, 1);
-  applyCommand(s, 0, { type: 'train', building: smith.id, kind: 'steel' });
-  assert.equal(smith.queue.length, 0, 'needs forging and the third age');
-  applyCommand(s, 0, { type: 'train', building: smith.id, kind: 'forging' });
+  applyCommand(s, 0, { type: 'train', building: smith.id, kind: 'weapons' });
   applyCommand(s, 0, { type: 'train', building: tc.id, kind: 'loom' });
-  run(s, 260);
-  assert.ok(p.techs.has('forging') && p.techs.has('loom'));
+  run(s, 310);
+  assert.ok(p.techs.has('weapons') && p.techs.has('loom'));
   assert.equal(owned(s, 0, 'villager')[0].hp, 40);
-  // Forging makes a swordsman hit a house for 8 + 2 (forging) + 2 (vs buildings) - 3 (armour) = 9.
+  // Better weapons make a swordsman hit a house for 8 + 2 (upgrade) + 2 (vs buildings) - 3 (armour) = 9.
   addPlayer(s, 1);
   const house = spawn(s, 1, 'house', 30, 30);
   const sword = spawn(s, 0, 'swordsman', 29, 30);
@@ -212,11 +210,11 @@ test('the market trades, villagers repair, and own things can be deleted', () =>
   const [sx, sy] = s.map.starts[0];
   const market = spawn(s, 0, 'market', sx - 2, sy + 3);
   applyCommand(s, 0, { type: 'trade', building: market.id, res: 'food', buy: false });
-  assert.deepEqual([p.res.food, p.res.gold], [100, 160]);
-  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'stone', buy: true });
-  assert.deepEqual([p.res.stone, p.res.gold], [200, 30]);
-  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'stone', buy: true });
-  assert.equal(p.res.gold, 30, 'cannot buy without the gold');
+  assert.deepEqual([p.res.food, p.res.gold], [100, 210]);
+  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'wood', buy: true });
+  assert.deepEqual([p.res.wood, p.res.gold], [300, 80]);
+  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'wood', buy: true });
+  assert.equal(p.res.gold, 80, 'cannot buy without the gold');
 
   market.hp = 100;
   applyCommand(s, 0, { type: 'interact', ids: [owned(s, 0, 'villager')[0].id], target: market.id });
@@ -263,4 +261,57 @@ test('walls block the way and idle units on one tile spread out', () => {
   const b = spawn(s, 0, 'spearman', sx, sy + 5);
   run(s, 40);
   assert.notDeepEqual([a.x, a.y], [b.x, b.y]);
+});
+
+test('gates let their own team through and nobody else', () => {
+  const s = createGame(41);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  addPlayer(s, 2, 0);
+  // A wall right across the map with a single gate of team 0.
+  const y = 32;
+  for (let x = 0; x < s.map.size; x++) {
+    s.map.tiles[y * s.map.size + x] = Tile.Grass;
+    if (x !== 20) spawn(s, 0, 'wall', x, y);
+  }
+  spawn(s, 0, 'gate', 20, y);
+  for (const tile of [(y - 1) * 64 + 20, (y + 1) * 64 + 20]) s.map.tiles[tile] = Tile.Grass;
+  const reaches = (owner: number) => {
+    const path = findPath(s.map, 20, y - 1, 20, y + 1, s.players.get(owner)!.team);
+    return path.length > 0 && path[path.length - 1] === y + 1;
+  };
+  assert.equal(reaches(0), true, 'owner');
+  assert.equal(reaches(2), true, 'ally');
+  assert.equal(reaches(1), false, 'enemy');
+});
+
+test('allies do not fight each other and a team wins together', () => {
+  const s = createGame(43);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 0);
+  addPlayer(s, 2, 1);
+  const mine = spawn(s, 0, 'swordsman', 30, 30);
+  const ally = spawn(s, 1, 'villager', 31, 30);
+  applyCommand(s, 0, { type: 'interact', ids: [mine.id], target: ally.id });
+  run(s, 60);
+  assert.equal(ally.hp, DEFS.villager.hp);
+  assert.equal(s.winner, -1);
+  s.entities.delete(owned(s, 2, 'king')[0].id);
+  run(s, 2);
+  assert.equal(s.winner, 0, 'team 0 wins');
+  assert.equal(s.players.get(0)!.defeated || s.players.get(1)!.defeated, false);
+});
+
+test('a computer opponent builds up, advances and beats an idle player', () => {
+  const host = new GameHost('TEST');
+  host.join('Idle');
+  host.join('Computer', 'ai');
+  host.start(47);
+  const s = host.state!;
+  let ticks = 0;
+  for (; ticks < 14000 && s.winner < 0; ticks++) host.tick();
+  const p = s.players.get(1)!;
+  assert.ok(owned(s, 1, 'villager').length >= 12, `villagers: ${owned(s, 1, 'villager').length}`);
+  assert.ok(p.age >= 2, `age ${p.age}`);
+  assert.equal(s.winner, 1, `no win after ${ticks} ticks; army ${[...s.entities.values()].filter((e) => e.owner === 1 && DEFS[e.kind].attack && !DEFS[e.kind].building && e.kind !== 'villager').length}`);
 });

@@ -33,6 +33,7 @@ import {
 import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
+import { isMuted, play, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
 
 interface View {
@@ -126,6 +127,8 @@ let fogMini: HTMLCanvasElement | undefined;
 /** Players whose sight is shown: the controlled one, plus all sides a host plays in a test game. */
 let sharedSight = new Set<number>();
 
+const teamOf = (slot: number) => roster.find((p) => p.slot === slot)?.team ?? -1 - slot;
+const isEnemy = (owner: number) => teamOf(owner) !== teamOf(me);
 const hasOf = (owner: number) => (tech: TechId) => ((players.get(owner)?.techs ?? 0) >> TECH_IDS.indexOf(tech) & 1) === 1;
 const maxHp = (v: View) => maxHpOf(v.kind, hasOf(v.owner));
 
@@ -230,8 +233,11 @@ function updateFog(now: number): void {
   rememberedBy.set(me, remembered);
   const p = players.get(me)!;
   // Once the game is decided, or for someone who is out, the whole map is shown.
-  revealAll = winner >= 0 || p.defeated;
-  sharedSight = new Set([me, ...controllable()]);
+  // An ally who is still in the game keeps the fog on for a fallen player.
+  const teamAlive = roster.some((q) => q.team === teamOf(me) && players.get(q.slot)?.defeated === false);
+  revealAll = winner >= 0 || (p.defeated && !teamAlive);
+  // Allies share what they see.
+  sharedSight = new Set([me, ...controllable(), ...roster.filter((q) => q.team === teamOf(me)).map((q) => q.slot)]);
   if (revealAll) {
     visible.fill(1);
     explored.fill(1);
@@ -300,7 +306,7 @@ function hash(x: number, y: number): number {
 
 const MINI_COLORS: Record<number, string> = {
   [Tile.Grass]: '#4f8a3a', [Tile.Water]: '#1c3f66', [Tile.Forest]: '#2a5a26',
-  [Tile.Berries]: '#b8506a', [Tile.Gold]: '#f2cf3a', [Tile.Stone]: '#9aa0a8',
+  [Tile.Berries]: '#b8506a', [Tile.Gold]: '#f2cf3a',
 };
 
 function paintTile(m: GameMap, index: number): void {
@@ -381,7 +387,7 @@ function onMessage(msg: ServerMessage): void {
   if (msg.t === 'lobby') {
     resetGame();
     roster = msg.players;
-    renderRoom(msg.room, msg.you, msg.host);
+    renderRoom(msg.room, msg.you, msg.host, msg.settings.quick);
     history.replaceState(null, '', `?room=${msg.room}`);
     $('lobby').style.display = 'none';
     $('waiting').style.display = '';
@@ -413,11 +419,13 @@ function onMessage(msg: ServerMessage): void {
         // Continue from wherever the unit is currently drawn, so motion stays smooth.
         [v.px, v.py] = viewPos(v, alpha);
         if (hp < v.hp && v.owner === me) underAttack(v, now);
+        if (v.owner === me && isBuilding(v.kind) && v.extra < 100 && extra >= 100) play('built', 400);
         Object.assign(v, { x, y, hp, act, extra, task, target });
       } else {
         const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, struck: 0, hurt: 0, px: x, py: y, x, y };
         views.set(id, created);
         setBlocked(created, 1);
+        if (owner === me && !isBuilding(created.kind) && msg.tick > 20) play('trained', 300);
       }
     }
     for (const [id, v] of views) {
@@ -433,6 +441,7 @@ function onMessage(msg: ServerMessage): void {
       if (!a || !b) continue;
       a.struck = now;
       b.hurt = now + 200;
+      if (canSee(a) || canSee(b)) play('arrow', 120);
       if (canSee(a) || canSee(b)) shots.push({ from: centreOf(a), to: centreOf(b), t: now });
     }
     for (const [from, to] of msg.hits) {
@@ -440,21 +449,32 @@ function onMessage(msg: ServerMessage): void {
       const b = views.get(to);
       if (a) a.struck = now;
       if (b) b.hurt = now + 120;
+      if ((a && canSee(a)) || (b && canSee(b))) play('hit', 110);
     }
     for (const [kindIdx, x, y] of msg.deaths) {
       const kind = KINDS[kindIdx];
       const half = isBuilding(kind) ? sizeOf(kind) / 2 : 0;
-      if (revealAll || tileSeen(Math.floor(x + half), Math.floor(y + half))) puffs.push({ x: x + half, y: y + half, t: now, big: isBuilding(kind) });
+      if (revealAll || tileSeen(Math.floor(x + half), Math.floor(y + half))) {
+        puffs.push({ x: x + half, y: y + half, t: now, big: isBuilding(kind) });
+        play(isBuilding(kind) ? 'collapse' : 'death', 150);
+      }
     }
     rallies.clear();
     for (const [id, x, y] of msg.rallies) rallies.set(id, [x, y]);
     queues.clear();
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
     let defeatChanged = false;
-    for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching] of msg.players) {
-      if (players.get(slot)?.defeated !== (defeated === 1)) defeatChanged = true;
-      players.set(slot, { res: { food, wood, gold, stone }, pop, cap, defeated: defeated === 1, age, techs, researching });
+    for (const [slot, food, wood, gold, pop, cap, defeated, age, techs, researching] of msg.players) {
+      const old = players.get(slot);
+      if (old?.defeated !== (defeated === 1)) defeatChanged = true;
+      if (slot === me && old) {
+        if (age > old.age) play('age');
+        else if (techs !== old.techs) play('research');
+        if (defeated === 1 && !old.defeated) play('defeat');
+      }
+      players.set(slot, { res: { food, wood, gold }, pop, cap, defeated: defeated === 1, age, techs, researching });
     }
+    if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
     if (defeatChanged) renderPlayers();
     winner = msg.winner;
     snapTime = now;
@@ -477,6 +497,7 @@ function underAttack(v: View, now: number): void {
   const [sx, sy] = tileToScreen(cx, cy);
   if (sx > 0 && sy > 40 && sx < canvas.width && sy < canvas.height - 170) return;
   alert = { x: cx, y: cy, t: now };
+  play('alarm');
   const toast = $('toast');
   toast.textContent = `Your ${DEFS[v.kind].label.toLowerCase()} is under attack! (Space to look)`;
   toast.hidden = false;
@@ -518,8 +539,9 @@ function showLobby(message: string): void {
   $('lobby-msg').textContent = message;
 }
 
-/** The waiting room: who is in, and for the host the buttons to set up and start. */
-function renderRoom(room: string, you: number, host: number): void {
+/** The waiting room: who is in, and for the host the controls to set up and start. */
+function renderRoom(room: string, you: number, host: number, quick: boolean): void {
+  const hosting = !!session?.host;
   $('room-title').textContent = `Room ${room}`;
   $<HTMLInputElement>('room-link').value = `${location.origin}${location.pathname}?room=${room}`;
   const list = $('room-players');
@@ -529,24 +551,40 @@ function renderRoom(room: string, you: number, host: number): void {
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.style.background = PLAYER_COLORS[p.slot];
-    const tags = [p.slot === you ? 'you' : '', p.slot === host ? 'host' : '', p.test ? 'played by the host' : ''].filter(Boolean);
-    li.append(chip, p.name + (tags.length ? ` (${tags.join(', ')})` : ''));
-    if (p.test && session?.host) {
+    const tags = [
+      p.slot === you ? 'you' : '', p.slot === host ? 'host' : '', p.test ? 'played by the host' : '', p.ai ? 'computer' : '',
+    ].filter(Boolean);
+    const name = document.createElement('span');
+    name.className = 'grow';
+    name.textContent = p.name + (tags.length ? ` (${tags.join(', ')})` : '');
+    // The host puts players into teams; same team means allies.
+    const team = document.createElement('select');
+    team.title = 'Team';
+    for (let t = 0; t < 4; t++) team.add(new Option(`Team ${t + 1}`, String(t)));
+    team.value = String(p.team);
+    team.disabled = !hosting;
+    team.addEventListener('change', () => session?.host?.setTeam(p.slot, Number(team.value)));
+    li.append(chip, name, team);
+    if ((p.test || p.ai) && hosting) {
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = 'Remove';
-      remove.addEventListener('click', () => session?.host?.removeTestPlayer(p.slot));
-      li.append(' ', remove);
+      remove.addEventListener('click', () => session?.host?.removeExtra(p.slot));
+      li.append(remove);
     }
     list.append(li);
   }
-  const hosting = !!session?.host;
   $('room-host').hidden = !hosting;
   $('room-wait').hidden = hosting;
-  $<HTMLButtonElement>('add-test-btn').disabled = roster.length >= 4;
+  $<HTMLButtonElement>('add-test-btn').disabled = $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= 4;
+  const quickBox = $<HTMLInputElement>('quick-box');
+  quickBox.checked = quick;
+  quickBox.disabled = !hosting;
+  const teams = new Set(roster.map((p) => p.team)).size;
   $('room-hint').textContent = roster.length < 2
-    ? 'You are alone. Share the link, or add a test opponent to play both sides yourself.'
-    : `${roster.length} players. Everyone starts at the same time.`;
+    ? 'You are alone. Share the link, or add a computer opponent.'
+    : teams < 2 ? 'Everyone is on the same team, so nobody can win. Put at least one player on another team.'
+      : `${roster.length} players in ${teams} teams. Everyone starts at the same time.`;
 }
 
 /** The slot this browser joined as; `me` can differ while the host plays a test opponent. */
@@ -578,6 +616,8 @@ function switchTeam(to?: number, keepSelection = false): void {
 
 $('start-btn').addEventListener('click', () => session?.host?.start());
 $('add-test-btn').addEventListener('click', () => session?.host?.addTestPlayer());
+$('add-ai-btn').addEventListener('click', () => session?.host?.addComputer());
+$('quick-box').addEventListener('change', (ev) => session?.host?.setQuickStart((ev.target as HTMLInputElement).checked));
 $('leave-btn').addEventListener('click', () => session?.close());
 $('switch-btn').addEventListener('click', () => switchTeam());
 $('end-btn').addEventListener('click', () => {
@@ -690,10 +730,12 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
   if (target && (target.owner !== me || isBuilding(target.kind))) {
     send({ type: 'interact', ids, target: target.id });
     marker = undefined;
-    if (target.owner !== me) attackFlash = { id: target.id, t: performance.now() };
+    if (isEnemy(target.owner)) attackFlash = { id: target.id, t: performance.now() };
+    play('order');
     return;
   }
   const tile = resourceTileAt(sx, sy);
+  play('order');
   if (tile >= 0) {
     send({ type: 'gather', ids, tile });
     tileFlash = { tile, t: performance.now() };
@@ -820,6 +862,7 @@ window.addEventListener('keydown', (ev) => {
   }
   if (key === 'h') $('help').hidden = !$('help').hidden;
   if (key === 'f') toggleFullscreen();
+  if (key === 'm') $('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)';
   if (key === 'x') send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
   if (key === 'delete' || key === 'backspace') {
     for (const id of selected) if (views.get(id)?.owner === me) send({ type: 'delete', id });
@@ -862,6 +905,10 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+$('mute-btn').textContent = isMuted() ? 'Sound off (M)' : 'Sound on (M)';
+$('mute-btn').addEventListener('click', () => ($('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)'));
+window.addEventListener('pointerdown', unlockSound);
+window.addEventListener('keydown', unlockSound);
 $('help-btn').addEventListener('click', () => ($('help').hidden = !$('help').hidden));
 $('actions').addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
@@ -953,7 +1000,7 @@ function renderPanel(): void {
 
   if (placing) {
     info = placing === 'wall'
-      ? 'Placing Stone Wall — drag a line and release, hold Shift for more, Esc to cancel'
+      ? 'Placing Wall — drag a line and release, hold Shift for more, Esc to cancel'
       : `Placing ${DEFS[placing].label} — click to build, hold Shift for several, Esc to cancel`;
   } else if (chosen.length === 1) {
     const v = chosen[0];
@@ -989,8 +1036,8 @@ function renderPanel(): void {
         buttons.push({ label: tech.label, cost: tech.cost, locked: !!missing, sub: missing || tech.effect, data: { train: id, at } });
       }
       if (v.kind === 'market') {
-        for (const r of ['food', 'wood', 'stone']) buttons.push({ label: `Sell 100 ${r}`, sub: `for ${TRADE_SELL} gold`, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
-        for (const r of ['food', 'wood', 'stone']) buttons.push({ label: `Buy 100 ${r}`, sub: `for ${TRADE_BUY} gold`, locked: (my?.res.gold ?? 0) < TRADE_BUY, data: { buy: r, at } });
+        for (const r of ['food', 'wood']) buttons.push({ label: `Sell 100 ${r}`, sub: `for ${TRADE_SELL} gold`, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
+        for (const r of ['food', 'wood']) buttons.push({ label: `Buy 100 ${r}`, sub: `for ${TRADE_BUY} gold`, locked: (my?.res.gold ?? 0) < TRADE_BUY, data: { buy: r, at } });
       }
       if (queue) buttons.push({ label: 'Cancel last', data: { cancel: at } });
       if (def.trains && !queue) info += ' · right-click the map to set a gathering point';
@@ -1032,7 +1079,7 @@ function renderHud(): void {
   const p = players.get(me);
   if (!p) return;
   const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0).length;
-  const signature = [p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, idle, p.defeated, winner, p.age].join();
+  const signature = [p.res.food, p.res.wood, p.res.gold, p.pop, p.cap, idle, p.defeated, winner, p.age].join();
   if (signature === hudSignature) return;
   hudSignature = signature;
   const el = $('resources');
@@ -1052,9 +1099,11 @@ function renderHud(): void {
   const banner = $('banner');
   let text = '';
   const who = me === myOwnSlot ? 'Your' : `${roster.find((q) => q.slot === me)?.name ?? 'This player'}'s`;
-  if (winner === me) text = me === myOwnSlot ? 'Victory! Yours is the last king standing.' : 'This side has won.';
+  const myTeam = teamOf(me);
+  const allies = roster.filter((q) => q.team === myTeam).length > 1;
+  if (winner === myTeam) text = me !== myOwnSlot ? 'This side has won.' : allies ? 'Victory! Your team has the last king standing.' : 'Victory! Yours is the last king standing.';
   else if (p.defeated) text = `${who} king has fallen. ${me === myOwnSlot ? 'You are' : 'This side is'} out of the game.`;
-  if (winner >= 0 && winner !== me) text += ` ${roster.find((q) => q.slot === winner)?.name ?? 'Another player'} wins.`;
+  if (winner >= 0 && winner !== myTeam) text += ` ${roster.filter((q) => q.team === winner).map((q) => q.name).join(' and ') || 'Another team'} won.`;
   banner.textContent = text.trim();
   banner.hidden = !text;
 }
@@ -1350,7 +1399,7 @@ function frame(now: number): void {
   }
   if (mouse.onMap && !placing && !drag && ownSelectedUnits().some((v) => DEFS[v.kind].attack)) {
     const over = unitAt(mouse.x, mouse.y) ?? buildingAt(mouse.x, mouse.y);
-    if (over && over.owner !== me && !marked.has(over.id)) drawTargetMark(over, 0.6, 1.5);
+    if (over && isEnemy(over.owner) && !marked.has(over.id)) drawTargetMark(over, 0.6, 1.5);
   }
 
   // Fields lie flat on the ground, so they are drawn before anything that stands.

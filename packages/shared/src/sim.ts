@@ -1,6 +1,6 @@
 import {
   armorOf, attackOf, CARRY_CAPACITY, Cost, DEFAULT_SIGHT, DEFS, FARM_RATE, GATHER_RATE, isTech, Kind, KINDS, maxHpOf, POP_MAX,
-  QUEUE_MAX, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
+  QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, Tile, TILE_RESOURCE } from './map';
 import { findPath } from './path';
@@ -52,6 +52,8 @@ export interface Entity {
 
 export interface PlayerState {
   slot: number;
+  /** Players on the same team are allies: they do not fight each other and win together. */
+  team: number;
   res: Record<Res, number>;
   pop: number;
   cap: number;
@@ -79,10 +81,12 @@ export interface GameState {
   hits: [number, number][];
   /** Units and buildings that died this tick: [kind index, x, y, owner]. */
   deaths: [number, number, number, number][];
-  /** True once two players have been in the game together. */
+  /** True once two teams have been in the game together. */
   contested: boolean;
-  /** Slot of the last king standing, or -1. */
+  /** The last team with a king standing, or -1. */
   winner: number;
+  /** Notes the computer opponents keep between their turns. */
+  ai: Map<number, { lastAttack: number; waves: number }>;
 }
 
 export type Command =
@@ -112,8 +116,16 @@ const tileRect = (map: GameMap, tile: number): Rect => ({ x: tile % map.size, y:
 export function createGame(seed: number): GameState {
   return {
     tick: 0, seed, map: generateMap(seed), entities: new Map(), players: new Map(), nextId: 1,
-    changedTiles: new Map(), tileEvents: [], shots: [], hits: [], deaths: [], contested: false, winner: -1,
+    changedTiles: new Map(), tileEvents: [], shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(),
   };
+}
+
+export function teamOf(state: GameState, owner: number): number {
+  return state.players.get(owner)?.team ?? -1 - owner;
+}
+
+export function isEnemy(state: GameState, a: number, b: number): boolean {
+  return teamOf(state, a) !== teamOf(state, b);
 }
 
 /** Returns a lookup telling whether a player has researched a technology. */
@@ -132,6 +144,7 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
   };
   state.entities.set(e.id, e);
   if (def.building) setBlocked(state.map, rectOf(e), 1);
+  if (kind === 'gate') state.map.gate[ty * state.map.size + tx] = teamOf(state, owner) + 1;
   return e;
 }
 
@@ -147,6 +160,7 @@ function kill(state: GameState, e: Entity): void {
   const owner = state.players.get(e.owner);
   for (const item of e.queue) if (isTech(item)) owner?.researching.delete(item);
   setBlocked(state.map, rectOf(e), 0);
+  if (e.kind === 'gate') state.map.gate[e.y * state.map.size + e.x] = 0;
   eject(state, e);
 }
 
@@ -169,18 +183,20 @@ export function hasKingInside(state: GameState, b: Entity): boolean {
   return false;
 }
 
-/** Gives a player their town centre, king, villagers and starting resources. */
-export function addPlayer(state: GameState, slot: number): void {
+/** Gives a player their town centre, castle, king, villagers and starting resources. */
+export function addPlayer(state: GameState, slot: number, team = slot, quick = false): void {
   state.players.set(slot, {
-    slot, res: { ...START_RESOURCES }, pop: 0, cap: 0, defeated: false, age: 1, techs: new Set(), researching: new Set(),
+    slot, team, res: { ...(quick ? QUICK_RESOURCES : START_RESOURCES) }, pop: 0, cap: 0, defeated: false,
+    age: 1, techs: new Set(), researching: new Set(),
   });
   const [sx, sy] = state.map.starts[slot];
   spawn(state, slot, 'towncenter', sx - 4, sy - 2);
   spawn(state, slot, 'castle', sx + 1, sy - 2);
-  const spots = freeTilesNear(state.map, sx - 1, sy + 1, 5);
+  const spots = freeTilesNear(state.map, sx - 1, sy + 1, quick ? 9 : 5);
   spawn(state, slot, 'king', spots[0][0], spots[0][1]);
   for (let i = 1; i < spots.length; i++) spawn(state, slot, 'villager', spots[i][0], spots[i][1]);
-  if ([...state.players.values()].filter((p) => !p.defeated).length >= 2) state.contested = true;
+  if (quick) spawn(state, slot, 'house', sx - 4, sy + 2);
+  if (new Set([...state.players.values()].filter((p) => !p.defeated).map((p) => p.team)).size >= 2) state.contested = true;
 }
 
 export function removePlayer(state: GameState, slot: number): void {
@@ -265,7 +281,7 @@ function goAdjacent(state: GameState, e: Entity, r: Rect): boolean {
   }
   ring.sort((a, b) => a[2] - b[2]);
   for (const [x, y] of ring.slice(0, 4)) {
-    const path = findPath(state.map, ex, ey, x, y);
+    const path = findPath(state.map, ex, ey, x, y, teamOf(state, e.owner));
     if (path.length >= 2 && path[path.length - 2] === x && path[path.length - 1] === y) {
       e.path = path;
       return true;
@@ -316,7 +332,7 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number): voi
   units.forEach((e, i) => {
     const spot = spots[i];
     if (!spot) return;
-    e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1]);
+    e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
     e.order = { t: 'move' };
   });
 }
@@ -366,8 +382,11 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     if (!target) return;
     for (const e of ownUnits(state, slot, cmd.ids)) {
       e.path = [];
-      if (target.owner !== slot) {
+      if (isEnemy(state, target.owner, slot)) {
         if (DEFS[e.kind].attack) e.order = { t: 'attack', id: target.id, auto: false };
+      } else if (target.owner !== slot) {
+        // An ally: just walk over.
+        moveUnits(state, [e], target.x, target.y);
       } else if (target.kind === 'castle' && e.kind === 'king' && target.progress >= 1) {
         e.order = { t: 'garrison', id: target.id };
       } else if (isBuilding(target) && e.kind === 'villager'
@@ -434,7 +453,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
   } else if (cmd.type === 'trade') {
     const b = state.entities.get(cmd.building);
     if (!b || b.owner !== slot || b.kind !== 'market' || b.progress < 1) return;
-    if (!RESOURCES.includes(cmd.res) || cmd.res === 'gold') return;
+    if (cmd.res !== 'food' && cmd.res !== 'wood') return;
     if (cmd.buy) {
       if (player.res.gold < TRADE_BUY) return;
       player.res.gold -= TRADE_BUY;
@@ -469,7 +488,7 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
   let best: Entity | undefined;
   let bestScore = Infinity;
   for (const other of state.entities.values()) {
-    if (other.owner === e.owner || other.inside >= 0) continue;
+    if (!isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
     const d = distance(e, other);
     if (d > reach) continue;
     // Prefer units over buildings at a similar distance.
@@ -634,7 +653,7 @@ function endAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack' 
 function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack' }>): void {
   const def = DEFS[e.kind];
   const target = state.entities.get(o.id);
-  if (!target || target.owner === e.owner || target.inside >= 0) return endAttack(state, e, o);
+  if (!target || !isEnemy(state, target.owner, e.owner) || target.inside >= 0) return endAttack(state, e, o);
   const d = distance(e, target);
   if (d <= rangeOf(e.kind, hasTech(state, e.owner))) {
     e.path = [];
@@ -647,7 +666,7 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
     if (isBuilding(target)) {
       if (!goAdjacent(state, e, rectOf(target)) && o.auto) endAttack(state, e, o);
     } else {
-      e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(target.x), Math.floor(target.y));
+      e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(target.x), Math.floor(target.y), teamOf(state, e.owner));
     }
   }
 }
@@ -712,7 +731,7 @@ function spreadIdleUnits(state: GameState): void {
     const spot = freeTilesNear(state.map, Math.floor(e.x), Math.floor(e.y), 16).find(([x, y]) => !taken.has(y * state.map.size + x));
     if (!spot) continue;
     taken.add(spot[1] * state.map.size + spot[0]);
-    e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1]);
+    e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
     e.order = { t: 'move' };
   }
 }
@@ -787,8 +806,8 @@ export function step(state: GameState): void {
     for (const e of [...state.entities.values()]) if (e.owner === p.slot) kill(state, e);
   }
   if (state.contested && state.winner < 0) {
-    const alive = [...state.players.values()].filter((p) => !p.defeated);
-    if (alive.length === 1) state.winner = alive[0].slot;
+    const alive = new Set([...state.players.values()].filter((p) => !p.defeated).map((p) => p.team));
+    if (alive.size === 1) state.winner = [...alive][0];
   }
 }
 
@@ -802,7 +821,7 @@ export function activityOf(e: Entity): number {
 
 /**
  * What a unit is visibly busy with and where, for work animations:
- * [task, target]. Tasks: 0 none, 1 wood, 2 berries, 3 gold, 4 stone, 5 farm, 6 build, 7 attack.
+ * [task, target]. Tasks: 0 none, 1 wood, 2 berries, 3 gold, 5 farm, 6 build, 7 attack.
  * The target is a tile index for 1-4 and an entity id for 5-7.
  */
 export function taskOf(e: Entity): [number, number] {
@@ -812,7 +831,7 @@ export function taskOf(e: Entity): [number, number] {
   if (o.t === 'build') return [6, o.id];
   if (o.t !== 'gather' || o.phase !== 'work') return [0, 0];
   if (o.farm >= 0) return [5, o.farm];
-  return [1 + ['wood', 'food', 'gold', 'stone'].indexOf(o.res), o.tile];
+  return [1 + ['wood', 'food', 'gold'].indexOf(o.res), o.tile];
 }
 
 export const kindIndex = (kind: Kind): number => KINDS.indexOf(kind);

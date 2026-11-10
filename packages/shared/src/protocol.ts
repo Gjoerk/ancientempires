@@ -3,8 +3,17 @@ import type { Command } from './sim';
 export interface PlayerInfo {
   slot: number;
   name: string;
+  /** Players with the same team number are allies. */
+  team: number;
   /** A stand-in opponent that the host controls themselves, for testing. */
   test?: boolean;
+  /** A computer opponent, played by the host's browser. */
+  ai?: boolean;
+}
+
+export interface GameSettings {
+  /** More starting resources and villagers, for shorter games. */
+  quick: boolean;
 }
 
 /**
@@ -16,7 +25,7 @@ export interface PlayerInfo {
 export type EntitySnapshot = [number, number, number, number, number, number, number, number, number, number];
 
 /**
- * [slot, food, wood, gold, stone, population, housing, defeated (0/1), age,
+ * [slot, food, wood, gold, population, housing, defeated (0/1), age,
  *  researched technologies as a bit mask over TECH_IDS, technologies being researched likewise]
  */
 export type PlayerSnapshot = number[];
@@ -32,7 +41,7 @@ export type ClientMessage =
 /** Sent by the host to players. */
 export type ServerMessage =
   /** The room is waiting in the lobby. Sent whenever who is in it changes. */
-  | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[] }
+  | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[]; settings: GameSettings }
   /** The host started the game. */
   | { t: 'start'; you: number; room: string; seed: number; players: PlayerInfo[] }
   | { t: 'players'; players: PlayerInfo[] }
@@ -54,6 +63,7 @@ export type ServerMessage =
       deaths: [number, number, number, number][];
       /** Rally points: [building id, x, y]. */
       rallies: [number, number, number][];
+      /** The winning team, or -1. */
       winner: number;
     }
   | { t: 'error'; message: string };

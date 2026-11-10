@@ -5,7 +5,7 @@ export const MAX_PLAYERS = 4;
 /** Radius around each start tile kept free for the town centre and castle. */
 const BASE_RADIUS = 6.5;
 
-export const Tile = { Grass: 0, Water: 1, Forest: 2, Berries: 3, Gold: 4, Stone: 5 } as const;
+export const Tile = { Grass: 0, Water: 1, Forest: 2, Berries: 3, Gold: 4 } as const;
 export type Tile = (typeof Tile)[keyof typeof Tile];
 
 /** Which resource a tile yields, and how much it holds when the map is made. */
@@ -13,7 +13,6 @@ export const TILE_RESOURCE: Partial<Record<Tile, { res: Res; amount: number }>> 
   [Tile.Forest]: { res: 'wood', amount: 100 },
   [Tile.Berries]: { res: 'food', amount: 200 },
   [Tile.Gold]: { res: 'gold', amount: 500 },
-  [Tile.Stone]: { res: 'stone', amount: 400 },
 };
 
 export interface GameMap {
@@ -23,6 +22,8 @@ export interface GameMap {
   amount: Uint16Array;
   /** 1 where a building stands. */
   blocked: Uint8Array;
+  /** Where a gate stands: the team that may walk through it, plus 1. */
+  gate: Uint8Array;
   /** Start tile per player slot. */
   starts: [number, number][];
 }
@@ -47,10 +48,11 @@ export function tileAt(map: GameMap, tx: number, ty: number): Tile {
   return map.tiles[ty * map.size + tx] as Tile;
 }
 
-export function isWalkable(map: GameMap, tx: number, ty: number): boolean {
+/** Whether a unit can stand on a tile. With a team given, that team's gates count as open. */
+export function isWalkable(map: GameMap, tx: number, ty: number, team = -1): boolean {
   if (!inBounds(map, tx, ty)) return false;
   const i = ty * map.size + tx;
-  return map.tiles[i] === Tile.Grass && map.blocked[i] === 0;
+  return map.tiles[i] === Tile.Grass && (map.blocked[i] === 0 || (team >= 0 && map.gate[i] === team + 1));
 }
 
 export function generateMap(seed: number, size = MAP_SIZE): GameMap {
@@ -79,7 +81,7 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
   for (let i = 0; i < 6; i++) blob(Tile.Water, rand() * size, rand() * size, 3 + rand() * 3, 1, 15);
   for (let i = 0; i < 34; i++) blob(Tile.Forest, rand() * size, rand() * size, 2 + rand() * 3, 0.8, 9);
   for (let i = 0; i < 7; i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
-  for (let i = 0; i < 6; i++) blob(Tile.Stone, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
+  for (let i = 0; i < 5; i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
 
   // A connected patch of exactly `count` tiles, grown outwards from a centre.
   const patch = (tile: Tile, cx: number, cy: number, count: number) => {
@@ -108,10 +110,10 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
     blob(Tile.Forest, ...spot(0.85, 10.5), 2.6, 1, BASE_RADIUS);
     patch(Tile.Berries, ...spot(0, 8), 6);
     patch(Tile.Gold, ...spot(0.45, 9), 5);
-    patch(Tile.Stone, ...spot(0.65, 9), 4);
+    patch(Tile.Gold, ...spot(0.65, 9.5), 4);
   }
 
   const amount = new Uint16Array(size * size);
   for (let i = 0; i < tiles.length; i++) amount[i] = TILE_RESOURCE[tiles[i] as Tile]?.amount ?? 0;
-  return { size, tiles, amount, blocked: new Uint8Array(size * size), starts };
+  return { size, tiles, amount, blocked: new Uint8Array(size * size), gate: new Uint8Array(size * size), starts };
 }

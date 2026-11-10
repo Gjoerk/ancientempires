@@ -36,14 +36,14 @@ All art is drawn by code, but any unit, building or resource can be replaced wit
 ## Status
 
 Done:
-- Waiting room; the host starts and ends games and can add a test opponent they play themselves.
-- Seeded 64×64 map with wood, berries, gold and stone near every start; fog of war with explored and unexplored areas.
-- Economy: gathering and delivering, farms, storehouses, houses, population limit, market trading.
-- Three ages and ten technologies (town centre, storehouse, blacksmith) that unlock and improve units and buildings.
-- Buildings placed and built by villagers, repair, rally points, stone walls dragged out as lines.
+- Waiting room with teams, computer opponents, a quick-start option and a test opponent the host plays themselves.
+- Seeded 64×64 map with wood, berries and gold near every start; fog of war shared between allies.
+- Economy with three resources (food, wood, gold): gathering, farms, storehouses, houses, population limit, market.
+- Three ages and a handful of upgrades (town centre, storehouse, blacksmith).
+- Buildings placed and built by villagers, repair, rally points, walls dragged out as lines, gates for the owner's team.
 - Combat: spearman, swordsman, archer, rider, battering ram, watchtower and castle, with counters; attack-move, stop, control groups.
-- Protect the king: he can shelter in the castle; a player whose king dies is out and the last king standing wins.
-- Any sprite can be replaced through the sprite pack.
+- Protect the king: he can shelter in the castle; a player whose king dies is out and the last team with a king wins.
+- Synthesised sound effects; any sprite can be replaced through the sprite pack.
 
-Not yet: gates, a computer opponent, healing and conversion, ships and water, trade routes, teams and diplomacy,
-unit formations and real collision, sound, game settings (map size, starting resources).
+Deliberately left out to keep the game quick to learn: ships, monks, trade carts, hunting, civilizations,
+diplomacy, formations and unit collision.

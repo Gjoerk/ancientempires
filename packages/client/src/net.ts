@@ -14,7 +14,11 @@ export interface HostControls {
   backToLobby(): void;
   /** Adds a stand-in opponent that the host plays themselves. */
   addTestPlayer(): void;
-  removeTestPlayer(slot: number): void;
+  addComputer(): void;
+  /** Removes a test or computer opponent from the lobby. */
+  removeExtra(slot: number): void;
+  setTeam(slot: number, team: number): void;
+  setQuickStart(on: boolean): void;
   /** Switches which of the host's own players the host's commands go to. */
   control(slot: number): boolean;
 }
@@ -156,11 +160,24 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
         sendLobby();
       },
       addTestPlayer() {
-        if (game.join('Test opponent', true)) sendLobby();
+        if (game.join('Test opponent', 'test')) sendLobby();
       },
-      removeTestPlayer(slot) {
-        if (game.state || !game.players.get(slot)?.test) return;
+      addComputer() {
+        if (game.join('Computer', 'ai')) sendLobby();
+      },
+      removeExtra(slot) {
+        const player = game.players.get(slot);
+        if (game.state || !(player?.test || player?.ai)) return;
         game.leave(slot);
+        sendLobby();
+      },
+      setTeam(slot, team) {
+        game.setTeam(slot, team);
+        sendLobby();
+      },
+      setQuickStart(on) {
+        if (game.state) return;
+        game.settings.quick = on;
         sendLobby();
       },
       control(slot) {

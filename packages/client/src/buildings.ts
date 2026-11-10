@@ -350,6 +350,18 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.crenels(0, 0, 1, 1, 18, STONE);
   },
 
+  // A wall tile with an archway; the doors carry the owner's colour.
+  gate(pen, team) {
+    pen.box(0, 0, 1, 1, 0, 24, STONE, '#74747e');
+    pen.onU(1, 0.2, 0.8, 0, 17, '#22160c');
+    pen.onU(1, 0.26, 0.74, 0, 14, team);
+    pen.onU(1, 0.48, 0.52, 0, 14, '#22160c');
+    pen.onV(1, 0.2, 0.8, 0, 17, '#22160c');
+    pen.onV(1, 0.26, 0.74, 0, 14, team);
+    pen.onV(1, 0.48, 0.52, 0, 14, '#22160c');
+    pen.crenels(0, 0, 1, 1, 24, STONE);
+  },
+
   // Walled keep with four corner towers. A flag flies only while a king is inside.
   castle(pen, team, state) {
     const tower = (u: number, v: number) => {
