@@ -2,8 +2,8 @@ import {
   armorOf, attackOf, bonusOf, CARRY_CAPACITY, cooldownOf, TRADE_GOODS, Cost, DEFAULT_SIGHT, DEFS, FARM_FOOD, FARM_RATE, GATHER_RATE, GATHER_TECH, RESEED_COST, isTech, Kind, KINDS, maxHpOf, POP_MAX,
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
-import { GameMap, generateMap, inBounds, isWalkable, Tile, TILE_RESOURCE } from './map';
-import { findPath } from './path';
+import { GameMap, generateMap, inBounds, isWalkable, markBuilding, Tile, TILE_RESOURCE } from './map';
+import { findPath, findPathToArea } from './path';
 
 /** Simulation steps per second. The host runs this; guests only draw snapshots. */
 export const TICK_RATE = 10;
@@ -46,6 +46,8 @@ export interface Entity {
   trainTicks: number;
   /** Where newly trained units go, as tile coordinates. */
   rally?: [number, number];
+  /** While moving with a group: the group's speed, so that everyone keeps the same pace. */
+  pace?: number;
   /** Id of the castle this unit is sheltering in, or -1. */
   inside: number;
 }
@@ -83,6 +85,8 @@ export interface GameState {
   hits: [number, number][];
   /** Units and buildings that died this tick: [kind index, x, y, owner]. */
   deaths: [number, number, number, number][];
+  /** Tile index -> id of the unit standing there or heading there. Rebuilt every tick. */
+  occupied: Map<number, number>;
   /** True once two teams have been in the game together. */
   contested: boolean;
   /** The last team with a king standing, or -1. */
@@ -120,7 +124,7 @@ const tileRect = (map: GameMap, tile: number): Rect => ({ x: tile % map.size, y:
 export function createGame(seed: number, size?: number): GameState {
   return {
     tick: 0, seed, map: generateMap(seed, size), entities: new Map(), players: new Map(), nextId: 1,
-    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(),
+    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(), occupied: new Map(),
   };
 }
 
@@ -147,15 +151,15 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
     carry: 0, carryRes: 'food', work: 0, progress: built ? 1 : 0, queue: [], trainTicks: 0, inside: -1,
   };
   state.entities.set(e.id, e);
-  if (def.building) setBlocked(state.map, rectOf(e), 1);
+  if (def.building) setBlocked(state.map, e, 1);
   // A farm's `carry` is the food left before it must be sown again.
   if (kind === 'farm') e.carry = FARM_FOOD;
   if (kind === 'gate') state.map.gate[ty * state.map.size + tx] = teamOf(state, owner) + 1;
   return e;
 }
 
-function setBlocked(map: GameMap, r: Rect, value: number): void {
-  for (let y = r.y; y < r.y + r.s; y++) for (let x = r.x; x < r.x + r.s; x++) map.blocked[y * map.size + x] = value;
+function setBlocked(map: GameMap, e: Entity, value: number): void {
+  markBuilding(map, e.x, e.y, sizeOf(e), DEFS[e.kind].walkable === true, value);
 }
 
 function kill(state: GameState, e: Entity): void {
@@ -165,7 +169,7 @@ function kill(state: GameState, e: Entity): void {
   // Research that was under way is lost and can be ordered again.
   const owner = state.players.get(e.owner);
   for (const item of e.queue) if (isTech(item)) owner?.researching.delete(item);
-  setBlocked(state.map, rectOf(e), 0);
+  setBlocked(state.map, e, 0);
   if (e.kind === 'gate') state.map.gate[e.y * state.map.size + e.x] = 0;
   eject(state, e);
 }
@@ -246,7 +250,9 @@ function pay(player: PlayerState, cost: Cost, sign = -1): void {
 /** Whether a building of this kind fits with its top-left corner on a tile. */
 export function canPlace(map: GameMap, kind: Kind, tx: number, ty: number): boolean {
   const s = DEFS[kind].size ?? 1;
-  for (let y = ty; y < ty + s; y++) for (let x = tx; x < tx + s; x++) if (!isWalkable(map, x, y)) return false;
+  for (let y = ty; y < ty + s; y++) {
+    for (let x = tx; x < tx + s; x++) if (!isWalkable(map, x, y) || map.footprint[y * map.size + x]) return false;
+  }
   return true;
 }
 
@@ -272,30 +278,90 @@ function isAdjacent(e: Entity, r: Rect): boolean {
   return tx >= r.x - 1 && tx <= r.x + r.s && ty >= r.y - 1 && ty <= r.y + r.s;
 }
 
-/** Sends a unit to the nearest reachable tile next to a rectangle. False if there is none. */
+/**
+ * Sends a unit to the nearest reachable tile next to a rectangle, one that no other unit stands on
+ * or is heading for when there is such a tile. False if the rectangle cannot be reached at all.
+ */
 function goAdjacent(state: GameState, e: Entity, r: Rect): boolean {
   if (isAdjacent(e, r)) {
     e.path = [];
     return true;
   }
+  const team = teamOf(state, e.owner);
   const ex = Math.floor(e.x);
   const ey = Math.floor(e.y);
-  const ring: [number, number, number][] = [];
-  for (let y = r.y - 1; y <= r.y + r.s; y++) {
-    for (let x = r.x - 1; x <= r.x + r.s; x++) {
-      const inside = x >= r.x && x < r.x + r.s && y >= r.y && y < r.y + r.s;
-      if (!inside && isWalkable(state.map, x, y)) ring.push([x, y, Math.hypot(x - ex, y - ey)]);
+  const res = findPathToArea(state.map, ex, ey, r.x, r.y, r.s, team);
+  if (!res.reached) return false;
+  e.path = res.path;
+  // If that spot is already taken, prefer a free one on the way round, when it is not much further.
+  const end = e.path.length >= 2 ? e.path[e.path.length - 1] * state.map.size + e.path[e.path.length - 2] : -1;
+  if (end >= 0 && isTaken(state, end, e)) {
+    const spot = freeSpotAround(state, e, r);
+    if (spot) {
+      const alt = findPath(state.map, ex, ey, spot[0], spot[1], team);
+      if (alt.length >= 2 && alt[alt.length - 2] === spot[0] && alt[alt.length - 1] === spot[1] && alt.length <= e.path.length + 8) e.path = alt;
     }
   }
-  ring.sort((a, b) => a[2] - b[2]);
-  for (const [x, y] of ring.slice(0, 4)) {
-    const path = findPath(state.map, ex, ey, x, y, teamOf(state, e.owner));
-    if (path.length >= 2 && path[path.length - 2] === x && path[path.length - 1] === y) {
-      e.path = path;
-      return true;
+  return true;
+}
+
+/** Walks a unit onto a rectangle (a field). False if it cannot be reached. */
+function goOnto(state: GameState, e: Entity, r: Rect): boolean {
+  const res = findPathToArea(state.map, Math.floor(e.x), Math.floor(e.y), r.x, r.y, r.s, teamOf(state, e.owner), true);
+  if (!res.reached) return false;
+  e.path = res.path;
+  return true;
+}
+
+const isInside = (e: Entity, r: Rect) => {
+  const tx = Math.floor(e.x);
+  const ty = Math.floor(e.y);
+  return tx >= r.x && tx < r.x + r.s && ty >= r.y && ty < r.y + r.s;
+};
+
+/** Whether another unit stands on a tile or is on its way there. */
+function isTaken(state: GameState, tile: number, self: Entity): boolean {
+  const who = state.occupied.get(tile);
+  return who !== undefined && who !== self.id;
+}
+
+/** The free walkable tile around a rectangle that is nearest to a unit, rings further out if needed. */
+function freeSpotAround(state: GameState, e: Entity, r: Rect, maxRing = 2): [number, number] | undefined {
+  const map = state.map;
+  let best: [number, number] | undefined;
+  for (let ring = 1; ring <= maxRing && !best; ring++) {
+    let bestD = Infinity;
+    for (let y = r.y - ring; y <= r.y + r.s - 1 + ring; y++) {
+      for (let x = r.x - ring; x <= r.x + r.s - 1 + ring; x++) {
+        const edge = x === r.x - ring || x === r.x + r.s - 1 + ring || y === r.y - ring || y === r.y + r.s - 1 + ring;
+        if (!edge || !isWalkable(map, x, y, teamOf(state, e.owner)) || isTaken(state, y * map.size + x, e)) continue;
+        const d = Math.hypot(x + 0.5 - e.x, y + 0.5 - e.y);
+        if (d < bestD) {
+          bestD = d;
+          best = [x, y];
+        }
+      }
     }
   }
-  return false;
+  return best;
+}
+
+/** Records where units stand and where moving units are going, so that others can pick different tiles. */
+function updateOccupied(state: GameState): void {
+  state.occupied.clear();
+  const n = state.map.size;
+  for (const e of state.entities.values()) {
+    if (isBuilding(e) || e.inside >= 0) continue;
+    const tile = e.path.length >= 2 ? e.path[e.path.length - 1] * n + e.path[e.path.length - 2] : Math.floor(e.y) * n + Math.floor(e.x);
+    if (!state.occupied.has(tile)) state.occupied.set(tile, e.id);
+  }
+}
+
+function claim(state: GameState, e: Entity): void {
+  if (e.path.length < 2) return;
+  const n = state.map.size;
+  const tile = e.path[e.path.length - 1] * n + e.path[e.path.length - 2];
+  if (!state.occupied.has(tile)) state.occupied.set(tile, e.id);
 }
 
 function nearestResourceTile(map: GameMap, from: number, res: Res, radius: number): number {
@@ -334,15 +400,67 @@ function ownUnits(state: GameState, player: number, ids: unknown): Entity[] {
     .filter((e): e is Entity => !!e && e.owner === player && !isBuilding(e) && e.inside < 0);
 }
 
-function moveUnits(state: GameState, units: Entity[], x: number, y: number): void {
-  // Each unit gets its own tile around the target so a group does not stack up.
-  const spots = freeTilesNear(state.map, Math.floor(x), Math.floor(y), units.length);
-  units.forEach((e, i) => {
-    const spot = spots[i];
+const isRangedKind = (k: Kind) => (DEFS[k].range ?? 0) > 2;
+
+/** Where each unit of a group stands at the destination: soldiers in front, archers behind, the rest at the back. */
+function formation(state: GameState, units: Entity[], x: number, y: number): Map<Entity, [number, number]> {
+  const n = units.length;
+  let cx = 0;
+  let cy = 0;
+  for (const e of units) {
+    cx += e.x / n;
+    cy += e.y / n;
+  }
+  // Rows face the direction of travel.
+  let dx = x - cx;
+  let dy = y - cy;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.5) [dx, dy] = [1, 0];
+  else [dx, dy] = [dx / len, dy / len];
+  const [px, py] = [-dy, dx];
+  const rank = (e: Entity) => (DEFS[e.kind].building ? 9 : e.kind === 'villager' || e.kind === 'king' ? 3 : e.kind === 'ram' ? 2 : isRangedKind(e.kind) ? 1 : 0);
+  const ordered = [...units].sort((a, b) => rank(a) - rank(b) || (a.x - cx) * px + (a.y - cy) * py - ((b.x - cx) * px + (b.y - cy) * py));
+  const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5))));
+  const taken = new Set<number>();
+  const out = new Map<Entity, [number, number]>();
+  ordered.forEach((e, i) => {
+    const row = Math.floor(i / cols);
+    const inRow = Math.min(cols, n - row * cols);
+    const col = (i % cols) - (inRow - 1) / 2;
+    const tx = Math.floor(x + 0.5 - dx * row + px * col);
+    const ty = Math.floor(y + 0.5 - dy * row + py * col);
+    // The nearest free tile to the slot, so that walls and trees just bend the formation.
+    const spot = freeTilesNear(state.map, tx, ty, 12).find(([sx, sy]) => !taken.has(sy * state.map.size + sx));
     if (!spot) return;
+    taken.add(spot[1] * state.map.size + spot[0]);
+    out.set(e, spot);
+  });
+  return out;
+}
+
+function moveUnits(state: GameState, units: Entity[], x: number, y: number): void {
+  // A group keeps formation and walks at the pace of its slowest member.
+  const slots = formation(state, units, x, y);
+  const pace = units.length > 1 ? Math.min(...units.map((e) => DEFS[e.kind].speed ?? 1)) : undefined;
+  for (const e of units) {
+    const spot = slots.get(e);
+    if (!spot) continue;
     e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
     e.order = { t: 'move' };
-  });
+    e.pace = pace;
+  }
+}
+
+/** Units standing where a new building goes step off it, so that nobody is walled in. */
+function clearFootprint(state: GameState, r: Rect): void {
+  for (const e of state.entities.values()) {
+    if (isBuilding(e) || e.inside >= 0 || !isInside(e, r)) continue;
+    const [spot] = freeTilesNear(state.map, Math.floor(e.x), Math.floor(e.y), 1);
+    if (!spot) continue;
+    e.x = spot[0] + 0.5;
+    e.y = spot[1] + 0.5;
+    if (e.path.length > 0) e.path = findPath(state.map, spot[0], spot[1], e.path[e.path.length - 2], e.path[e.path.length - 1], teamOf(state, e.owner));
+  }
 }
 
 function attackMove(state: GameState, units: Entity[], x: number, y: number): void {
@@ -423,6 +541,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     if (builders.length === 0 || !canPlace(map, cmd.kind, cmd.x, cmd.y) || !canAfford(player, def.cost)) return;
     pay(player, def.cost);
     const site = spawn(state, slot, cmd.kind, cmd.x, cmd.y, false);
+    if (!def.walkable) clearFootprint(state, rectOf(site));
     for (const e of builders) {
       e.order = { t: 'build', id: site.id };
       e.path = [];
@@ -599,13 +718,13 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
 
   if (o.phase === 'go') {
     if (e.path.length > 0) return;
-    if (isAdjacent(e, rect)) {
+    if (farm ? isInside(e, rect) : isAdjacent(e, rect)) {
       o.phase = 'work';
       if (e.carryRes !== o.res) {
         e.carry = 0;
         e.carryRes = o.res;
       }
-    } else if (!goAdjacent(state, e, rect)) {
+    } else if (!(farm ? goOnto(state, e, rect) : goAdjacent(state, e, rect))) {
       e.order = { t: 'idle' };
     }
     return;
@@ -687,17 +806,39 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
   if (!target || !isEnemy(state, target.owner, e.owner) || target.inside >= 0) return endAttack(state, e, o);
   const d = distance(e, target);
   if (d <= rangeOf(e.kind, hasTech(state, e.owner))) {
-    e.path = [];
+    // In reach. A melee fighter stops here only if nobody else stands on this tile; otherwise it carries on
+    // to its own spot, swinging as it goes, so that fighters never pile up on one another.
+    const here = Math.floor(e.y) * state.map.size + Math.floor(e.x);
+    const crowded = !isRangedKind(e.kind) && isTaken(state, here, e);
+    if (!crowded) {
+      if (isRangedKind(e.kind) || e.path.length > 4) e.path = [];
+      if (e.path.length === 0) state.occupied.set(here, e.id);
+    } else if (e.path.length === 0) {
+      const spot = freeSpotAround(state, e, isBuilding(target) ? rectOf(target) : { x: Math.floor(target.x), y: Math.floor(target.y), s: 1 });
+      if (spot) {
+        e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
+        claim(state, e);
+      }
+    }
     if (e.cooldown <= 0) strike(state, e, target);
     return;
   }
   if (isBuilding(e) || (o.auto && d > (def.sight ?? DEFAULT_SIGHT) + 4)) return endAttack(state, e, o);
-  // Chase, re-planning now and then because the target moves.
+  // Chase, re-planning now and then because the target moves. Melee fighters each go for their own
+  // tile next to the target, so that a crowd surrounds it instead of piling onto one spot.
   if (e.path.length === 0 || (state.tick + e.id) % 5 === 0) {
-    if (isBuilding(target)) {
-      if (!goAdjacent(state, e, rectOf(target)) && o.auto) endAttack(state, e, o);
+    const r = isBuilding(target) ? rectOf(target) : { x: Math.floor(target.x), y: Math.floor(target.y), s: 1 };
+    const ranged = isRangedKind(e.kind);
+    if (!ranged || isBuilding(target)) {
+      const spot = d < 6 ? freeSpotAround(state, e, r) : undefined;
+      if (spot) {
+        e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
+        // Already on that tile but off its centre: step to the centre, which is in reach.
+        if (e.path.length === 0) e.path = [spot[0], spot[1]];
+        claim(state, e);
+      } else if (!goAdjacent(state, e, r) && o.auto) endAttack(state, e, o);
     } else {
-      e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(target.x), Math.floor(target.y), teamOf(state, e.owner));
+      e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), r.x, r.y, teamOf(state, e.owner));
     }
   }
 }
@@ -757,7 +898,8 @@ function spreadIdleUnits(state: GameState): void {
   for (const e of state.entities.values()) {
     if (isBuilding(e) || e.inside >= 0 || e.path.length > 0) continue;
     const tile = Math.floor(e.y) * state.map.size + Math.floor(e.x);
-    if (taken.has(tile) && e.order.t === 'idle') crowded.push(e);
+    const shooting = e.order.t === 'attack' && isRangedKind(e.kind);
+    if (taken.has(tile) && (e.order.t === 'idle' || shooting)) crowded.push(e);
     else taken.add(tile);
   }
   for (const e of crowded) {
@@ -765,12 +907,15 @@ function spreadIdleUnits(state: GameState): void {
     if (!spot) continue;
     taken.add(spot[1] * state.map.size + spot[0]);
     e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
-    e.order = { t: 'move' };
+    // Archers keep shooting from the new spot.
+    if (e.order.t === 'idle') e.order = { t: 'move' };
   }
 }
 
 function moveAlongPath(e: Entity): void {
-  let budget = (DEFS[e.kind].speed ?? 0) / TICK_RATE;
+  const speed = DEFS[e.kind].speed ?? 0;
+  const grouped = e.pace !== undefined && (e.order.t === 'move' || e.order.t === 'amove');
+  let budget = (grouped ? Math.min(speed, e.pace!) : speed) / TICK_RATE;
   while (budget > 0 && e.path.length >= 2) {
     const wx = e.path[0] + 0.5;
     const wy = e.path[1] + 0.5;
@@ -796,6 +941,7 @@ export function step(state: GameState): void {
   state.shots = [];
   state.hits = [];
   state.deaths = [];
+  updateOccupied(state);
   if (state.tick % 10 === 0) spreadIdleUnits(state);
 
   for (const p of state.players.values()) p.pop = p.cap = 0;

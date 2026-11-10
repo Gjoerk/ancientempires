@@ -9,27 +9,44 @@ export const HH = 16;
 
 type Ctx = CanvasRenderingContext2D;
 
+/** Pre-drawn sprites, per pixel grid and per palette object. */
+const blitCache = new WeakMap<string[], WeakMap<object, Map<string, HTMLCanvasElement>>>();
+
 /**
  * Draws rows of palette characters with the bottom centre at (x, y).
  * `flip` mirrors the sprite; `step` (1 or 2) lifts one leg for a walking frame.
+ * Each combination is drawn pixel by pixel once and then reused as an image.
+ * Palettes must be long-lived objects for the cache to work.
  */
 function blit(
   ctx: Ctx, rows: string[], palette: Record<string, string>, x: number, y: number, px = 2, flip = false, step = 0,
 ): void {
   const w = rows[0].length;
-  const ox = Math.round(x - (w * px) / 2);
-  const oy = Math.round(y - rows.length * px);
-  for (let r = 0; r < rows.length; r++) {
-    const legs = step > 0 && r >= rows.length - 3;
-    for (let c = 0; c < w; c++) {
-      const color = palette[rows[r][c]];
-      if (!color) continue;
-      // While walking, the legs on one half of the sprite are drawn a pixel higher, alternating.
-      const lift = legs && (c < w / 2) === (step === 1) ? px : 0;
-      ctx.fillStyle = color;
-      ctx.fillRect(ox + (flip ? w - 1 - c : c) * px, oy + r * px - lift, px, px);
+  let byPalette = blitCache.get(rows);
+  if (!byPalette) blitCache.set(rows, (byPalette = new WeakMap()));
+  let byVariant = byPalette.get(palette);
+  if (!byVariant) byPalette.set(palette, (byVariant = new Map()));
+  const key = `${px}|${flip ? 1 : 0}|${step}`;
+  let img = byVariant.get(key);
+  if (!img) {
+    img = document.createElement('canvas');
+    img.width = w * px;
+    img.height = rows.length * px + px;
+    const c = img.getContext('2d')!;
+    for (let r = 0; r < rows.length; r++) {
+      const legs = step > 0 && r >= rows.length - 3;
+      for (let col = 0; col < w; col++) {
+        const color = palette[rows[r][col]];
+        if (!color) continue;
+        // While walking, the legs on one half of the sprite are drawn a pixel higher, alternating.
+        const lift = legs && (col < w / 2) === (step === 1) ? px : 0;
+        c.fillStyle = color;
+        c.fillRect((flip ? w - 1 - col : col) * px, px + r * px - lift, px, px);
+      }
     }
+    byVariant.set(key, img);
   }
+  ctx.drawImage(img, Math.round(x - (w * px) / 2), Math.round(y - rows.length * px) - px);
 }
 
 function shadow(ctx: Ctx, x: number, y: number, rx: number, ry: number): void {
@@ -228,6 +245,19 @@ function drawTool(ctx: Ctx, x: number, y: number, w: Work): void {
   }
 }
 
+const unitPalettes = new Map<number, Record<string, string>>();
+function unitPalette(owner: number): Record<string, string> {
+  let palette = unitPalettes.get(owner);
+  if (!palette) {
+    palette = {
+      s: '#e2b48c', e: '#2a2018', l: '#6b4a2b', d: '#3a2a1a', h: '#5a3b1e', m: '#9aa0a8', w: '#e6e9ee', k: '#7a5230',
+      g: '#3f6b3a', c: '#7a2d8a', y: '#f2cf3a', o: '#8a5a33', n: '#4a2e18', t: PLAYER_COLORS[owner % PLAYER_COLORS.length],
+    };
+    unitPalettes.set(owner, palette);
+  }
+  return palette;
+}
+
 export function drawUnit(
   ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1, activity = 0, now = 0,
   face = 1,
@@ -247,10 +277,7 @@ export function drawUnit(
     return;
   }
   shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
-  const palette = {
-    s: '#e2b48c', e: '#2a2018', l: '#6b4a2b', d: '#3a2a1a', h: '#5a3b1e', m: '#9aa0a8', w: '#e6e9ee', k: '#7a5230',
-    g: '#3f6b3a', c: '#7a2d8a', y: '#f2cf3a', o: '#8a5a33', n: '#4a2e18', t: PLAYER_COLORS[owner % PLAYER_COLORS.length],
-  };
+  const palette = unitPalette(owner);
   if (carry >= 0 && !work) {
     // A bundle of whatever is being carried home, on the back.
     ctx.fillStyle = CARRY_COLORS[carry];
@@ -303,21 +330,38 @@ export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: 
     drawSprite(ctx, custom, '#ffffff', x, y, now);
     return;
   }
-  if (tile === Tile.Forest) {
-    shadow(ctx, x, y + 4, 10, 5);
-    const greens = [['#2f6b2c', '#3f8a37'], ['#28602f', '#37803f'], ['#356e25', '#4a9030']][variant % 3];
-    blit(ctx, TREE, { a: greens[0], b: greens[1], k: '#5a3b1e' }, x, y + 4);
-  } else if (tile === Tile.Berries) {
-    shadow(ctx, x, y + 5, 12, 5);
-    blit(ctx, BUSH, { a: '#2f6b2c', b: '#4a9030', r: '#d43b5a' }, x, y + 7, 3);
-  } else if (tile === Tile.Gold) {
-    shadow(ctx, x, y + 5, 13, 5);
-    blit(ctx, ROCK, { s: '#7a6f5a', y: '#f2cf3a' }, x, y + 7, 3);
-  } else if (tile === Tile.Stone) {
-    shadow(ctx, x, y + 5, 13, 5);
-    blit(ctx, ROCK, { s: '#85898f', y: '#c4c8cf' }, x, y + 7, 3);
+  // Shadow and sprite together are drawn once per kind and variant, then reused.
+  const key = tile * 10 + (tile === Tile.Forest ? variant % 3 : 0);
+  let img = propCache.get(key);
+  if (!img) {
+    img = document.createElement('canvas');
+    img.width = 48;
+    img.height = 48;
+    const c = img.getContext('2d')!;
+    const [cx, cy] = [24, 36];
+    if (tile === Tile.Forest) {
+      shadow(c, cx, cy + 4, 10, 5);
+      blit(c, TREE, TREE_PALETTES[variant % 3], cx, cy + 4);
+    } else if (tile === Tile.Berries) {
+      shadow(c, cx, cy + 5, 12, 5);
+      blit(c, BUSH, BUSH_PALETTE, cx, cy + 7, 3);
+    } else if (tile === Tile.Gold) {
+      shadow(c, cx, cy + 5, 13, 5);
+      blit(c, ROCK, GOLD_PALETTE, cx, cy + 7, 3);
+    } else if (tile === Tile.Stone) {
+      shadow(c, cx, cy + 5, 13, 5);
+      blit(c, ROCK, STONE_PALETTE, cx, cy + 7, 3);
+    }
+    propCache.set(key, img);
   }
+  ctx.drawImage(img, Math.round(x) - 24, Math.round(y) - 36);
 }
+
+const propCache = new Map<number, HTMLCanvasElement>();
+const TREE_PALETTES = [['#2f6b2c', '#3f8a37'], ['#28602f', '#37803f'], ['#356e25', '#4a9030']].map(([a, b]) => ({ a, b, k: '#5a3b1e' }));
+const BUSH_PALETTE = { a: '#2f6b2c', b: '#4a9030', r: '#d43b5a' };
+const GOLD_PALETTE = { s: '#7a6f5a', y: '#f2cf3a' };
+const STONE_PALETTE = { s: '#85898f', y: '#c4c8cf' };
 
 export function shade(hex: string, f: number): string {
   const n = parseInt(hex.slice(1), 16);

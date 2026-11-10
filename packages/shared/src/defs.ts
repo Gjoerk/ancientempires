@@ -38,12 +38,15 @@ export interface KindDef {
   /** Population room this building provides. */
   housing?: number;
   trains?: Kind[];
+  /** Units can walk over it (fields). */
+  walkable?: boolean;
   /** Resources villagers can deliver here. */
   dropoff?: Res[];
 }
 
 /** Melee fighters must stand right next to their target. */
-const MELEE = 1.0;
+/** Melee reach: enough for the eight tiles around a target, diagonals included, and no more. */
+const MELEE = 1.45;
 
 export const DEFS: Record<Kind, KindDef> = {
   villager: { label: 'Villager', hp: 25, cost: { food: 50 }, time: 12, speed: 2.2, attack: 3, range: MELEE, cooldown: 1.5, sight: 5 },
@@ -82,7 +85,7 @@ export const DEFS: Record<Kind, KindDef> = {
   miningcamp: {
     label: 'Mining Camp', building: true, hp: 250, cost: { wood: 100 }, time: 15, size: 2, armor: 3, dropoff: ['gold', 'stone'],
   },
-  farm: { label: 'Farm', building: true, hp: 100, cost: { wood: 50 }, time: 8, size: 2, armor: 1, sight: 3 },
+  farm: { label: 'Farm', building: true, hp: 100, cost: { wood: 50 }, time: 8, size: 2, armor: 1, sight: 3, walkable: true },
   barracks: {
     label: 'Barracks', building: true, hp: 450, cost: { wood: 150 }, time: 25, size: 3, armor: 3,
     trains: ['spearman', 'swordsman'],
@@ -280,7 +283,7 @@ export const FARM_FOOD = 300;
 export const RESEED_COST = 25;
 /** The technology that speeds up gathering each resource. */
 export const GATHER_TECH: Record<Res, TechId> = { food: 'ploughs', wood: 'axes', gold: 'picks', stone: 'picks' };
-export const QUEUE_MAX = 5;
+export const QUEUE_MAX = 15;
 export const START_RESOURCES: Record<Res, number> = { food: 200, wood: 200, gold: 100, stone: 100 };
 /** Quick start: more to spend and more villagers, for shorter games. */
 export const QUICK_RESOURCES: Record<Res, number> = { food: 700, wood: 600, gold: 400, stone: 300 };

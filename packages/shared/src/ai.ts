@@ -41,7 +41,7 @@ function findSite(map: GameMap, kind: Kind, cx: number, cy: number): [number, nu
             // The footprint must be buildable and the ring around it must not hold a building.
             const inside = u >= x && u < x + s && v >= y && v < y + s;
             if (u < 0 || v < 0 || u >= map.size || v >= map.size) free = false;
-            else if (inside ? !canPlace(map, 'wall', u, v) : map.blocked[v * map.size + u] === 1) free = false;
+            else if (inside ? !canPlace(map, 'wall', u, v) : map.footprint[v * map.size + u] === 1) free = false;
           }
         }
         if (free) return [x, y];

@@ -24,8 +24,10 @@ export interface GameMap {
   tiles: Uint8Array;
   /** Resources left in each tile. */
   amount: Uint16Array;
-  /** 1 where a building stands. */
+  /** 1 where a building stands that units cannot walk through. */
   blocked: Uint8Array;
+  /** 1 where any building stands, fields included: nothing else can be built there. */
+  footprint: Uint8Array;
   /** Where a gate stands: the team that may walk through it, plus 1. */
   gate: Uint8Array;
   /** Start tile per player slot. */
@@ -53,6 +55,17 @@ export function tileAt(map: GameMap, tx: number, ty: number): Tile {
 }
 
 /** Whether a unit can stand on a tile. With a team given, that team's gates count as open. */
+/** Marks or clears the tiles a building covers. */
+export function markBuilding(map: GameMap, x0: number, y0: number, size: number, walkable: boolean, value: number): void {
+  for (let y = y0; y < y0 + size; y++) {
+    for (let x = x0; x < x0 + size; x++) {
+      if (!inBounds(map, x, y)) continue;
+      map.footprint[y * map.size + x] = value;
+      if (!walkable) map.blocked[y * map.size + x] = value;
+    }
+  }
+}
+
 export function isWalkable(map: GameMap, tx: number, ty: number, team = -1): boolean {
   if (!inBounds(map, tx, ty)) return false;
   const i = ty * map.size + tx;
@@ -121,5 +134,5 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
 
   const amount = new Uint16Array(size * size);
   for (let i = 0; i < tiles.length; i++) amount[i] = TILE_RESOURCE[tiles[i] as Tile]?.amount ?? 0;
-  return { size, tiles, amount, blocked: new Uint8Array(size * size), gate: new Uint8Array(size * size), starts };
+  return { size, tiles, amount, blocked: new Uint8Array(size * size), footprint: new Uint8Array(size * size), gate: new Uint8Array(size * size), starts };
 }

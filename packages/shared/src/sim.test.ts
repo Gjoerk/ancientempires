@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addPlayer, applyCommand, armorOf, attackOf, createGame, DEFS, hasTech, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
+  addPlayer, applyCommand, armorOf, attackOf, canPlace, createGame, DEFS, hasTech, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
   TILE_RESOURCE,
 } from './index';
 
@@ -382,4 +382,127 @@ test('resigning kills the king and ends the game for that player', () => {
   run(s, 2);
   assert.equal(s.players.get(1)!.defeated, true);
   assert.equal(s.winner, 0);
+});
+
+test('fields can be walked over, and villagers among many fields stay free to move', () => {
+  const s = createGame(61);
+  addPlayer(s, 0);
+  const [sx, sy] = s.map.starts[0];
+  // A 3 x 3 block of fields with no gaps, and a villager standing in the middle of it.
+  const fx = sx - 3;
+  const fy = sy + 3;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    for (let y = fy + j * 2; y < fy + j * 2 + 2; y++) for (let x = fx + i * 2; x < fx + i * 2 + 2; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
+    spawn(s, 0, 'farm', fx + i * 2, fy + j * 2);
+  }
+  const v = owned(s, 0, 'villager')[0];
+  v.x = fx + 3.5;
+  v.y = fy + 3.5;
+  assert.ok(isWalkable(s.map, fx + 3, fy + 3), 'a field does not block');
+  applyCommand(s, 0, { type: 'move', ids: [v.id], x: fx + 9, y: fy + 3 });
+  run(s, 80);
+  assert.ok(Math.hypot(v.x - (fx + 9.5), v.y - (fy + 3.5)) < 1.5, `walked out to ${v.x},${v.y}`);
+  // Two farmers on two neighbouring fields each stand on their own field.
+  const [a, b] = owned(s, 0, 'villager');
+  const farms = owned(s, 0, 'farm');
+  applyCommand(s, 0, { type: 'interact', ids: [a.id], target: farms[4].id });
+  applyCommand(s, 0, { type: 'interact', ids: [b.id], target: farms[5].id });
+  run(s, 120);
+  for (const [unit, farm] of [[a, farms[4]], [b, farms[5]]] as const) {
+    assert.equal(unit.order.t, 'gather');
+    assert.ok(unit.x >= farm.x && unit.x < farm.x + 2 && unit.y >= farm.y && unit.y < farm.y + 2, `farmer on field: ${unit.x},${unit.y}`);
+  }
+  // Nothing can be built on top of a field.
+  assert.equal(canPlace(s.map, 'house', fx, fy), false);
+});
+
+test('a building surrounded by others is reached through the one gap left', () => {
+  const s = createGame(63);
+  addPlayer(s, 0);
+  const [sx, sy] = s.map.starts[0];
+  const bx = sx - 4;
+  const by = sy + 5;
+  for (let y = by - 3; y < by + 6; y++) for (let x = bx - 3; x < bx + 6; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
+  const target = spawn(s, 0, 'mill', bx, by, false);
+  // Houses all round it, leaving a single one-tile gap on the far side.
+  for (const [x, y] of [[bx - 2, by - 2], [bx, by - 2], [bx + 2, by - 2], [bx - 2, by], [bx + 2, by], [bx - 2, by + 2], [bx + 2, by + 2]]) spawn(s, 0, 'house', x, y);
+  spawn(s, 0, 'wall', bx, by + 2);
+  const v = owned(s, 0, 'villager')[0];
+  v.x = bx + 0.5;
+  v.y = by - 4.5;
+  applyCommand(s, 0, { type: 'interact', ids: [v.id], target: target.id });
+  run(s, 400);
+  assert.ok(target.progress > 0.3, `builder got there: progress ${target.progress.toFixed(2)}`);
+});
+
+test('soldiers attacking one target surround it instead of stacking up', () => {
+  const s = createGame(65);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  const tx = 40;
+  const ty = 40;
+  for (let y = 30; y < 50; y++) for (let x = 30; x < 50; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
+  // A villager stands still and does not hit back.
+  const victim = spawn(s, 1, 'villager', tx, ty);
+  victim.hp = 100000;
+  const army = Array.from({ length: 6 }, (_, i) => spawn(s, 0, 'swordsman', 33, 36 + i));
+  applyCommand(s, 0, { type: 'interact', ids: army.map((e) => e.id), target: victim.id });
+  run(s, 120);
+  const tiles = new Set(army.map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`));
+  assert.equal(tiles.size, 6, `six attackers on ${tiles.size} tiles`);
+  assert.ok(army.every((e) => e.order.t === 'attack' && Math.hypot(e.x - victim.x, e.y - victim.y) < 1.6), 'all in reach');
+});
+
+test('a group moves in formation at the pace of its slowest unit', () => {
+  const s = createGame(67);
+  addPlayer(s, 0);
+  for (let y = 20; y < 60; y++) for (let x = 20; x < 60; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
+  const rider = spawn(s, 0, 'rider', 25, 30);
+  const foot = Array.from({ length: 5 }, (_, i) => spawn(s, 0, 'spearman', 25, 31 + i));
+  applyCommand(s, 0, { type: 'move', ids: [rider.id, ...foot.map((e) => e.id)], x: 45, y: 33 });
+  run(s, 30);
+  const furthest = Math.max(...foot.map((e) => e.x));
+  assert.ok(rider.x <= furthest + 1.1, `rider ${rider.x.toFixed(1)} stays with the infantry (${furthest.toFixed(1)})`);
+  run(s, 150);
+  const spots = new Set([rider, ...foot].map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`));
+  assert.equal(spots.size, 6, 'each on its own tile');
+  // Spearmen, being melee, stand in front of the rider-free rear? All arrived near the target.
+  assert.ok([rider, ...foot].every((e) => Math.hypot(e.x - 45, e.y - 33) < 4));
+});
+
+test('every training click counts, up to fifteen in a queue', () => {
+  const s = createGame(69);
+  addPlayer(s, 0);
+  const p = s.players.get(0)!;
+  p.res.food = 5000;
+  const tc = owned(s, 0, 'towncenter')[0];
+  for (let i = 0; i < 20; i++) applyCommand(s, 0, { type: 'train', building: tc.id, kind: 'villager' });
+  assert.equal(tc.queue.length, 15);
+  assert.equal(p.res.food, 5000 - 15 * 50);
+});
+
+test('a unit standing where a building is placed steps out of the way', () => {
+  const s = createGame(71);
+  addPlayer(s, 0);
+  const [sx, sy] = s.map.starts[0];
+  const [builder, bystander] = owned(s, 0, 'villager');
+  bystander.x = sx - 0.5;
+  bystander.y = sy + 3.5;
+  applyCommand(s, 0, { type: 'place', ids: [builder.id], kind: 'house', x: sx - 1, y: sy + 3 });
+  assert.equal(owned(s, 0, 'house').length, 1);
+  assert.ok(isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'moved off the footprint');
+});
+
+test('a mixed crowd of nine melee fighters never shares a tile around its target', () => {
+  const s = createGame(65);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  for (let y = 30; y < 50; y++) for (let x = 30; x < 50; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
+  const victim = spawn(s, 1, 'villager', 42, 40);
+  victim.hp = 100000;
+  const kinds = ['spearman', 'swordsman', 'rider'] as const;
+  const army = Array.from({ length: 9 }, (_, i) => spawn(s, 0, kinds[i % 3], 33 + (i % 3), 36 + Math.floor(i / 3)));
+  applyCommand(s, 0, { type: 'interact', ids: army.map((e) => e.id), target: victim.id });
+  run(s, 200);
+  assert.equal(new Set(army.map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`)).size, 9);
 });

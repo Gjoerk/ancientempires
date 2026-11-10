@@ -12,6 +12,7 @@ import {
   GameMap,
   GameSettings,
   generateMap,
+  markBuilding,
   spawn,
   isTech,
   Kind,
@@ -190,8 +191,10 @@ function workSpot(v: View, now: number): [number, number] | undefined {
   if (!b) return undefined;
   const s = sizeOf(b.kind);
   if (v.task === 5) {
-    // Farmers wander slowly around their field.
-    return [b.x + s / 2 + Math.cos(now / 5000 + v.id) * 0.55, b.y + s / 2 + Math.sin(now / 3700 + v.id * 2) * 0.55];
+    // Farmers stand on their field and move slowly up and down their furrow.
+    const fx = Math.max(b.x + 0.3, Math.min(b.x + s - 0.3, v.x + Math.cos(now / 4000 + v.id) * 0.35));
+    const fy = Math.max(b.y + 0.3, Math.min(b.y + s - 0.3, v.y + Math.sin(now / 3100 + v.id * 2) * 0.2));
+    return [fx, fy];
   }
   return [Math.max(b.x, Math.min(b.x + s, v.x)), Math.max(b.y, Math.min(b.y + s, v.y))];
 }
@@ -279,37 +282,37 @@ function updateFog(now: number): void {
   fogMini.width = fogMini.height = n;
   const g = fogMini.getContext('2d')!;
   const img = g.createImageData(n, n);
-  for (let i = 0; i < n * n; i++) img.data[i * 4 + 3] = visible[i] ? 0 : explored[i] ? 110 : 255;
+  for (let i = 0; i < n * n; i++) {
+    img.data[i * 4] = 8;
+    img.data[i * 4 + 1] = 12;
+    img.data[i * 4 + 2] = 8;
+    img.data[i * 4 + 3] = visible[i] ? 0 : explored[i] ? 115 : 255;
+  }
   g.putImageData(img, 0, 0);
+  // Ground blocks with newly explored tiles in them are drawn again.
+  const blocks = Math.ceil(n / CHUNK);
+  if (chunkSeen.length !== blocks * blocks) chunkSeen = new Int32Array(blocks * blocks).fill(-1);
+  const count = new Int32Array(blocks * blocks);
+  for (let i = 0; i < n * n; i++) if (explored[i] || revealAll) count[Math.floor(Math.floor(i / n) / CHUNK) * blocks + Math.floor((i % n) / CHUNK)]++;
+  for (let c = 0; c < count.length; c++) {
+    if (count[c] !== chunkSeen[c]) {
+      chunkSeen[c] = count[c];
+      chunks.delete(c);
+    }
+  }
 }
 
-/** Darkens what is not in sight and blacks out what was never seen, for the tiles on screen. */
+/**
+ * Darkens what is not in sight and blacks out what was never seen. The fog is a picture with one pixel per
+ * tile, stretched over the map in one go; smoothing gives it soft edges.
+ */
 function drawFog(): void {
-  if (!map || revealAll) return;
-  const n = map.size;
-  const corners = [screenToTile(0, 0), screenToTile(canvas.width, 0), screenToTile(0, canvas.height), screenToTile(canvas.width, canvas.height)];
-  const x0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0]))) - 1);
-  const x1 = Math.min(n - 1, Math.ceil(Math.max(...corners.map((c) => c[0]))) + 1);
-  const y0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[1]))) - 1);
-  const y1 = Math.min(n - 1, Math.ceil(Math.max(...corners.map((c) => c[1]))) + 1);
-  for (const pass of [0, 1]) {
-    ctx.beginPath();
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        const i = ty * n + tx;
-        if (visible[i] || (pass === 0) !== (explored[i] === 0)) continue;
-        const [cx, cy] = tileToScreen(tx, ty);
-        if (cx < -HW || cx > canvas.width + HW || cy < -HH * 4 || cy > canvas.height + HH) continue;
-        ctx.moveTo(cx, cy - 0.5);
-        ctx.lineTo(cx + HW + 0.5, cy + HH);
-        ctx.lineTo(cx, cy + HH * 2 + 0.5);
-        ctx.lineTo(cx - HW - 0.5, cy + HH);
-        ctx.closePath();
-      }
-    }
-    ctx.fillStyle = pass === 0 ? '#0b0e0a' : 'rgba(8,12,8,.45)';
-    ctx.fill();
-  }
+  if (!map || revealAll || !fogMini) return;
+  ctx.save();
+  ctx.setTransform(HW, HH, -HW, HH, canvas.width / 2 - cam.x, canvas.height / 2 - cam.y);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(fogMini, 0, 0);
+  ctx.restore();
 }
 
 // --- terrain ---------------------------------------------------------------
@@ -344,6 +347,8 @@ function paintTile(m: GameMap, index: number): void {
 }
 
 function buildTerrain(m: GameMap): void {
+  chunks.clear();
+  chunkSeen = new Int32Array(0);
   ground = new Uint8Array(m.size * m.size);
   miniTerrain = document.createElement('canvas');
   miniTerrain.width = miniTerrain.height = m.size;
@@ -361,20 +366,31 @@ function visibleTiles(): [number, number, number, number] {
   ];
 }
 
-/** Draws the ground for the tiles on screen, one fill per colour. */
-function drawGround(): void {
+/** Tiles per side of a pre-drawn block of ground. */
+const CHUNK = 8;
+/** Pre-drawn blocks of ground, by block index; a block is dropped when something in it changes. */
+const chunks = new Map<number, { img: HTMLCanvasElement; used: number }>();
+let chunkSeen = new Int32Array(0);
+let frameNo = 0;
+
+function paintChunk(bx: number, by: number): HTMLCanvasElement {
   const n = map!.size;
-  const [x0, y0, x1, y1] = visibleTiles();
+  const img = document.createElement('canvas');
+  img.width = CHUNK * HW * 2 + 2;
+  img.height = CHUNK * HH * 2 + 2;
+  const c = img.getContext('2d')!;
+  const x0 = bx * CHUNK;
+  const y0 = by * CHUNK;
   const paths = GROUND_COLORS.map(() => new Path2D());
   const specks = new Path2D();
-  for (let ty = y0; ty <= y1; ty++) {
-    for (let tx = x0; tx <= x1; tx++) {
-      const [cx, cy] = tileToScreen(tx, ty);
-      if (cx < -HW || cx > canvas.width + HW || cy < -HH * 2 || cy > canvas.height) continue;
-      const x = Math.round(cx);
-      const y = Math.round(cy);
-      const c = ground[ty * n + tx];
-      const path = paths[c];
+  for (let ty = y0; ty < Math.min(n, y0 + CHUNK); ty++) {
+    for (let tx = x0; tx < Math.min(n, x0 + CHUNK); tx++) {
+      const i = ty * n + tx;
+      // Ground never seen stays dark: nothing is drawn there at all.
+      if (!revealAll && !explored[i]) continue;
+      const x = (tx - x0 - (ty - y0)) * HW + CHUNK * HW + 1;
+      const y = (tx - x0 + (ty - y0)) * HH + 1;
+      const path = paths[ground[i]];
       // A hair wider than the tile so that no seams show between neighbours.
       path.moveTo(x, y - 0.5);
       path.lineTo(x + HW + 0.5, y + HH);
@@ -382,27 +398,59 @@ function drawGround(): void {
       path.lineTo(x - HW - 0.5, y + HH);
       path.closePath();
       const r = hash(tx, ty);
-      if (c < 4 && r > 0.8) specks.rect(x - 8 + (Math.floor(r * 60) % 16), y + 10 + (Math.floor(r * 90) % 10), 2, 2);
+      if (ground[i] < 4 && r > 0.8) specks.rect(x - 8 + (Math.floor(r * 60) % 16), y + 10 + (Math.floor(r * 90) % 10), 2, 2);
     }
   }
-  GROUND_COLORS.forEach((color, i) => {
-    ctx.fillStyle = color;
-    ctx.fill(paths[i]);
+  GROUND_COLORS.forEach((color, k) => {
+    c.fillStyle = color;
+    c.fill(paths[k]);
   });
-  ctx.fillStyle = '#6aa64c';
-  ctx.fill(specks);
+  c.fillStyle = '#6aa64c';
+  c.fill(specks);
+  return img;
+}
+
+/** Draws the ground from pre-drawn blocks, only those that can be on screen. */
+function drawGround(): void {
+  const n = map!.size;
+  const blocks = Math.ceil(n / CHUNK);
+  const [x0, y0, x1, y1] = visibleTiles();
+  frameNo++;
+  for (let by = Math.floor(y0 / CHUNK); by <= Math.floor(y1 / CHUNK); by++) {
+    for (let bx = Math.floor(x0 / CHUNK); bx <= Math.floor(x1 / CHUNK); bx++) {
+      if (bx < 0 || by < 0 || bx >= blocks || by >= blocks) continue;
+      const [sx, sy] = tileToScreen(bx * CHUNK, by * CHUNK);
+      const left = Math.round(sx) - CHUNK * HW - 1;
+      const top = Math.round(sy) - 1;
+      if (left > canvas.width || top > canvas.height || left + CHUNK * HW * 2 < 0 || top + CHUNK * HH * 2 < 0) continue;
+      const key = by * blocks + bx;
+      let chunk = chunks.get(key);
+      if (!chunk) {
+        chunk = { img: paintChunk(bx, by), used: 0 };
+        chunks.set(key, chunk);
+      }
+      chunk.used = frameNo;
+      ctx.drawImage(chunk.img, left, top);
+    }
+  }
+  // Keep memory in check: forget the blocks that have not been on screen for the longest.
+  if (chunks.size > 160) {
+    const old = [...chunks].sort((a, b) => a[1].used - b[1].used).slice(0, chunks.size - 120);
+    for (const [key] of old) chunks.delete(key);
+  }
 }
 
 function setTile(index: number, tile: number): void {
   if (!map) return;
   map.tiles[index] = tile;
   paintTile(map, index);
+  const blocks = Math.ceil(map.size / CHUNK);
+  chunks.delete(Math.floor(Math.floor(index / map.size) / CHUNK) * blocks + Math.floor((index % map.size) / CHUNK));
 }
 
 function setBlocked(v: View, value: number): void {
   if (!map || !isBuilding(v.kind)) return;
-  const s = sizeOf(v.kind);
-  for (let y = v.y; y < v.y + s; y++) for (let x = v.x; x < v.x + s; x++) map.blocked[y * map.size + x] = value;
+  markBuilding(map, v.x, v.y, sizeOf(v.kind), DEFS[v.kind].walkable === true, value);
 }
 
 // --- network ---------------------------------------------------------------
@@ -594,7 +642,7 @@ function resetGame(): void {
   selectedTile = -1;
   $('chat-log').textContent = '';
   $('chat-input').hidden = true;
-  hudSignature = panelSignature = detailSignature = '';
+  hudSignature = panelSignature = detailSignature = idleSignature = lastButtons = '';
   $('top').hidden = true;
   $('bottom').hidden = true;
   $('banner').hidden = true;
@@ -1073,13 +1121,7 @@ window.addEventListener('keydown', (ev) => {
     box.focus();
     return;
   }
-  if (key === ',') {
-    // Select every soldier that is standing around.
-    selected.clear();
-    for (const v of views.values()) {
-      if (v.owner === me && v.act === 0 && !isBuilding(v.kind) && v.kind !== 'villager' && v.kind !== 'king') selected.add(v.id);
-    }
-  }
+  if (key === ',') selectIdleSoldiers();
   if (key === 'h') $('help').hidden = !$('help').hidden;
   if (key === 'f') toggleFullscreen();
   if (key === 'm') $('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)';
@@ -1106,17 +1148,52 @@ window.addEventListener('keydown', (ev) => {
     ev.preventDefault();
     switchTeam();
   }
-  if (key === '.') {
-    // Jump to the next villager with nothing to do.
-    const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0);
-    if (idle.length === 0) return;
-    const current = idle.findIndex((v) => selected.has(v.id));
-    const next = idle[(current + 1) % idle.length];
-    selected.clear();
-    selected.add(next.id);
-    [cam.x, cam.y] = tileToWorld(next.x, next.y);
-  }
+  if (key === '.') nextIdleVillager();
 });
+
+const idleVillagers = () => [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0);
+const idleSoldiers = () => [...views.values()].filter((v) => v.owner === me && v.act === 0 && !isBuilding(v.kind) && v.kind !== 'villager' && v.kind !== 'king');
+
+/** Selects the next villager with nothing to do and looks at it. */
+function nextIdleVillager(): void {
+  const idle = idleVillagers();
+  if (idle.length === 0) return;
+  const current = idle.findIndex((v) => selected.has(v.id));
+  const next = idle[(current + 1) % idle.length];
+  selected.clear();
+  selectedTile = -1;
+  selected.add(next.id);
+  [cam.x, cam.y] = tileToWorld(next.x, next.y);
+}
+
+/** Selects every soldier that is standing around. */
+function selectIdleSoldiers(): void {
+  const idle = idleSoldiers();
+  if (idle.length === 0) return;
+  selected.clear();
+  selectedTile = -1;
+  for (const v of idle) selected.add(v.id);
+}
+
+$('idle-vil-btn').addEventListener('click', nextIdleVillager);
+$('idle-mil-btn').addEventListener('click', selectIdleSoldiers);
+
+let idleSignature = '';
+function renderIdle(): void {
+  const vil = idleVillagers().length;
+  const mil = idleSoldiers().length;
+  const signature = `${vil}|${mil}|${me}`;
+  if (signature === idleSignature) return;
+  idleSignature = signature;
+  const set = (id: string, count: number, iconId: string) => {
+    const b = $(id);
+    b.classList.toggle('none', count === 0);
+    b.querySelector('b')!.textContent = String(count);
+    b.querySelector('img')!.src = icon(iconId, me);
+  };
+  set('idle-vil-btn', vil, 'villager');
+  set('idle-mil-btn', mil, 'swordsman');
+}
 window.addEventListener('keyup', (ev) => keys.delete(ev.key.toLowerCase()));
 window.addEventListener('blur', () => keys.clear());
 
@@ -1126,6 +1203,11 @@ function toggleFullscreen(): void {
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
+// Browsers only allow sound after the player has clicked or pressed a key.
+window.addEventListener('pointerdown', unlockSound);
+window.addEventListener('keydown', unlockSound);
+$('mute-btn').textContent = isMuted() ? 'Sound off (M)' : 'Sound on (M)';
+$('mute-btn').addEventListener('click', () => ($('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)'));
 $('help-close').addEventListener('click', () => ($('help').hidden = true));
 $('chat-btn').addEventListener('click', () => {
   $('menu').hidden = true;
@@ -1270,6 +1352,7 @@ const TIPS = [
 let focusKey = '';
 let focusSelection = '';
 let panelSignature = '';
+let lastButtons = '';
 let detailSignature = '';
 let currentButtons: PanelButton[] = [];
 let currentDefault: Detail | undefined;
@@ -1380,10 +1463,14 @@ function renderPanel(): void {
   currentDefault = detail;
   renderDetails();
 
-  const signature = JSON.stringify([card, card.group.map((v) => [v.id, v.hp]), buttons.map((b) => [b.label, b.locked, b.cost && !canAfford(b.cost)])]);
-  if (signature === panelSignature) return;
-  panelSignature = signature;
-  renderCard(card);
+  const signature = JSON.stringify([card, card.group.map((v) => [v.id, v.hp])]);
+  if (signature !== panelSignature) {
+    panelSignature = signature;
+    renderCard(card);
+  }
+  const buttonSignature = JSON.stringify([me, buttons.map((b) => [buttonKey(b), b.label, b.locked, b.cost && !canAfford(b.cost)])]);
+  if (buttonSignature === lastButtons) return;
+  lastButtons = buttonSignature;
   renderButtons(buttons);
   // The panel may have grown; things floating above it follow.
   document.documentElement.style.setProperty('--bottom-h', `${$('bottom').offsetHeight}px`);
@@ -1463,32 +1550,48 @@ function renderCard(card: SelCard): void {
   }
 }
 
+/**
+ * Shows the command buttons. When only costs or states change, the existing buttons are updated in place
+ * instead of being replaced, so that clicking quickly never lands on a button that is being swapped out.
+ */
 function renderButtons(buttons: PanelButton[]): void {
   const actions = $('actions');
-  actions.textContent = '';
-  for (const b of buttons) {
-    const el = document.createElement('button');
-    el.type = 'button';
-    Object.assign(el.dataset, b.data);
-    el.dataset.key = buttonKey(b);
-    const img = document.createElement('img');
-    img.className = 'pic';
-    img.src = icon(b.icon, me);
-    img.alt = '';
-    const label = document.createElement('span');
-    label.className = 'lbl';
+  const keys = buttons.map(buttonKey);
+  const current = [...actions.children] as HTMLElement[];
+  const same = current.length === keys.length && current.every((el, i) => el.dataset.key === keys[i]);
+  if (!same) {
+    actions.textContent = '';
+    for (const b of buttons) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      Object.assign(el.dataset, b.data);
+      el.dataset.key = buttonKey(b);
+      const img = document.createElement('img');
+      img.className = 'pic';
+      img.alt = '';
+      const label = document.createElement('span');
+      label.className = 'lbl';
+      const last = document.createElement('span');
+      last.className = 'cost';
+      el.append(img, label, last);
+      actions.append(el);
+    }
+  }
+  buttons.forEach((b, i) => {
+    const el = actions.children[i] as HTMLElement;
+    const img = el.querySelector('img.pic') as HTMLImageElement;
+    const src = icon(b.icon, me);
+    if (img.src !== src) img.src = src;
     // "Spearman: Pikes" is shown as "Pikes"; the icon already shows the spearman.
-    label.textContent = b.label.split(': ').pop()!;
-    const last = document.createElement('span');
-    last.className = 'cost';
+    (el.querySelector('.lbl') as HTMLElement).textContent = b.label.split(': ').pop()!;
+    const last = el.querySelector('.cost') as HTMLElement;
+    last.textContent = '';
     if (b.locked && b.short) last.textContent = b.short;
     else last.append(...costChips(b.gain ?? b.cost ?? {}, b.gain ? '+' : ''));
-    el.append(img, label, last);
-    if (b.locked) el.classList.add('locked');
-    else if (b.cost && !canAfford(b.cost)) el.classList.add('poor');
-    if (el.dataset.key === focusKey) el.classList.add('focus');
-    actions.append(el);
-  }
+    el.classList.toggle('locked', !!b.locked);
+    el.classList.toggle('poor', !b.locked && !!b.cost && !canAfford(b.cost));
+    el.classList.toggle('focus', el.dataset.key === focusKey);
+  });
 }
 
 /** Fills the details box: the button last pointed at, or else the selection itself. */
@@ -1600,7 +1703,6 @@ function renderHud(): void {
   // Housing is full: nothing more can be trained until a house is built.
   const pop = stat('house', `${p.pop}/${p.cap}`, 'Population / housing');
   if (p.pop >= p.cap && p.cap < 60) pop.classList.add('warn');
-  if (idle > 0) stat('villager', String(idle), 'Idle villagers — press . to find them');
   stat('', AGE_NAMES[p.age] ?? '', 'Your age').classList.add('age');
   stat('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Game time');
 
@@ -1616,8 +1718,13 @@ function renderHud(): void {
   banner.hidden = !text;
 }
 
+let minimapTime = 0;
 function renderMinimap(): void {
   if (!map || !miniTerrain) return;
+  // Redrawn about six times a second; that is plenty for a map this small.
+  const t = performance.now();
+  if (t - minimapTime < 160) return;
+  minimapTime = t;
   const [a, b] = miniScale();
   mctx.setTransform(1, 0, 0, 1, 0, 0);
   mctx.clearRect(0, 0, minimap.width, minimap.height);
@@ -1846,7 +1953,7 @@ function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   requestAnimationFrame(frame);
-  ctx.fillStyle = '#10140f';
+  ctx.fillStyle = '#0b0e0a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!map || me < 0) return;
   updateCamera(dt);
@@ -1918,7 +2025,11 @@ function frame(now: number): void {
   // Fields lie flat on the ground, so they are drawn before anything that stands.
   const shown = [...views.values()].filter(canSee);
   for (const [id, ghost] of remembered) if (!shown.some((v) => v.id === id)) shown.push(ghost);
-  for (const v of shown) if (v.kind === 'farm') drawBuildingView(v);
+  for (const v of shown) {
+    if (v.kind !== 'farm') continue;
+    const [x, y] = tileToScreen(v.x + 1, v.y + 1);
+    if (x > -100 && x < canvas.width + 100 && y > -100 && y < canvas.height + 100) drawBuildingView(v);
+  }
 
   // Everything standing on the ground shares one depth-sorted pass.
   const alpha = Math.min(1, (now - snapTime) / TICK_MS);
@@ -1930,8 +2041,13 @@ function frame(now: number): void {
     if (sx < -40 || sy < -10 || sx > canvas.width + 40 || sy > canvas.height + 60 || !explored[index]) continue;
     drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 3), now) });
   }
+  const onScreen = (tx: number, ty: number, margin: number) => {
+    const [x, y] = tileToScreen(tx, ty);
+    return x > -margin && x < canvas.width + margin && y > -margin && y < canvas.height + margin * 2;
+  };
   for (const v of shown) {
     if (v.kind === 'farm') continue;
+    if (!onScreen(...centreOf(v), isBuilding(v.kind) ? 80 + sizeOf(v.kind) * 40 : 40)) continue;
     if (isBuilding(v.kind)) {
       drawables.push({ depth: v.x + v.y + sizeOf(v.kind), draw: () => drawBuildingView(v) });
     } else {
@@ -1984,17 +2100,18 @@ function frame(now: number): void {
 
   renderPanel();
   renderHud();
+  renderIdle();
   renderMinimap();
 }
 document.documentElement.style.setProperty('--lock-icon', `url(${icon('lock')})`);
 void loadSprites().then(() => {
   // Icons may come from the sprite pack, so draw them again once it is in.
   clearIcons();
-  panelSignature = hudSignature = detailSignature = '';
+  panelSignature = hudSignature = detailSignature = idleSignature = '';
 });
 requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __spawn: spawn, __game: { getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
+  Object.assign(window, { __spawn: spawn, __game: { setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

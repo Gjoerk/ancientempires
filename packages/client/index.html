@@ -149,12 +149,22 @@
     #d-body { font-size: 13px; line-height: 1.35; overflow-y: auto; scrollbar-width: thin; }
     #d-body p { margin: 0 0 3px; }
     #d-body p.warn { color: #ff8a70; }
+    /* Buttons beside the minimap that find units with nothing to do. */
+    #idle { grid-area: idle; align-self: center; display: flex; flex-direction: column; gap: 6px; }
+    #idle button { position: relative; width: 56px; height: 56px; padding: 0; display: grid; place-items: center; border-radius: 4px;
+      background: #1d130b; border: 0; box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 rgba(255, 220, 160, .08); }
+    #idle button:hover { filter: none; background: #2c1e12; box-shadow: 0 1px 0 rgba(255, 220, 160, .12), 0 2px 5px rgba(0, 0, 0, .5); }
+    #idle img { width: 40px; height: 40px; }
+    #idle b { position: absolute; right: 2px; bottom: 1px; min-width: 16px; padding: 0 3px; border-radius: 8px; font-size: 12px; line-height: 16px;
+      text-align: center; color: #1b120a; background: var(--accent); font-variant-numeric: lining-nums tabular-nums; }
+    #idle button.none { opacity: .45; }
+    #idle button.none b { display: none; }
     #map-frame { grid-area: map; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
     #minimap { width: var(--map-w, 300px); height: calc(var(--map-w, 300px) / 2); cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
 
     /* Square command tiles on the left, the selection in the middle, details, then the map. */
     body[data-bar="a"] #bottom { --bar-h: 236px; --map-w: 300px;
-      grid-template-columns: auto minmax(230px, 290px) minmax(220px, 1fr) auto; grid-template-areas: "actions sel details map"; }
+      grid-template-columns: auto minmax(230px, 290px) minmax(220px, 1fr) auto auto; grid-template-areas: "actions sel details idle map"; }
     body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(6, 58px); grid-auto-rows: 58px; gap: 4px; }
     /* Icon-only tiles as in classic strategy games; name, cost and effect are in the details box. */
     body[data-bar="a"] #actions button { width: 58px; height: 58px; padding: 0; justify-content: center; }
@@ -211,8 +221,8 @@
     }
     @media (max-width: 1100px) {
       /* Narrow windows: the selection sits above the details. */
-      body[data-bar="a"] #bottom { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr);
-        grid-template-areas: "actions sel map" "actions details map"; }
+      body[data-bar="a"] #bottom { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(0, 1fr);
+        grid-template-areas: "actions sel idle map" "actions details idle map"; }
       body[data-bar="a"] #sel { flex-direction: row; }
     }
 
@@ -229,7 +239,10 @@
       /* Phones: one line about the selection, one scrolling row of labelled buttons, the map.
          The details box opens above the bar when a button is pressed and held. */
       body[data-bar] #bottom { --bar-h: 124px; --map-w: 150px; padding: 4px 6px; gap: 4px 6px; border-width: 5px 5px 4px;
-        grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 22px minmax(0, 1fr); grid-template-areas: "sel map" "actions map"; }
+        grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: 22px minmax(0, 1fr); grid-template-areas: "sel idle map" "actions idle map"; }
+      body[data-bar] #idle { gap: 4px; }
+      body[data-bar] #idle button { width: 46px; height: 46px; }
+      body[data-bar] #idle img { width: 30px; height: 30px; }
       body[data-bar] #sel { flex-direction: row; padding: 0 6px; align-items: center; background: none; border: 0; box-shadow: none; }
       body[data-bar] #sel > .head { display: flex; flex-direction: row; align-items: center; gap: 8px; width: auto; flex: 1; min-width: 0; }
       body[data-bar] #portrait, body[data-bar] #sel-sub, body[data-bar] #sel-stats, body[data-bar] #queue, body[data-bar] #group { display: none; }
@@ -291,6 +304,10 @@
       <div id="d-stats"></div>
       <div id="d-body"></div>
     </section>
+    <div id="idle">
+      <button id="idle-vil-btn" type="button" title="Next idle villager (.)"><img alt="Idle villagers"><b></b></button>
+      <button id="idle-mil-btn" type="button" title="All idle soldiers (,)"><img alt="Idle soldiers"><b></b></button>
+    </div>
     <div id="map-frame"><canvas id="minimap" width="360" height="180"></canvas></div>
   </div>
   <div id="touch-tools" hidden>
@@ -315,7 +332,8 @@
     Press and hold to look at something without giving an order<br>
     <b>Keys</b><br>
     X stop · Delete destroys your selection · Shift + 1–9 stores a group, 1–9 selects it<br>
-    . next idle villager · , all idle soldiers · Space jumps to the last attack on you<br>
+    . next idle villager · , all idle soldiers (or the two buttons next to the minimap) · Space jumps to the last attack on you<br>
+    Groups walk in formation at the pace of their slowest member; fields can be walked over.<br>
     Enter chat · F fullscreen · M sound · H or Esc closes this<br>
     <b>Good to know</b><br>
     Build a mill, lumber camp or mining camp next to food, wood, gold or stone so villagers walk less.<br>

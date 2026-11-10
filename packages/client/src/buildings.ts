@@ -173,11 +173,27 @@ class Pen {
   }
 }
 
+/** Four sails on a hub in front of the windmill tower. */
+function millSails(pen: Pen, now: number): void {
+  const hub = pen.p(1.55, 0.9, 30);
+  const turn = now / 1400;
+  for (let i = 0; i < 4; i++) {
+    const a = turn + (i * Math.PI) / 2;
+    const tip: Pt = [hub[0] + Math.cos(a) * 26, hub[1] + Math.sin(a) * 26];
+    const side: Pt = [Math.cos(a + Math.PI / 2) * 5, Math.sin(a + Math.PI / 2) * 5];
+    const from: Pt = [hub[0] + Math.cos(a) * 6, hub[1] + Math.sin(a) * 6];
+    pen.poly('#efe6cf', [from, tip, [tip[0] + side[0], tip[1] + side[1]], [from[0] + side[0], from[1] + side[1]]]);
+    pen.line(hub, tip, TIMBER, 2);
+  }
+  pen.disc(hub, 3, '#3a2a1a');
+}
+
 export interface BuildingState {
   /** Construction progress 0..1. */
   built: number;
   /** A king is sheltering inside (castles). */
   kingInside: boolean;
+  /** Time for animations; -1 while drawing the still picture that is kept and reused. */
   now: number;
 }
 
@@ -260,18 +276,8 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.onV(1.4, 0.85, 1.05, 14, 21, '#39404c');
     pen.onU(1.5, 0.4, 1.4, 26, 30, team);
     pen.pyramid(0.4, 0.3, 1.6, 1.5, 30, 16, '#7a3b2a');
-    // Four sails on a hub in front of the tower.
-    const hub = pen.p(1.55, 0.9, 30);
-    const turn = state.now / 1400;
-    for (let i = 0; i < 4; i++) {
-      const a = turn + (i * Math.PI) / 2;
-      const tip: Pt = [hub[0] + Math.cos(a) * 26, hub[1] + Math.sin(a) * 26];
-      const side: Pt = [Math.cos(a + Math.PI / 2) * 5, Math.sin(a + Math.PI / 2) * 5];
-      const from: Pt = [hub[0] + Math.cos(a) * 6, hub[1] + Math.sin(a) * 6];
-      pen.poly('#efe6cf', [from, tip, [tip[0] + side[0], tip[1] + side[1]], [from[0] + side[0], from[1] + side[1]]]);
-      pen.line(hub, tip, TIMBER, 2);
-    }
-    pen.disc(hub, 3, '#3a2a1a');
+    // The sails turn, so they are drawn every frame rather than kept in the picture of the mill.
+    if (state.now >= 0) millSails(pen, state.now);
   },
 
   // Stone drill hall with battlements, a corner turret and banners by the gate.
@@ -425,7 +431,7 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.onU(3.6, 1.65, 2.35, 0, 17, '#3a2a1a');
     pen.crenels(3.3, 1, 3.6, 3, 24, STONE);
     tower(3.0, 3.0);
-    if (state.kingInside) pen.flag(pen.p(2, 2, 50), team, state.now);
+    if (state.kingInside && state.now >= 0) pen.flag(pen.p(2, 2, 50), team, state.now);
   },
 };
 
@@ -518,6 +524,34 @@ export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, 
     }
     return;
   }
+  if (done) {
+    // Finished buildings are drawn once into a picture and then copied; only moving parts are drawn live.
+    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}`;
+    let img = buildingCache.get(key);
+    if (!img) {
+      img = document.createElement('canvas');
+      img.width = s * HW * 2 + CACHE_LEFT + CACHE_RIGHT;
+      img.height = s * HH * 2 + CACHE_TOP + CACHE_BOTTOM;
+      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, now: -1 });
+      buildingCache.set(key, img);
+    }
+    ctx.drawImage(img, Math.round(sx) - s * HW - CACHE_LEFT, Math.round(sy) - CACHE_TOP);
+    if (kind === 'mill') millSails(new Pen(ctx, sx, sy, false), state.now);
+    if (kind === 'castle' && state.kingInside) drawRoyalFlag(ctx, new Pen(ctx, sx, sy, false).p(2, 2, 50), team, state.now);
+    return;
+  }
+  paintBuilding(ctx, kind, team, seed, sx, sy, state);
+}
+
+// Room around a building's footprint in its kept picture: roofs and towers rise above it, shadows fall to the right.
+const CACHE_LEFT = 24;
+const CACHE_RIGHT = 96;
+const CACHE_TOP = 120;
+const CACHE_BOTTOM = 40;
+const buildingCache = new Map<string, HTMLCanvasElement>();
+
+function paintBuilding(ctx: Ctx, kind: Kind, team: string, seed: number, sx: number, sy: number, state: BuildingState): void {
+  const s = DEFS[kind].size ?? 1;
   if (kind === 'farm') {
     drawFarm(new Pen(ctx, sx, sy, false), team, state, seed);
     return;
