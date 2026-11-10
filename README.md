@@ -26,7 +26,8 @@ Open the printed URL in two tabs: host in one, join with the room code in the ot
 - `npm run typecheck`
 - `npm run build` — static site in `packages/client/dist`
 
-The game is published by copying `packages/client/dist` into the `ancientempires/` folder of the `Gjoerk/gjoerk.github.io` site repository.
+The game is published by copying `packages/client/dist` into the `kingsfall/` folder of the `Gjoerk/gjoerk.github.io` site repository,
+where it is served at gabrielschwarz.com/kingsfall/. The old `ancientempires/` address forwards there.
 
 ## Custom sprites
 
