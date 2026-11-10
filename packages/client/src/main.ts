@@ -160,8 +160,14 @@ function tileToWorld(tx: number, ty: number): [number, number] {
   return [(tx - ty) * HW, (tx + ty) * HH];
 }
 
+/** While painting the menu background into a picture, drawing goes there and the view has the picture's size. */
+let drawingTarget: CanvasRenderingContext2D | undefined;
+let sceneSize: [number, number] | undefined;
+const viewW = () => sceneSize?.[0] ?? canvas.width;
+const viewH = () => sceneSize?.[1] ?? canvas.height;
+
 function worldToScreen(wx: number, wy: number): [number, number] {
-  return [wx - cam.x + canvas.width / 2, wy - cam.y + canvas.height / 2];
+  return [wx - cam.x + viewW() / 2, wy - cam.y + viewH() / 2];
 }
 
 function tileToScreen(tx: number, ty: number): [number, number] {
@@ -169,8 +175,8 @@ function tileToScreen(tx: number, ty: number): [number, number] {
 }
 
 function screenToTile(sx: number, sy: number): [number, number] {
-  const wx = sx + cam.x - canvas.width / 2;
-  const wy = sy + cam.y - canvas.height / 2;
+  const wx = sx + cam.x - viewW() / 2;
+  const wy = sy + cam.y - viewH() / 2;
   return [(wx / HW + wy / HH) / 2, (wy / HH - wx / HW) / 2];
 }
 
@@ -360,7 +366,7 @@ function buildTerrain(m: GameMap): void {
 /** The range of tiles that can be on screen: [x0, y0, x1, y1]. */
 function visibleTiles(): [number, number, number, number] {
   const n = map!.size;
-  const corners = [screenToTile(0, 0), screenToTile(canvas.width, 0), screenToTile(0, canvas.height), screenToTile(canvas.width, canvas.height)];
+  const corners = [screenToTile(0, 0), screenToTile(viewW(), 0), screenToTile(0, viewH()), screenToTile(viewW(), viewH())];
   return [
     Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0]))) - 1), Math.max(0, Math.floor(Math.min(...corners.map((c) => c[1]))) - 1),
     Math.min(n - 1, Math.ceil(Math.max(...corners.map((c) => c[0]))) + 1), Math.min(n - 1, Math.ceil(Math.max(...corners.map((c) => c[1]))) + 1),
@@ -423,7 +429,7 @@ function drawGround(): void {
       const [sx, sy] = tileToScreen(bx * CHUNK, by * CHUNK);
       const left = Math.round(sx) - CHUNK * HW - 1;
       const top = Math.round(sy) - 1;
-      if (left > canvas.width || top > canvas.height || left + CHUNK * HW * 2 < 0 || top + CHUNK * HH * 2 < 0) continue;
+      if (left > viewW() || top > viewH() || left + CHUNK * HW * 2 < 0 || top + CHUNK * HH * 2 < 0) continue;
       const key = by * blocks + bx;
       let chunk = chunks.get(key);
       if (!chunk) {
@@ -431,7 +437,7 @@ function drawGround(): void {
         chunks.set(key, chunk);
       }
       chunk.used = frameNo;
-      ctx.drawImage(chunk.img, left, top);
+      (drawingTarget ?? ctx).drawImage(chunk.img, left, top);
     }
   }
   // Keep memory in check: forget the blocks that have not been on screen for the longest.
@@ -668,8 +674,8 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
   for (const p of roster) {
     const li = document.createElement('li');
     const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.style.background = PLAYER_COLORS[p.slot];
+    chip.className = 'gem';
+    chip.style.setProperty('--gem', `var(--gem-${p.slot})`);
     const tags = [
       p.slot === you ? 'you' : '', p.slot === host ? 'host' : '', p.test ? 'played by the host' : '', p.ai ? 'computer' : '',
     ].filter(Boolean);
@@ -681,8 +687,13 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
     team.title = 'Team';
     for (let t = 0; t < 4; t++) team.add(new Option(`Team ${t + 1}`, String(t)));
     team.value = String(p.team);
+    team.className = 'team';
+    team.style.setProperty('--gem', `var(--gem-${p.team})`);
     team.disabled = !hosting;
-    team.addEventListener('change', () => session?.host?.setTeam(p.slot, Number(team.value)));
+    team.addEventListener('change', () => {
+      team.style.setProperty('--gem', `var(--gem-${team.value})`);
+      session?.host?.setTeam(p.slot, Number(team.value));
+    });
     li.append(chip, name, team);
     if ((p.test || p.ai) && hosting) {
       const remove = document.createElement('button');
@@ -1213,8 +1224,6 @@ $('full-btn').addEventListener('click', toggleFullscreen);
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
 for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
 installMenuArt();
-// Menu card design, for choosing between the three: ?menu=1, 2 or 3.
-document.body.dataset.menu = ['1', '2', '3'].includes(new URLSearchParams(location.search).get('menu') ?? '') ? new URLSearchParams(location.search).get('menu')! : '1';
 
 // Browsers only allow sound after the player has clicked or pressed a key.
 window.addEventListener('pointerdown', unlockSound);
@@ -1966,41 +1975,73 @@ let lobbyMap: GameMap | undefined;
 let lobbyTown: { kind: Kind; x: number; y: number }[] = [];
 const lobbyStart = performance.now();
 
+/** The town on the menu background is painted once into this picture, which then glides as a whole. */
+let lobbyPicture: HTMLCanvasElement | undefined;
+/** How far the picture drifts each way, in canvas pixels; it is painted this much larger than the screen. */
+const DRIFT_X = 150;
+const DRIFT_Y = 90;
+
 function drawLobbyScene(now: number): void {
   if (!lobbyMap) {
-    lobbyMap = generateMap((Math.random() * 0xffffffff) >>> 0, 80);
-    const [sx, sy] = lobbyMap.starts[0];
+    // A large map with the town in its middle, so that the view never reaches the edge of the world.
+    lobbyMap = generateMap((Math.random() * 0xffffffff) >>> 0, 112);
+    const c = Math.floor(lobbyMap.size / 2);
+    for (let y = c - 10; y <= c + 10; y++) {
+      for (let x = c - 12; x <= c + 10; x++) if (Math.hypot(x - c, y - c) < 9.5) lobbyMap.tiles[y * lobbyMap.size + x] = Tile.Grass;
+    }
     lobbyTown = [
-      { kind: 'towncenter', x: sx - 4, y: sy - 2 }, { kind: 'castle', x: sx + 1, y: sy - 2 }, { kind: 'house', x: sx - 4, y: sy + 2 },
-      { kind: 'house', x: sx - 7, y: sy - 1 }, { kind: 'mill', x: sx - 1, y: sy + 3 }, { kind: 'farm', x: sx + 2, y: sy + 3 },
-      { kind: 'farm', x: sx + 4, y: sy + 3 }, { kind: 'barracks', x: sx - 8, y: sy + 2 }, { kind: 'tower', x: sx + 6, y: sy - 4 },
+      { kind: 'towncenter', x: c - 4, y: c - 2 }, { kind: 'castle', x: c + 1, y: c - 2 }, { kind: 'house', x: c - 4, y: c + 2 },
+      { kind: 'house', x: c - 7, y: c - 1 }, { kind: 'mill', x: c - 1, y: c + 3 }, { kind: 'farm', x: c + 2, y: c + 3 },
+      { kind: 'farm', x: c + 4, y: c + 3 }, { kind: 'barracks', x: c - 8, y: c + 2 }, { kind: 'tower', x: c + 6, y: c - 4 },
     ];
   }
   if (map !== lobbyMap) {
     map = lobbyMap;
     buildTerrain(map);
+    lobbyPicture = undefined;
   }
   revealAll = true;
-  // The view drifts slowly around the town.
+  const w = canvas.width + DRIFT_X * 2;
+  const h = canvas.height + DRIFT_Y * 2;
+  if (!lobbyPicture || lobbyPicture.width !== w || lobbyPicture.height !== h) lobbyPicture = paintLobbyPicture(w, h, now);
+  // Fractional offsets are fine here: the whole picture moves together, so nothing shimmers.
   const t = (now - lobbyStart) / 1000;
-  const [sx, sy] = map.starts[0];
-  [cam.x, cam.y] = tileToWorld(sx + Math.sin(t / 23) * 7, sy + 2 + Math.cos(t / 31) * 5);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(lobbyPicture, -DRIFT_X + Math.sin(t / 9) * (DRIFT_X - 6), -DRIFT_Y + Math.cos(t / 13) * (DRIFT_Y - 6));
+  ctx.imageSmoothingEnabled = false;
+}
+
+/** Paints the menu town and its surroundings into a picture of the given size. */
+function paintLobbyPicture(w: number, h: number, now: number): HTMLCanvasElement {
+  const picture = document.createElement('canvas');
+  picture.width = w;
+  picture.height = h;
+  // The usual drawing routines are pointed at the picture for a moment.
+  const c = picture.getContext('2d')!;
+  c.imageSmoothingEnabled = false;
+  drawingTarget = c;
+  sceneSize = [w, h];
+  const centre = Math.floor(map!.size / 2);
+  [cam.x, cam.y] = tileToWorld(centre, centre + 1);
   drawGround();
   const items: { depth: number; draw: () => void }[] = [];
   for (const [index, tile] of props) {
-    const tx = index % map.size;
-    const ty = Math.floor(index / map.size);
+    const tx = index % map!.size;
+    const ty = Math.floor(index / map!.size);
     const [x, y] = tileToScreen(tx + 0.5, ty + 0.5);
-    if (x < -40 || y < -10 || x > canvas.width + 40 || y > canvas.height + 60) continue;
-    items.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, x, y, Math.floor(hash(tx, ty) * 3), now) });
+    if (x < -40 || y < -10 || x > w + 40 || y > h + 60) continue;
+    items.push({ depth: tx + ty + 1, draw: () => drawProp(c, tile, x, y, Math.floor(hash(tx, ty) * 3), now) });
   }
   for (const b of lobbyTown) {
     const s = sizeOf(b.kind);
     const [x, y] = tileToScreen(b.x, b.y);
-    items.push({ depth: b.kind === 'farm' ? -1e9 : b.x + b.y + s, draw: () => drawBuilding(ctx, b.kind, 0, b.x * 31 + b.y, x, y, { built: 1, kingInside: true, now }) });
+    items.push({ depth: b.kind === 'farm' ? -1e9 : b.x + b.y + s, draw: () => drawBuilding(c, b.kind, 0, b.x * 31 + b.y, x, y, { built: 1, kingInside: true, now }) });
   }
   items.sort((a, b) => a.depth - b.depth);
   for (const item of items) item.draw();
+  drawingTarget = undefined;
+  sceneSize = undefined;
+  return picture;
 }
 
 let last = performance.now();

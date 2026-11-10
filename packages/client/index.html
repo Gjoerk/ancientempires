@@ -6,7 +6,7 @@
   <title>Kingsfall</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jacquard+24&family=Pixelify+Sans:wght@500;700&family=Press+Start+2P&family=PT+Sans:wght@400;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=PT+Sans:wght@400;700&display=swap">
   <style>
     /* Dark green and gold. Everything below is styled through these variables. */
     body {
@@ -212,7 +212,6 @@
       -webkit-background-clip: text; background-clip: text; text-shadow: none; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .6)); }
     /* Written in mixed case; designs with capitals turn it into capitals. */
     .card h1.title { text-transform: uppercase; }
-    body[data-menu="1"] .card h1.title { text-transform: none; }
     .card .tagline { text-align: center; color: var(--dim); font-size: 14px; margin-top: -6px; }
     .card .rule { height: 1px; background: linear-gradient(90deg, transparent, var(--trim), transparent); margin: 2px 0; }
     .card label.field { display: grid; gap: 4px; font-size: 13px; color: var(--dim); }
@@ -233,19 +232,20 @@
     #room-host { display: grid; gap: 10px; }
     #room-players { list-style: none; margin: 4px 0; padding: 8px; display: grid; gap: 6px; background: rgba(0, 0, 0, .22); border-radius: 6px;
       border: 1px solid rgba(201, 165, 74, .2); }
-    #room-players li { display: flex; align-items: center; gap: 6px; }
+    #room-players li { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    #room-players select.team { font-size: 12px; padding-left: 6px; }
     #room-players .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    /* ---------- Menu card designs, picked with body[data-menu] ---------- */
-    .card-wrap { position: relative; width: min(440px, calc(100vw - 28px)); margin: 30px 0; }
+    /* ---------- Menu card: a heraldic banner hanging from a gold rod ---------- */
+    /* Narrow enough that the rod and its knobs stay on screen. */
+    .card-wrap { position: relative; width: min(440px, calc(100vw - 76px)); margin: 30px 0; }
     .card-wrap > .card { width: 100%; margin: 0; position: relative; }
     /* Fields shrink with the card instead of pushing the Join button out of it. */
     .card input, .card select { min-width: 0; box-sizing: border-box; }
+    .card { grid-template-columns: minmax(0, 1fr); }
     .card .row { grid-template-columns: minmax(0, 1fr) auto; }
     .card label.field input { width: 100%; }
-    @media (max-width: 480px) { body[data-menu="3"] .card button { padding-left: 34px; padding-right: 34px; } body[data-menu="3"] .card { padding-left: 22px; padding-right: 22px; } }
     body[data-menu] .card select { appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer; }
 
-    /* 1 — Heraldic banner hanging from a gold rod, fleurs-de-lis, ribbon buttons. */
     body[data-menu="1"] .card-wrap { padding-top: 14px; filter: drop-shadow(2px 0 0 #c9a54a) drop-shadow(-2px 0 0 #c9a54a) drop-shadow(0 2px 0 #c9a54a)
       drop-shadow(0 18px 26px rgba(0, 0, 0, .7)); }
     body[data-menu="1"] .card-wrap::before { content: ""; position: absolute; z-index: 2; top: 2px; left: -20px; right: -20px; height: 12px; border-radius: 6px;
@@ -257,8 +257,9 @@
       clip-path: polygon(0 0, 100% 0, 100% calc(100% - 46px), 50% 100%, 0 calc(100% - 46px));
       background: var(--pat-fleur) 0 0 / 48px 48px, linear-gradient(180deg, #11301f, #0b2016); }
     body[data-menu="1"] .card::before { content: ""; position: absolute; inset: 9px 9px 56px; border: 1px dashed rgba(201, 165, 74, .5); pointer-events: none; }
-    body[data-menu="1"] .card h1 { font-family: "Jacquard 24", serif; font-size: 64px; line-height: .9; letter-spacing: .02em; font-weight: 400; }
-    body[data-menu="1"] .card .tagline { font-style: italic; }
+    body[data-menu="1"] .card h1 { font-family: "Pixelify Sans", sans-serif; font-weight: 700; font-size: 50px; letter-spacing: .08em; line-height: 1;
+      color: #f3d77e; background: none; -webkit-background-clip: border-box; background-clip: border-box; filter: none;
+      text-shadow: 0 4px 0 #6b1f17, 0 6px 8px rgba(0, 0, 0, .6); }
     body[data-menu="1"] .card button { position: relative; border: 0; border-radius: 0; box-shadow: none; padding: 12px 34px;
       clip-path: polygon(0 0, 100% 0, calc(100% - 16px) 50%, 100% 100%, 0 100%, 16px 50%);
       background: linear-gradient(180deg, #2f6649, #1a3e2c); color: var(--ink); text-transform: uppercase; letter-spacing: .12em; font-size: 13px; font-weight: 700; }
@@ -272,67 +273,11 @@
     body[data-menu="1"] .card select { background: var(--arrow-shield) right 6px center / 14px 16px no-repeat, rgba(0, 0, 0, .35); border: 1px solid #c9a54a;
       border-radius: 0 0 12px 12px; padding-right: 28px; }
     body[data-menu="1"] .card .emblem { width: 64px; height: 64px; }
+    /* Each player has a gem in their colour; a team dropdown shows the gem of the chosen team. */
+    .card .gem { display: inline-block; flex: none; width: 14px; height: 14px; background: var(--gem) center / 14px 14px no-repeat; }
+    body[data-menu="1"] .card select.team { background: var(--gem) right 8px center / 13px 13px no-repeat, rgba(0, 0, 0, .35); padding-right: 30px; }
 
-    /* 2 — Pixel quest window: stepped pixel frame, harlequin diamonds, bevelled blocks with a blinking pointer. */
-    body[data-menu="2"] .card-wrap { filter: drop-shadow(0 6px 0 rgba(0, 0, 0, .55)) drop-shadow(0 20px 26px rgba(0, 0, 0, .6)); }
-    body[data-menu="2"] .card { border: 8px solid transparent; border-image: var(--frame-px) 8 / 8px stretch; border-radius: 0; box-shadow: none;
-      background: var(--pat-harlequin) 0 0 / 32px 32px, #0a2016; background-clip: padding-box; padding: 24px 24px 20px; image-rendering: pixelated; }
-    body[data-menu="2"] .card h1 { font-family: "Press Start 2P", monospace; font-size: 28px; letter-spacing: .06em; line-height: 1.3; color: #f3d77e;
-      background: none; -webkit-background-clip: border-box; background-clip: border-box; filter: none; text-shadow: 4px 4px 0 #050c08, -2px -2px 0 #8a6417; }
-    body[data-menu="2"] .card .tagline { font-family: "Pixelify Sans", sans-serif; font-size: 15px; }
-    body[data-menu="2"] .card label.field, body[data-menu="2"] .card .or { font-family: "Press Start 2P", monospace; font-size: 9px; letter-spacing: .06em;
-      text-transform: uppercase; color: #c9a54a; line-height: 1.8; }
-    body[data-menu="2"] .card .rule { height: 4px; background: repeating-linear-gradient(90deg, #c9a54a 0 4px, transparent 4px 8px); }
-    body[data-menu="2"] .card button { position: relative; border: 6px solid transparent; border-image: var(--bevel-green) 6 fill / 6px stretch;
-      background: none; border-radius: 0; box-shadow: none; color: #f3ecd4; font-family: "Press Start 2P", monospace; font-size: 11px;
-      letter-spacing: .04em; text-transform: uppercase; padding: 9px 14px; line-height: 1.4; text-shadow: 2px 2px 0 #050c08; }
-    body[data-menu="2"] .card button.primary { border-image-source: var(--bevel-gold); color: #2a1c05; text-shadow: 1px 1px 0 #fbe9a6; }
-    body[data-menu="2"] .card button:hover { filter: none; }
-    body[data-menu="2"] .card button:hover::before { content: ""; position: absolute; left: -2px; top: 50%; width: 10px; height: 14px; margin-top: -7px;
-      background: var(--pointer) center / 10px 14px no-repeat; animation: blink .8s steps(2) infinite; }
-    body[data-menu="2"] .card button:active { border-image-source: var(--bevel-green-down); transform: translateY(2px); }
-    body[data-menu="2"] .card button.primary:active { border-image-source: var(--bevel-gold-down); }
-    body[data-menu="2"] .card li button { font-size: 8px; padding: 4px 6px; }
-    body[data-menu="2"] .card input, body[data-menu="2"] .card select { border: 6px solid transparent; border-image: var(--inset-px) 6 fill / 6px stretch;
-      background: none; border-radius: 0; font-family: "Pixelify Sans", sans-serif; font-size: 16px; padding: 4px 6px; box-shadow: none; }
-    body[data-menu="2"] .card select { padding-right: 28px; background: var(--arrow-gold) right 6px center / 14px 10px no-repeat; font-size: 14px; }
-    body[data-menu="2"] .card input:focus, body[data-menu="2"] .card select:focus { box-shadow: 0 0 0 2px #f3d77e; }
-    body[data-menu="2"] #room-players { background: rgba(0, 0, 0, .35); border: 2px solid #050c08; border-radius: 0; }
-    @keyframes blink { 50% { opacity: 0; } }
 
-    /* 3 — Tapestry hung from a rod: woven cloth, crimson border bands, gold fringe, engraved plates with gems. */
-    body[data-menu="3"] .card-wrap { padding-top: 12px; padding-bottom: 20px; filter: drop-shadow(0 18px 26px rgba(0, 0, 0, .7)); }
-    body[data-menu="3"] .card-wrap::before { content: ""; position: absolute; z-index: 2; top: 0; left: -18px; right: -18px; height: 14px; border-radius: 7px;
-      background: linear-gradient(#7a5230, #4a2e18 60%, #2a1a0c); box-shadow: inset 0 1px 0 rgba(255, 220, 160, .35); }
-    body[data-menu="3"] .card-wrap::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: 0; height: 22px;
-      background: repeating-linear-gradient(90deg, #e3b84e 0 3px, #8a6417 3px 4px, transparent 4px 9px);
-      -webkit-mask: linear-gradient(#000 40%, transparent); mask: linear-gradient(#000 40%, transparent); }
-    body[data-menu="3"] .card { border: 0; border-radius: 0; padding: 46px 30px 48px;
-      background: var(--pat-band) 0 14px / 24px 16px repeat-x, var(--pat-band) 0 calc(100% - 14px) / 24px 16px repeat-x,
-        var(--pat-weave) 0 0 / 16px 16px, #10291d;
-      box-shadow: inset 0 0 0 3px #08170f, inset 0 0 0 5px #c9a54a, inset 0 0 0 7px #08170f, inset 0 0 40px rgba(0, 0, 0, .55); }
-    body[data-menu="3"] .card h1 { font-family: "Pixelify Sans", sans-serif; font-weight: 700; font-size: 48px; letter-spacing: .08em; line-height: 1;
-      color: #f3d77e; background: none; -webkit-background-clip: border-box; background-clip: border-box; filter: none;
-      text-shadow: 0 4px 0 #6b1f17, 0 6px 8px rgba(0, 0, 0, .6); }
-    body[data-menu="3"] .card .tagline { font-family: "Pixelify Sans", sans-serif; font-size: 15px; color: #d9c79a; }
-    body[data-menu="3"] .card .rule { height: 2px; background: #c9a54a; box-shadow: 0 3px 0 #6b1f17; margin: 4px 30px; }
-    body[data-menu="3"] .card button { position: relative; font-family: "Pixelify Sans", sans-serif; font-weight: 700; font-size: 17px; letter-spacing: .04em;
-      padding: 10px 40px; border: 2px solid #c9a54a; border-radius: 3px; color: #efe8d0; background: linear-gradient(180deg, #1c4532, #0e2619);
-      box-shadow: inset 0 0 0 2px #06100b, inset 0 3px 0 rgba(255, 255, 255, .07), 0 3px 0 #06100b; }
-    body[data-menu="3"] .card button::before, body[data-menu="3"] .card button::after { content: ""; position: absolute; top: 50%; width: 14px; height: 14px; margin-top: -7px;
-      background: var(--gem-green) center / 14px 14px no-repeat; }
-    body[data-menu="3"] .card button::before { left: 12px; }
-    body[data-menu="3"] .card button::after { right: 12px; }
-    body[data-menu="3"] .card button.primary { background: linear-gradient(180deg, #f3d77e, #c99a2e 60%, #a2771b); color: #2a1405; border-color: #6e5212;
-      box-shadow: inset 0 0 0 2px #fbe9a6, 0 3px 0 #4a3408; }
-    body[data-menu="3"] .card button.primary::before, body[data-menu="3"] .card button.primary::after { background-image: var(--gem-red); }
-    body[data-menu="3"] .card button:hover { filter: brightness(1.12); }
-    body[data-menu="3"] .card li button { padding: 2px 8px; font-size: 12px; }
-    body[data-menu="3"] .card li button::before, body[data-menu="3"] .card li button::after { display: none; }
-    body[data-menu="3"] .card input, body[data-menu="3"] .card select { background: #091a11; border: 2px solid #5a4a1c; border-radius: 3px;
-      box-shadow: inset 0 2px 0 rgba(0, 0, 0, .55); font-family: "Pixelify Sans", sans-serif; font-size: 16px; }
-    body[data-menu="3"] .card select { background: var(--gem-red) right 9px center / 12px 12px no-repeat, #091a11; padding-right: 30px; font-size: 14px; }
-    body[data-menu="3"] .card input:focus, body[data-menu="3"] .card select:focus { border-color: #e8c25a; }
 
     #lobby-msg { min-height: 1.4em; color: var(--accent); margin: 0; }
 
@@ -385,7 +330,7 @@
     }
   </style>
 </head>
-<body data-bar="a" data-skin="3">
+<body data-bar="a" data-skin="3" data-menu="1">
   <canvas id="game"></canvas>
   <div id="top" class="bar" hidden>
     <div id="resources"></div>
@@ -492,7 +437,6 @@
     <div class="card-wrap"><form id="lobby-form" class="card" autocomplete="off">
       <img class="emblem" alt="">
       <h1 class="title">Kingsfall</h1>
-      <p class="tagline">Build a realm. Protect your king.</p>
       <div class="rule"></div>
       <label class="field">Your name
         <input id="name" placeholder="e.g. Gabriel" maxlength="16" required>
