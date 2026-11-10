@@ -38,6 +38,7 @@ import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
 import { clearIcons, icon } from './icons';
+import { installMenuArt } from './menu-art';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { isMuted, play, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
@@ -1211,6 +1212,9 @@ function toggleFullscreen(): void {
 $('full-btn').addEventListener('click', toggleFullscreen);
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
 for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
+installMenuArt();
+// Menu card design, for choosing between the three: ?menu=1, 2 or 3.
+document.body.dataset.menu = ['1', '2', '3'].includes(new URLSearchParams(location.search).get('menu') ?? '') ? new URLSearchParams(location.search).get('menu')! : '1';
 
 // Browsers only allow sound after the player has clicked or pressed a key.
 window.addEventListener('pointerdown', unlockSound);
