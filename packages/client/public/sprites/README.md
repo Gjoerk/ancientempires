@@ -50,7 +50,7 @@ The most specific key that exists is used.
 
 **Units** — `unit.<kind>` with kind one of `villager`, `king`, `swordsman`, `spearman`, `archer`, `rider`, `ram`.
 Optional per activity: `unit.<kind>.idle`, `.walk`, `.attack`, `.work`, and for villagers
-`.work.wood`, `.work.berries`, `.work.gold`, `.work.farm`, `.work.build`.
+`.work.wood`, `.work.berries`, `.work.gold`, `.work.stone`, `.work.farm`, `.work.build`.
 Work sprites should face right; they are mirrored when the work is on the left.
 If a villager has no `.work` sprite, the built-in tool animation is drawn over the sprite.
 
@@ -60,7 +60,7 @@ Optional: `building.<kind>.site` (under construction), `building.site` (any buil
 construction), `building.castle.king` (castle with a king inside; replaces the `flag` option).
 Without a site sprite the finished sprite fades in as construction progresses.
 
-**Resources** — `resource.tree`, `resource.berries`, `resource.gold`.
+**Resources** — `resource.tree`, `resource.berries`, `resource.gold`, `resource.stone`.
 Optional variants `resource.tree.0`, `.1`, `.2` are picked per tile for variety.
 
 Terrain tiles, the minimap, health bars and the interface are not part of the sprite pack yet.

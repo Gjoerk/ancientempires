@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addPlayer, applyCommand, createGame, DEFS, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
+  addPlayer, applyCommand, armorOf, attackOf, createGame, DEFS, hasTech, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
   TILE_RESOURCE,
 } from './index';
 
@@ -28,7 +28,7 @@ test('map generation is deterministic and every start has all four resources nea
   assert.deepEqual(a.tiles, generateMap(42).tiles);
   for (const [sx, sy] of a.starts) {
     assert.ok(isWalkable(a, sx, sy));
-    for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold]) {
+    for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold, Tile.Stone]) {
       let found = false;
       for (let y = sy - 12; y <= sy + 12; y++) for (let x = sx - 12; x <= sx + 12; x++) if (a.tiles[y * a.size + x] === tile) found = true;
       assert.ok(found, `tile ${tile} near start`);
@@ -45,7 +45,7 @@ test('paths only cross walkable tiles and end at the goal', () => {
 });
 
 test('villagers gather every resource and deliver it to the town centre', () => {
-  for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold]) {
+  for (const tile of [Tile.Forest, Tile.Berries, Tile.Gold, Tile.Stone]) {
     const s = createGame(5);
     addPlayer(s, 0);
     const res = TILE_RESOURCE[tile as Tile]!.res;
@@ -170,7 +170,7 @@ test('ages gate buildings and units, and research unlocks and improves things', 
   const s = createGame(31);
   addPlayer(s, 0);
   const p = s.players.get(0)!;
-  Object.assign(p.res, { food: 5000, wood: 5000, gold: 5000 });
+  Object.assign(p.res, { food: 5000, wood: 5000, gold: 5000, stone: 5000 });
   const [sx, sy] = s.map.starts[0];
   const ids = owned(s, 0, 'villager').map((e) => e.id);
   const tc = owned(s, 0, 'towncenter')[0];
@@ -193,13 +193,26 @@ test('ages gate buildings and units, and research unlocks and improves things', 
   run(s, 310);
   assert.ok(p.techs.has('weapons') && p.techs.has('loom'));
   assert.equal(owned(s, 0, 'villager')[0].hp, 40);
-  // Better weapons make a swordsman hit a house for 8 + 2 (upgrade) + 2 (vs buildings) - 3 (armour) = 9.
+  // Better weapons make a swordsman hit a house for 8 + 1 (upgrade) + 2 (vs buildings) - 3 (armour) = 8.
   addPlayer(s, 1);
   const house = spawn(s, 1, 'house', 30, 30);
   const sword = spawn(s, 0, 'swordsman', 29, 30);
   applyCommand(s, 0, { type: 'interact', ids: [sword.id], target: house.id });
   run(s, 2);
-  assert.equal(house.hp, DEFS.house.hp - 9);
+  assert.equal(house.hp, DEFS.house.hp - 8);
+
+  // Upgrades for one kind of soldier leave the others alone, and existing units gain the health.
+  const spear = spawn(s, 0, 'spearman', 28, 28);
+  applyCommand(s, 0, { type: 'train', building: smith.id, kind: 'jacks' });
+  applyCommand(s, 0, { type: 'train', building: smith.id, kind: 'blades' });
+  run(s, 520);
+  assert.ok(p.techs.has('jacks') && p.techs.has('blades'));
+  assert.equal(spear.hp, DEFS.spearman.hp + 15);
+  const has = hasTech(s, 0);
+  assert.equal(attackOf('swordsman', has), 8 + 1 + 3);
+  assert.equal(attackOf('spearman', has), 4 + 1);
+  assert.equal(armorOf('spearman', has), 1);
+  assert.equal(armorOf('swordsman', has), 1);
 });
 
 test('the market trades, villagers repair, and own things can be deleted', () => {
@@ -210,11 +223,11 @@ test('the market trades, villagers repair, and own things can be deleted', () =>
   const [sx, sy] = s.map.starts[0];
   const market = spawn(s, 0, 'market', sx - 2, sy + 3);
   applyCommand(s, 0, { type: 'trade', building: market.id, res: 'food', buy: false });
-  assert.deepEqual([p.res.food, p.res.gold], [100, 210]);
-  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'wood', buy: true });
-  assert.deepEqual([p.res.wood, p.res.gold], [300, 80]);
-  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'wood', buy: true });
-  assert.equal(p.res.gold, 80, 'cannot buy without the gold');
+  assert.deepEqual([p.res.food, p.res.gold], [100, 160]);
+  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'stone', buy: true });
+  assert.deepEqual([p.res.stone, p.res.gold], [200, 30]);
+  applyCommand(s, 0, { type: 'trade', building: market.id, res: 'stone', buy: true });
+  assert.equal(p.res.gold, 30, 'cannot buy without the gold');
 
   market.hp = 100;
   applyCommand(s, 0, { type: 'interact', ids: [owned(s, 0, 'villager')[0].id], target: market.id });

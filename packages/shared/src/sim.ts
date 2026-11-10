@@ -1,5 +1,5 @@
 import {
-  armorOf, attackOf, CARRY_CAPACITY, Cost, DEFAULT_SIGHT, DEFS, FARM_RATE, GATHER_RATE, isTech, Kind, KINDS, maxHpOf, POP_MAX,
+  armorOf, attackOf, bonusOf, CARRY_CAPACITY, cooldownOf, TRADE_GOODS, Cost, DEFAULT_SIGHT, DEFS, FARM_RATE, GATHER_RATE, isTech, Kind, KINDS, maxHpOf, POP_MAX,
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, Tile, TILE_RESOURCE } from './map';
@@ -453,7 +453,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
   } else if (cmd.type === 'trade') {
     const b = state.entities.get(cmd.building);
     if (!b || b.owner !== slot || b.kind !== 'market' || b.progress < 1) return;
-    if (cmd.res !== 'food' && cmd.res !== 'wood') return;
+    if (!TRADE_GOODS.includes(cmd.res)) return;
     if (cmd.buy) {
       if (player.res.gold < TRADE_BUY) return;
       player.res.gold -= TRADE_BUY;
@@ -503,9 +503,9 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
 
 function strike(state: GameState, e: Entity, target: Entity): void {
   const def = DEFS[e.kind];
-  const bonus = (def.bonus?.[target.kind] ?? 0) + (isBuilding(target) ? def.vsBuildings ?? 0 : 0);
-  const dmg = Math.max(1, attackOf(e.kind, hasTech(state, e.owner)) + bonus - armorOf(target.kind, hasTech(state, target.owner)));
-  e.cooldown = Math.round((def.cooldown ?? 1.5) * TICK_RATE);
+  const has = hasTech(state, e.owner);
+  const dmg = Math.max(1, attackOf(e.kind, has) + bonusOf(e.kind, target.kind, has) - armorOf(target.kind, hasTech(state, target.owner)));
+  e.cooldown = Math.round(cooldownOf(e.kind, has) * TICK_RATE);
   if ((def.range ?? 0) > 2) state.shots.push([e.id, target.id]);
   else state.hits.push([e.id, target.id]);
   target.hp -= dmg;
@@ -695,8 +695,10 @@ function stepTraining(state: GameState, b: Entity): void {
     player.researching.delete(item);
     if (item === 'age2' || item === 'age3') player.age = Math.max(player.age, item === 'age2' ? 2 : 3);
     player.techs.add(item);
-    if (item === 'loom') {
-      for (const e of state.entities.values()) if (e.owner === b.owner && e.kind === 'villager') e.hp += 15;
+    // Units already in the field get the extra health at once.
+    const boost = TECHS[item].boost;
+    if (boost?.hp) {
+      for (const e of state.entities.values()) if (e.owner === b.owner && boost.kinds.includes(e.kind)) e.hp += boost.hp;
     }
   } else {
     // A finished unit waits inside until there is housing for it.
@@ -821,7 +823,7 @@ export function activityOf(e: Entity): number {
 
 /**
  * What a unit is visibly busy with and where, for work animations:
- * [task, target]. Tasks: 0 none, 1 wood, 2 berries, 3 gold, 5 farm, 6 build, 7 attack.
+ * [task, target]. Tasks: 0 none, 1 wood, 2 berries, 3 gold, 4 stone, 5 farm, 6 build, 7 attack.
  * The target is a tile index for 1-4 and an entity id for 5-7.
  */
 export function taskOf(e: Entity): [number, number] {
@@ -831,7 +833,7 @@ export function taskOf(e: Entity): [number, number] {
   if (o.t === 'build') return [6, o.id];
   if (o.t !== 'gather' || o.phase !== 'work') return [0, 0];
   if (o.farm >= 0) return [5, o.farm];
-  return [1 + ['wood', 'food', 'gold'].indexOf(o.res), o.tile];
+  return [1 + ['wood', 'food', 'gold', 'stone'].indexOf(o.res), o.tile];
 }
 
 export const kindIndex = (kind: Kind): number => KINDS.indexOf(kind);

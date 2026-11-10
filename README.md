@@ -37,9 +37,9 @@ All art is drawn by code, but any unit, building or resource can be replaced wit
 
 Done:
 - Waiting room with teams, computer opponents, a quick-start option and a test opponent the host plays themselves.
-- Seeded 64×64 map with wood, berries and gold near every start; fog of war shared between allies.
-- Economy with three resources (food, wood, gold): gathering, farms, storehouses, houses, population limit, market.
-- Three ages and a handful of upgrades (town centre, storehouse, blacksmith).
+- Seeded 64×64 map with wood, berries, gold and stone near every start; fog of war shared between allies.
+- Economy with four resources (food, wood, gold, stone): gathering, farms, storehouses, houses, population limit, market.
+- Three ages; economy upgrades at the town centre and storehouse; army-wide and per-unit upgrades at the blacksmith.
 - Buildings placed and built by villagers, repair, rally points, walls dragged out as lines, gates for the owner's team.
 - Combat: spearman, swordsman, archer, rider, battering ram, watchtower and castle, with counters; attack-move, stop, control groups.
 - Protect the king: he can shelter in the castle; a player whose king dies is out and the last team with a king wins.

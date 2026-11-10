@@ -25,7 +25,7 @@ export interface GameSettings {
 export type EntitySnapshot = [number, number, number, number, number, number, number, number, number, number];
 
 /**
- * [slot, food, wood, gold, population, housing, defeated (0/1), age,
+ * [slot, food, wood, gold, stone, population, housing, defeated (0/1), age,
  *  researched technologies as a bit mask over TECH_IDS, technologies being researched likewise]
  */
 export type PlayerSnapshot = number[];

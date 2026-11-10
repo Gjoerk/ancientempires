@@ -101,7 +101,7 @@ export class GameHost {
     return {
       t: 'snap', tick: s.tick, ents, queues,
       players: [...s.players.values()].map((p) => [
-        p.slot, p.res.food, p.res.wood, p.res.gold, p.pop, p.cap, p.defeated ? 1 : 0,
+        p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
         p.age, mask(p.techs), mask(p.researching),
       ]),
       tiles: s.tileEvents, shots: s.shots, hits: s.hits, deaths: s.deaths, rallies, winner: s.winner,

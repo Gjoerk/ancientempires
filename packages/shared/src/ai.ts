@@ -1,4 +1,4 @@
-import { DEFS, Kind, POP_MAX, Res, TechId } from './defs';
+import { DEFS, Kind, POP_MAX, Res, TECH_IDS, TechId, TECHS } from './defs';
 import { GameMap, Tile, TILE_RESOURCE } from './map';
 import { applyCommand, canAfford, canPlace, Entity, GameState, isEnemy } from './sim';
 
@@ -8,8 +8,8 @@ import { applyCommand, canAfford, canPlace, Entity, GameState, isEnemy } from '.
 const VILLAGER_GOAL = 18;
 const ARMY_LIMIT = 26;
 /** Share of villagers wanted on each resource. */
-const WORKER_SHARE: Record<Res, number> = { food: 0.45, wood: 0.35, gold: 0.2 };
-const RES_TILES: Record<Res, number[]> = { food: [Tile.Berries], wood: [Tile.Forest], gold: [Tile.Gold] };
+const WORKER_SHARE: Record<Res, number> = { food: 0.45, wood: 0.33, gold: 0.2, stone: 0.02 };
+const RES_TILES: Record<Res, number[]> = { food: [Tile.Berries], wood: [Tile.Forest], gold: [Tile.Gold], stone: [Tile.Stone] };
 
 function nearestTile(map: GameMap, tiles: number[], fx: number, fy: number, radius: number): number {
   let best = -1;
@@ -114,7 +114,9 @@ export function runAi(state: GameState, slot: number): void {
   }
   const smith = built('blacksmith')[0];
   if (smith && smith.queue.length === 0) {
-    for (const tech of ['weapons', 'armour'] as const) if (wants(tech)) applyCommand(state, slot, { type: 'train', building: smith.id, kind: tech });
+    // Army-wide upgrades first, then whatever else the smith offers.
+    const next = TECH_IDS.find((id) => TECHS[id].at === 'blacksmith' && wants(id) && canAfford(p, TECHS[id].cost) && id !== 'arrowslits');
+    if (next) applyCommand(state, slot, { type: 'train', building: smith.id, kind: next });
   }
   const store = built('storehouse')[0] ?? undefined;
   if (store && store.queue.length === 0 && wants('tools')) applyCommand(state, slot, { type: 'train', building: store.id, kind: 'tools' });
@@ -134,29 +136,37 @@ export function runAi(state: GameState, slot: number): void {
     }
   }
 
-  // Put idle villagers on whatever resource is most short of workers.
-  const working: Record<Res, number> = { food: 0, wood: 0, gold: 0 };
+  // Villagers are spread over the resources in fixed shares. Idle ones go where workers are
+  // most lacking, and when the split has drifted one villager at a time is moved back.
+  const working: Record<Res, number> = { food: 0, wood: 0, gold: 0, stone: 0 };
   for (const v of villagers) if (v.order.t === 'gather') working[v.order.res]++;
+  const assign = (v: Entity, res: Res): boolean => {
+    if (res === 'food' && !berriesLeft) {
+      const farm = farms.find((f) => !villagers.some((w) => w.order.t === 'gather' && w.order.farm === f.id));
+      if (!farm) return false;
+      applyCommand(state, slot, { type: 'interact', ids: [v.id], target: farm.id });
+    } else {
+      const tile = nearestTile(map, RES_TILES[res], sx, sy, 24);
+      if (tile < 0 || !TILE_RESOURCE[map.tiles[tile] as Tile]) return false;
+      applyCommand(state, slot, { type: 'gather', ids: [v.id], tile });
+    }
+    if (v.order.t === 'gather') working[v.order.res]--;
+    working[res]++;
+    return true;
+  };
+  const byNeed = (): Res[] => (['food', 'wood', 'gold', 'stone'] as Res[]).sort(
+    (a, b) => working[a] / WORKER_SHARE[a] - working[b] / WORKER_SHARE[b],
+  );
   for (const v of villagers) {
     if (v.order.t !== 'idle') continue;
-    const order: Res[] = (['food', 'wood', 'gold'] as Res[]).sort(
-      (a, b) => working[a] / WORKER_SHARE[a] - working[b] / WORKER_SHARE[b],
-    );
-    for (const res of order) {
-      if (res === 'food') {
-        const farm = farms.find((f) => !villagers.some((w) => w.order.t === 'gather' && w.order.farm === f.id));
-        if (!berriesLeft && farm) {
-          applyCommand(state, slot, { type: 'interact', ids: [v.id], target: farm.id });
-          working.food++;
-          break;
-        }
-      }
-      const tile = nearestTile(map, RES_TILES[res], sx, sy, 24);
-      if (tile < 0 || !TILE_RESOURCE[map.tiles[tile] as Tile]) continue;
-      applyCommand(state, slot, { type: 'gather', ids: [v.id], tile });
-      working[res]++;
-      break;
-    }
+    for (const res of byNeed()) if (assign(v, res)) break;
+  }
+  const order = byNeed();
+  const most = order[order.length - 1];
+  const least = order.find((res) => working[res] < WORKER_SHARE[res] * villagers.length - 1);
+  if (least && least !== most && working[most] > WORKER_SHARE[most] * villagers.length + 1) {
+    const mover = villagers.find((v) => v.order.t === 'gather' && v.order.res === most && v.carry === 0);
+    if (mover) assign(mover, least);
   }
 
   // Attack in waves that grow each time; in between, the army waits at home.

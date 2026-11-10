@@ -28,6 +28,8 @@ import {
   TICK_MS,
   TILE_RESOURCE,
   TRADE_BUY,
+  TRADE_GOODS,
+  rangeOf,
   TRADE_SELL,
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
@@ -306,7 +308,7 @@ function hash(x: number, y: number): number {
 
 const MINI_COLORS: Record<number, string> = {
   [Tile.Grass]: '#4f8a3a', [Tile.Water]: '#1c3f66', [Tile.Forest]: '#2a5a26',
-  [Tile.Berries]: '#b8506a', [Tile.Gold]: '#f2cf3a',
+  [Tile.Berries]: '#b8506a', [Tile.Gold]: '#f2cf3a', [Tile.Stone]: '#9aa0a8',
 };
 
 function paintTile(m: GameMap, index: number): void {
@@ -464,7 +466,7 @@ function onMessage(msg: ServerMessage): void {
     queues.clear();
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
     let defeatChanged = false;
-    for (const [slot, food, wood, gold, pop, cap, defeated, age, techs, researching] of msg.players) {
+    for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching] of msg.players) {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
       if (slot === me && old) {
@@ -472,7 +474,7 @@ function onMessage(msg: ServerMessage): void {
         else if (techs !== old.techs) play('research');
         if (defeated === 1 && !old.defeated) play('defeat');
       }
-      players.set(slot, { res: { food, wood, gold }, pop, cap, defeated: defeated === 1, age, techs, researching });
+      players.set(slot, { res: { food, wood, gold, stone }, pop, cap, defeated: defeated === 1, age, techs, researching });
     }
     if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
     if (defeatChanged) renderPlayers();
@@ -909,6 +911,12 @@ $('mute-btn').textContent = isMuted() ? 'Sound off (M)' : 'Sound on (M)';
 $('mute-btn').addEventListener('click', () => ($('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)'));
 window.addEventListener('pointerdown', unlockSound);
 window.addEventListener('keydown', unlockSound);
+// Pointing at an upgrade or trade button explains it in the info line.
+$('actions').addEventListener('mouseover', (ev) => {
+  const button = (ev.target as HTMLElement).closest('button');
+  if (button?.title) $('info').textContent = `${button.firstChild?.textContent ?? ''} — ${button.title}`;
+});
+$('actions').addEventListener('mouseout', () => (panelSignature = ''));
 $('help-btn').addEventListener('click', () => ($('help').hidden = !$('help').hidden));
 $('actions').addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
@@ -1009,6 +1017,7 @@ function renderPanel(): void {
     const ownerName = v.owner === me ? '' : ` · ${roster.find((p) => p.slot === v.owner)?.name ?? 'enemy'}`;
     info = `${def.label}${ownerName} · HP ${v.hp}/${maxHp(v)}`;
     if (def.attack) info += ` · attack ${attackOf(v.kind, theirs)}`;
+    if ((def.range ?? 0) > 2) info += ` · range ${rangeOf(v.kind, theirs)}`;
     if (!isBuilding(v.kind) || def.attack) info += ` · armour ${armorOf(v.kind, theirs)}`;
     if (isBuilding(v.kind) && v.extra < 100) info += ` · under construction ${v.extra}%`;
     else if (!isBuilding(v.kind) && v.extra % 100 > 0) info += ` · carrying ${v.extra % 100} ${RESOURCES[Math.floor(v.extra / 100)]}`;
@@ -1036,8 +1045,8 @@ function renderPanel(): void {
         buttons.push({ label: tech.label, cost: tech.cost, locked: !!missing, sub: missing || tech.effect, data: { train: id, at } });
       }
       if (v.kind === 'market') {
-        for (const r of ['food', 'wood']) buttons.push({ label: `Sell 100 ${r}`, sub: `for ${TRADE_SELL} gold`, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
-        for (const r of ['food', 'wood']) buttons.push({ label: `Buy 100 ${r}`, sub: `for ${TRADE_BUY} gold`, locked: (my?.res.gold ?? 0) < TRADE_BUY, data: { buy: r, at } });
+        for (const r of TRADE_GOODS) buttons.push({ label: `Sell 100 ${r}`, sub: `for ${TRADE_SELL} gold`, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
+        for (const r of TRADE_GOODS) buttons.push({ label: `Buy 100 ${r}`, sub: `for ${TRADE_BUY} gold`, locked: (my?.res.gold ?? 0) < TRADE_BUY, data: { buy: r, at } });
       }
       if (queue) buttons.push({ label: 'Cancel last', data: { cancel: at } });
       if (def.trains && !queue) info += ' · right-click the map to set a gathering point';
@@ -1079,7 +1088,7 @@ function renderHud(): void {
   const p = players.get(me);
   if (!p) return;
   const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0).length;
-  const signature = [p.res.food, p.res.wood, p.res.gold, p.pop, p.cap, idle, p.defeated, winner, p.age].join();
+  const signature = [p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, idle, p.defeated, winner, p.age].join();
   if (signature === hudSignature) return;
   hudSignature = signature;
   const el = $('resources');
