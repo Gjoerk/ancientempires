@@ -506,3 +506,95 @@ test('a mixed crowd of nine melee fighters never shares a tile around its target
   run(s, 200);
   assert.equal(new Set(army.map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`)).size, 9);
 });
+
+test('houses cannot be built past the population limit, and the limit caps housing', () => {
+  const s = createGame(81, undefined, 20);
+  addPlayer(s, 0);
+  const p = s.players.get(0)!;
+  p.res.wood = 5000;
+  const [sx, sy] = s.map.starts[0];
+  const v = owned(s, 0, 'villager')[0];
+  // The town centre gives 5; three houses bring it to 20, and a fourth is refused.
+  const spots = [[sx - 2, sy + 4], [sx, sy + 4], [sx + 2, sy + 4], [sx + 4, sy + 4]];
+  for (const [x, y] of spots) {
+    for (let yy = y; yy < y + 2; yy++) for (let xx = x; xx < x + 2; xx++) s.map.tiles[yy * s.map.size + xx] = Tile.Grass;
+    applyCommand(s, 0, { type: 'place', ids: [v.id], kind: 'house', x, y, queue: true });
+  }
+  assert.equal(owned(s, 0, 'house').length, 3);
+  run(s, 600);
+  assert.equal(p.cap, 20);
+});
+
+test('one villager works through a list of building sites', () => {
+  const s = createGame(83);
+  addPlayer(s, 0);
+  s.players.get(0)!.res.wood = 1000;
+  const [sx, sy] = s.map.starts[0];
+  const v = owned(s, 0, 'villager')[0];
+  for (const [x, y] of [[sx - 2, sy + 4], [sx, sy + 4], [sx + 2, sy + 4]]) {
+    for (let yy = y; yy < y + 2; yy++) for (let xx = x; xx < x + 2; xx++) s.map.tiles[yy * s.map.size + xx] = Tile.Grass;
+    applyCommand(s, 0, { type: 'place', ids: [v.id], kind: 'house', x, y, queue: true });
+  }
+  assert.equal(v.tasks?.length, 2);
+  run(s, 500);
+  assert.deepEqual(owned(s, 0, 'house').map((h) => h.progress), [1, 1, 1]);
+  // A new order without the queue flag wipes the list.
+  const w = owned(s, 0, 'villager')[1];
+  applyCommand(s, 0, { type: 'place', ids: [w.id], kind: 'house', x: sx - 2, y: sy + 7, queue: true });
+  applyCommand(s, 0, { type: 'move', ids: [w.id], x: sx, y: sy });
+  assert.equal(w.tasks, undefined);
+});
+
+test('villagers and the king shelter in the town centre, and come out again', () => {
+  const s = createGame(85);
+  addPlayer(s, 0);
+  const tc = owned(s, 0, 'towncenter')[0];
+  const [a, b] = owned(s, 0, 'villager');
+  const king = owned(s, 0, 'king')[0];
+  applyCommand(s, 0, { type: 'interact', ids: [a.id, b.id, king.id], target: tc.id });
+  run(s, 100);
+  assert.deepEqual([a.inside, b.inside, king.inside], [tc.id, tc.id, tc.id]);
+  applyCommand(s, 0, { type: 'eject', building: tc.id });
+  assert.deepEqual([a.inside, b.inside, king.inside], [-1, -1, -1]);
+  // A villager carrying food delivers it instead of going in.
+  a.carry = 5;
+  a.carryRes = 'food';
+  const food = s.players.get(0)!.res.food;
+  applyCommand(s, 0, { type: 'interact', ids: [a.id], target: tc.id });
+  run(s, 60);
+  assert.equal(a.inside, -1);
+  assert.equal(s.players.get(0)!.res.food, food + 5);
+});
+
+test('monks heal friends and convert enemies, but never kings', () => {
+  const s = createGame(87);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  for (let y = 30; y < 50; y++) for (let x = 30; x < 50; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
+  const monk = spawn(s, 0, 'monk', 35, 35);
+  const hurt = spawn(s, 0, 'spearman', 37, 35);
+  hurt.hp = 10;
+  // Two hit points a second: 35 to go takes under twenty seconds.
+  run(s, 220);
+  assert.equal(hurt.hp, DEFS.spearman.hp, 'healed on its own');
+  const enemy = spawn(s, 1, 'swordsman', 40, 38);
+  enemy.order = { t: 'move' };
+  applyCommand(s, 0, { type: 'interact', ids: [monk.id], target: enemy.id });
+  run(s, 100);
+  assert.equal(enemy.owner, 0, 'converted');
+  assert.ok(monk.cooldown > 0, 'the monk rests');
+  const king = owned(s, 1, 'king')[0];
+  applyCommand(s, 0, { type: 'interact', ids: [monk.id], target: king.id });
+  assert.notEqual(monk.order.t, 'convert');
+});
+
+test('a villager copies the job of another', () => {
+  const s = createGame(89);
+  addPlayer(s, 0);
+  const [a, b] = owned(s, 0, 'villager');
+  const tree = findTile(s, Tile.Forest, s.map.starts[0]);
+  applyCommand(s, 0, { type: 'gather', ids: [a.id], tile: tree });
+  applyCommand(s, 0, { type: 'copy', ids: [b.id], from: a.id });
+  assert.equal(b.order.t, 'gather');
+  assert.equal(b.order.t === 'gather' && b.order.res, 'wood');
+});

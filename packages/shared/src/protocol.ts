@@ -16,6 +16,8 @@ export interface GameSettings {
   /** More starting resources and villagers, for shorter games. */
   quick: boolean;
   mapSize: MapSizeName;
+  /** Highest population anyone may reach. */
+  popLimit: number;
 }
 
 /**
@@ -47,7 +49,7 @@ export type ServerMessage =
   /** The room is waiting in the lobby. Sent whenever who is in it changes. */
   | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[]; settings: GameSettings }
   /** The host started the game. */
-  | { t: 'start'; you: number; room: string; seed: number; size: number; players: PlayerInfo[] }
+  | { t: 'start'; you: number; room: string; seed: number; size: number; popLimit: number; players: PlayerInfo[] }
   | { t: 'players'; players: PlayerInfo[] }
   | { t: 'chat'; from: number; text: string }
   /** Sent while nothing else is, so guests can tell the host is still there. */
@@ -64,6 +66,8 @@ export type ServerMessage =
       amounts: [number, number][];
       /** Ranged attacks this tick: [attacker id, target id]. */
       shots: [number, number][];
+      /** Monks at work this tick: [monk id, target id, 1 heal / 2 convert]. */
+      blessings: [number, number, number][];
       /** Melee blows this tick: [attacker id, target id]. */
       hits: [number, number][];
       /** Deaths this tick: [kind index, x, y, owner]. */

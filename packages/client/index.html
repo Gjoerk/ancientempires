@@ -56,13 +56,16 @@
       overflow-x: auto; scrollbar-width: none; }
     #top::-webkit-scrollbar { display: none; }
     #resources { display: flex; gap: 6px; align-items: center; }
-    .stat { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 3px; background: var(--slot); border-radius: 4px;
+    /* Every chip in the top bar is the same height, so text-only ones (age, clock) are centred like the rest. */
+    .stat { display: inline-flex; align-items: center; gap: 4px; height: 28px; box-sizing: border-box; padding: 0 8px 0 3px; background: var(--slot); border-radius: 4px;
       border: 1px solid var(--btn-lo); }
     .stat img { width: 24px; height: 24px; }
     .stat b { font-size: 16px; min-width: 2ch; }
     .stat small { color: var(--dim); font-size: 11px; }
     .stat.warn b { color: #d8301f; }
     .stat.age b { color: var(--accent); min-width: 0; }
+    .stat:not(:has(img)) { padding: 0 10px; }
+    .stat b { line-height: 1; }
     #players { margin-left: auto; display: flex; gap: 10px; align-items: center; }
     .chip { display: inline-block; width: 11px; height: 11px; margin-right: 5px; border: 1px solid var(--edge); }
     #menu-btn { flex: none; position: sticky; right: 0; }
@@ -77,7 +80,7 @@
     /* ---------- Lettering and buttons: a plain readable font, buttons recessed into the panel. ---------- */
     body[data-skin] { --title-font: var(--font); --num-font: var(--font); font-variant: normal; }
     body[data-skin] #sel-name, body[data-skin] #d-title { font-weight: 600; letter-spacing: 0; }
-    body[data-skin] #d-body { font-size: 14px; line-height: 1.4; }
+    body[data-skin] #d-body { font-size: 13.5px; line-height: 1.3; }
     body[data-skin] #actions { gap: 3px; }
     body[data-skin] #actions button { border-radius: 4px; transition: background-color .12s, box-shadow .12s, border-color .12s; }
     body[data-skin] #actions button:active { transform: none; }
@@ -148,7 +151,7 @@
     #d-cost .res img { width: 17px; height: 17px; }
     #d-stats { display: flex; flex-wrap: wrap; gap: 3px 14px; font-size: 13px; color: var(--dim); }
     #d-body { font-size: 13px; line-height: 1.35; overflow-y: auto; scrollbar-width: thin; }
-    #d-body p { margin: 0 0 3px; }
+    #d-body p { margin: 0 0 2px; }
     #d-body p.warn { color: #ff8a70; }
     /* Buttons beside the minimap that find units with nothing to do. */
     #idle { grid-area: idle; align-self: center; display: flex; flex-direction: column; gap: 6px; }
@@ -164,7 +167,8 @@
     #minimap { width: var(--map-w, 300px); height: calc(var(--map-w, 300px) / 2); cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
 
     /* Square command tiles on the left, the selection in the middle, details, then the map. */
-    body[data-bar="a"] #bottom { --bar-h: 236px; --map-w: 300px;
+    /* The minimap takes the full height of the bar on wide screens (canvas 420 × 210 inside the 236px bar). */
+    body[data-bar="a"] #bottom { --bar-h: 236px; --map-w: 420px;
       grid-template-columns: auto minmax(230px, 290px) minmax(220px, 1fr) auto auto; grid-template-areas: "actions sel details idle map"; }
     body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(6, 58px); grid-auto-rows: 58px; gap: 4px; }
     /* Icon-only tiles as in classic strategy games; name, cost and effect are in the details box. */
@@ -282,8 +286,12 @@
     #lobby-msg { min-height: 1.4em; color: var(--accent); margin: 0; }
 
     /* Narrower PC windows: a smaller minimap leaves room for six buttons per row. */
+    @media (max-width: 1400px) {
+      body[data-bar] #bottom { --map-w: 360px; }
+    }
     @media (max-width: 1300px) {
-      body[data-bar] #bottom { --map-w: 240px; }
+      body[data-bar] #bottom { --map-w: 270px; }
+      body[data-bar="a"] #bottom { grid-template-columns: auto minmax(200px, 250px) minmax(190px, 1fr) auto auto; }
     }
     @media (max-width: 1100px) {
       /* Narrow windows: the selection sits above the details. */
@@ -398,13 +406,17 @@
     Press and hold to look at something without giving an order<br>
     <b>Keys</b><br>
     X stop · Delete destroys your selection · Shift + 1–9 stores a group, 1–9 selects it<br>
-    . next idle villager · , all idle soldiers (or the two buttons next to the minimap) · Space jumps to the last attack on you<br>
+    . next idle villager (double-click its button for all of them) · , all idle soldiers · Space jumps to the last attack on you<br>
+    T gives the selected villagers the same job as the villager you gave an order last<br>
+    Shift while placing buildings puts them on the villagers' list: they build one after the other<br>
     Groups walk in formation at the pace of their slowest member; fields can be walked over.<br>
     Enter chat · F fullscreen · M sound · H or Esc closes this<br>
     <b>Good to know</b><br>
     Build a mill, lumber camp or mining camp next to food, wood, gold or stone so villagers walk less.<br>
     Walls are dragged out as a line and block everyone; a gate lets you and your allies through.<br>
-    Right-click the castle with your king to shelter him. Lose your king and you are out.<br>
+    Right-click the town centre or castle with your king, or with empty-handed villagers, to shelter them inside; a flag shows someone is in.<br>
+    Monks (from the monastery) heal friends on their own; right-click an enemy unit with a monk to win it over.<br>
+    Lose your king and you are out. The population limit is set by the host before the game.<br>
     <button id="help-close" type="button" style="margin-top:10px">Close</button>
   </div>
   <div id="waiting" class="screen" style="display:none">
@@ -424,6 +436,14 @@
           <option value="small">Small (64 × 64)</option>
           <option value="medium">Medium (80 × 80)</option>
           <option value="large">Large (112 × 112)</option>
+        </select>
+      </label>
+      <label class="check">Population limit
+        <select id="pop-select">
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="150">150</option>
+          <option value="200">200</option>
         </select>
       </label>
       <label class="check"><input id="quick-box" type="checkbox"> Quick start (more resources and villagers)</label>

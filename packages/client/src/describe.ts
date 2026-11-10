@@ -29,7 +29,7 @@ const ROLE: Record<Kind, string> = {
   rider: 'Fast, heavy cavalry. Runs down archers; beware of spearmen.',
   scout: 'Very fast and sees far. Use it to explore and to raid unguarded villagers.',
   ram: 'Slow siege engine that smashes buildings. Almost harmless to units, and hard to kill with arrows.',
-  towncenter: 'Trains villagers, advances you to the next age and takes every resource.',
+  towncenter: 'Trains villagers, advances the age and takes every resource. Shelters up to 10 villagers and the king.',
   house: 'Gives room for 5 more people. Build more when the population counter turns red.',
   mill: 'Drop-off point for food. Build it next to berry bushes or among your farms.',
   lumbercamp: 'Drop-off point for wood. Build it at the edge of a forest so villagers walk less.',
@@ -44,7 +44,9 @@ const ROLE: Record<Kind, string> = {
   wall: 'Blocks the way for everyone, your own units too. Drag out a line to build many at once.',
   gate: 'A piece of wall that you and your allies can walk through, but enemies cannot.',
   tower: 'Shoots arrows at enemies in range. Keeps raiders away from your villagers.',
-  castle: 'The strongest building. Shoots arrows, and your king can shelter inside where he cannot be hurt.',
+  castle: 'The strongest building. Shoots arrows, and your king and up to 15 villagers can shelter inside where they cannot be hurt.',
+  monk: 'Heals friendly units nearby, and can win an enemy unit over to your side. Kings and buildings cannot be converted.',
+  monastery: 'Trains monks.',
 };
 
 const plural = (kind: Kind): string => {
@@ -81,7 +83,7 @@ export function describeTech(id: TechId, has: Has, age: number): Detail {
   const tech = TECHS[id];
   const lines = [`${tech.effect}.`];
   if (id === 'age2' || id === 'age3') {
-    const unlocks = [...BUILDABLE, 'spearman', 'swordsman', 'archer', 'rider', 'scout', 'ram']
+    const unlocks = [...BUILDABLE, 'spearman', 'swordsman', 'archer', 'rider', 'scout', 'monk', 'ram']
       .filter((k) => (DEFS[k as Kind].age ?? 1) === (id === 'age2' ? 2 : 3)).map((k) => DEFS[k as Kind].label);
     lines[0] = `Unlocks ${list(unlocks)}.`;
   }
@@ -105,7 +107,7 @@ export function describeAction(id: string): Detail {
       lines: [`Buys 100 ${res} for ${TRADE_BUY} gold.`, 'Handy when a resource runs out near your town.'] };
   }
   if (id === 'eject') {
-    return { title: 'Send king out', icon: id, stats: [], lines: ['Lets the king leave the castle. Outside he can be attacked, so be careful.'] };
+    return { title: 'Send everyone out', icon: id, stats: [], lines: ['Everyone sheltering inside comes out. Outside they can be attacked, the king too.'] };
   }
   return { title: 'Cancel last', icon: 'cancel', stats: [], lines: ['Removes the last unit or research from the queue and gives back what it cost.'] };
 }

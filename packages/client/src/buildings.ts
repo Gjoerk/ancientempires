@@ -191,8 +191,10 @@ function millSails(pen: Pen, now: number): void {
 export interface BuildingState {
   /** Construction progress 0..1. */
   built: number;
-  /** A king is sheltering inside (castles). */
+  /** A king is sheltering inside (town centres and castles). */
   kingInside: boolean;
+  /** Someone is sheltering inside: the building flies a flag. */
+  occupied?: boolean;
   /** Time for animations; -1 while drawing the still picture that is kept and reused. */
   now: number;
 }
@@ -407,6 +409,26 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.crenels(0, 0, 1, 1, 24, STONE);
   },
 
+  // A stone hall with a slate roof and a bell tower, arched windows and a banner in the owner's colour.
+  monastery(pen, team) {
+    pen.box(0.15, 0.15, 2.85, 2.85, 0, 3, '#8d8674');
+    pen.box(1.15, 0.45, 2.7, 2.6, 3, 22, '#cbbfa4');
+    for (const u of [1.4, 1.9, 2.4]) {
+      pen.onV(2.6, u - 0.12, u + 0.12, 9, 17, '#2c3440');
+      pen.onV(2.6, u - 0.07, u + 0.07, 17, 19, '#2c3440');
+    }
+    pen.onU(2.7, 1.25, 1.85, 3, 16, '#3a2a1a');
+    pen.onU(2.7, 0.55, 0.85, 12, 20, team);
+    pen.gable(1.05, 0.35, 2.8, 2.7, 22, 14, '#45505c', '#cbbfa4', false);
+    pen.box(0.3, 1.1, 1.15, 2.6, 3, 16, '#b9ad92');
+    pen.gable(0.25, 1.05, 1.2, 2.65, 16, 8, '#45505c', '#b9ad92', false);
+    pen.box(0.3, 0.3, 1.05, 1.05, 3, 52, '#c2b699');
+    pen.onU(1.05, 0.55, 0.8, 38, 48, '#2c3440');
+    pen.onV(1.05, 0.55, 0.8, 38, 48, '#2c3440');
+    pen.disc(pen.p(1.05, 0.68, 41), 3, '#e3b84e');
+    pen.pyramid(0.22, 0.22, 1.13, 1.13, 52, 20, '#45505c');
+  },
+
   // Walled keep with four corner towers. A flag flies only while a king is inside.
   castle(pen, team, state) {
     const tower = (u: number, v: number) => {
@@ -434,6 +456,28 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     if (state.kingInside && state.now >= 0) pen.flag(pen.p(2, 2, 50), team, state.now);
   },
 };
+
+/** A plain flag in the owner's colour: villagers are sheltering inside. */
+export function drawTeamFlag(ctx: Ctx, base: Pt, team: string, now: number): void {
+  const top: Pt = [base[0], base[1] - 24];
+  ctx.strokeStyle = '#3a2a1a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(base[0], base[1]);
+  ctx.lineTo(top[0], top[1]);
+  ctx.stroke();
+  const wave = (k: number) => Math.sin(now / 180 + k) * 2;
+  ctx.fillStyle = team;
+  ctx.beginPath();
+  ctx.moveTo(top[0], top[1]);
+  ctx.lineTo(top[0] + 9, top[1] + 1 + wave(0));
+  ctx.lineTo(top[0] + 17, top[1] + wave(1.5));
+  ctx.lineTo(top[0] + 17, top[1] + 9 + wave(1.5));
+  ctx.lineTo(top[0] + 9, top[1] + 10 + wave(0));
+  ctx.lineTo(top[0], top[1] + 9);
+  ctx.closePath();
+  ctx.fill();
+}
 
 /** The royal flag with a crown, rippling in the wind. `base` is the foot of the pole. */
 export function drawRoyalFlag(ctx: Ctx, base: Pt, team: string, now: number): void {
@@ -537,7 +581,13 @@ export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, 
     }
     ctx.drawImage(img, Math.round(sx) - s * HW - CACHE_LEFT, Math.round(sy) - CACHE_TOP);
     if (kind === 'mill') millSails(new Pen(ctx, sx, sy, false), state.now);
-    if (kind === 'castle' && state.kingInside) drawRoyalFlag(ctx, new Pen(ctx, sx, sy, false).p(2, 2, 50), team, state.now);
+    // A flag flies while someone shelters inside: the royal one when it is the king.
+    const pole = kind === 'castle' ? [2, 2, 50] : kind === 'towncenter' ? [1.5, 1.5, 71] : undefined;
+    if (pole && (state.kingInside || state.occupied)) {
+      const base = new Pen(ctx, sx, sy, false).p(pole[0], pole[1], pole[2]);
+      if (state.kingInside) drawRoyalFlag(ctx, base, team, state.now);
+      else drawTeamFlag(ctx, base, team, state.now);
+    }
     return;
   }
   paintBuilding(ctx, kind, team, seed, sx, sy, state);

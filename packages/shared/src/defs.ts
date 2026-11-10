@@ -6,7 +6,7 @@ export type Cost = Partial<Record<Res, number>>;
 export const KINDS = [
   'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider', 'scout',
   'towncenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
-  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate',
+  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery',
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
@@ -38,6 +38,12 @@ export interface KindDef {
   /** Population room this building provides. */
   housing?: number;
   trains?: Kind[];
+  /** How many villagers (plus the king) can shelter inside. */
+  garrison?: number;
+  /** Hit points restored per second to a friendly unit (monks). */
+  heal?: number;
+  /** Can turn enemy units to its side (monks). */
+  converts?: boolean;
   /** Units can walk over it (fields). */
   walkable?: boolean;
   /** Resources villagers can deliver here. */
@@ -71,13 +77,16 @@ export const DEFS: Record<Kind, KindDef> = {
     label: 'Scout', hp: 45, cost: { food: 80 }, time: 14, age: 2, speed: 3.6,
     attack: 3, range: MELEE, cooldown: 1.6, sight: 9, bonus: { archer: 2 },
   },
+  monk: {
+    label: 'Monk', hp: 30, cost: { gold: 100 }, time: 20, age: 2, speed: 1.7, sight: 9, range: 6, heal: 2, converts: true,
+  },
   ram: {
     label: 'Battering Ram', hp: 180, cost: { wood: 160, gold: 60 }, time: 25, age: 3, speed: 1.4,
     attack: 3, range: MELEE, cooldown: 2.5, armor: 4, sight: 4, vsBuildings: 45,
   },
   towncenter: {
     label: 'Town Centre', building: true, hp: 800, cost: { wood: 275, stone: 100 }, time: 60, age: 2, size: 3,
-    armor: 3, sight: 8, housing: 5, trains: ['villager'], dropoff: ['food', 'wood', 'gold', 'stone'],
+    armor: 3, sight: 8, housing: 5, trains: ['villager'], dropoff: ['food', 'wood', 'gold', 'stone'], garrison: 10,
   },
   house: { label: 'House', building: true, hp: 200, cost: { wood: 30 }, time: 12, size: 2, armor: 3, housing: 5 },
   mill: { label: 'Mill', building: true, hp: 250, cost: { wood: 100 }, time: 15, size: 2, armor: 3, dropoff: ['food'] },
@@ -109,7 +118,10 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   castle: {
     label: 'Castle', building: true, hp: 1500, cost: { stone: 450, wood: 200 }, time: 90, age: 3, size: 4, armor: 4,
-    attack: 7, range: 7, cooldown: 2, sight: 9,
+    attack: 7, range: 7, cooldown: 2, sight: 9, garrison: 15,
+  },
+  monastery: {
+    label: 'Monastery', building: true, hp: 450, cost: { wood: 175 }, time: 30, age: 2, size: 3, armor: 3, trains: ['monk'],
   },
 };
 
@@ -119,7 +131,7 @@ export const DEFAULT_SIGHT = 6;
 /** Buildings a villager can construct, in menu order. */
 export const BUILDABLE: Kind[] = [
   'house', 'farm', 'mill', 'lumbercamp', 'miningcamp', 'barracks', 'wall', 'gate',
-  'range', 'stable', 'blacksmith', 'market', 'tower', 'towncenter',
+  'range', 'stable', 'blacksmith', 'market', 'monastery', 'tower', 'towncenter',
   'workshop', 'castle',
 ];
 
@@ -273,7 +285,12 @@ export function bonusOf(kind: Kind, target: Kind, has: Has): number {
   return (def.bonus?.[target] ?? 0) + boosted(kind, has, (b) => b.bonus?.[target]) + vsBuilding;
 }
 
-export const POP_MAX = 60;
+/** Population limits the host can choose from, and the default. */
+export const POP_LIMITS = [50, 100, 150, 200];
+export const POP_MAX = 100;
+/** Seconds a monk needs to convert a unit, and to rest afterwards. */
+export const CONVERT_TIME = 6;
+export const CONVERT_REST = 12;
 export const CARRY_CAPACITY = 10;
 /** Resources gathered per second. */
 export const GATHER_RATE = 1;

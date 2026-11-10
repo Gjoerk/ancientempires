@@ -1,4 +1,4 @@
-import { DEFS, Kind, POP_MAX, Res, TECH_IDS, TechId, TECHS } from './defs';
+import { DEFS, Kind, Res, TECH_IDS, TechId, TECHS } from './defs';
 import { GameMap, Tile, TILE_RESOURCE } from './map';
 import { applyCommand, canAfford, canPlace, Entity, GameState, isEnemy } from './sim';
 
@@ -98,7 +98,7 @@ export function runAi(state: GameState, slot: number): void {
   const woodTile = nearestTile(map, RES_TILES.wood, sx, sy, 24);
   const goldTile = nearestTile(map, RES_TILES.gold, sx, sy, 24);
   const berriesLeft = nearestTile(map, RES_TILES.food, sx, sy, 16) >= 0;
-  if (p.pop >= p.cap - 2 && p.cap < POP_MAX) build('house');
+  if (p.pop >= p.cap - 2 && p.cap < state.popLimit) build('house');
   else if (of('barracks').length === 0 && villagers.length >= 7) build('barracks');
   else if (of('lumbercamp').length === 0 && villagers.length >= 8 && woodTile >= 0) build('lumbercamp', [woodTile % map.size, Math.floor(woodTile / map.size)]);
   else if (of('miningcamp').length === 0 && villagers.length >= 9 && goldTile >= 0) build('miningcamp', [goldTile % map.size, Math.floor(goldTile / map.size)]);

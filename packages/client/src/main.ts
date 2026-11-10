@@ -102,8 +102,14 @@ const players = new Map<number, PlayerView>();
 let roster: PlayerInfo[] = [];
 const queues = new Map<number, number[]>();
 const selected = new Set<number>();
+/** Monks at work: green sparkles for healing, rings for converting. */
+let blessings: { from: number; to: number; kind: number; t: number }[] = [];
 let shots: { from: [number, number]; to: [number, number]; t: number }[] = [];
 let winner = -1;
+/** Highest population anyone may reach in this game. */
+let popLimit = 100;
+/** Villagers that were given orders, most recent last, for copying a job with T. */
+const orderedVillagers: number[] = [];
 let gameTick = 0;
 let snapTime = 0;
 let centred = false;
@@ -192,7 +198,7 @@ function unitScreen(v: View): [number, number] {
 /** The point in tile units a working unit is busy at, if any. */
 function workSpot(v: View, now: number): [number, number] | undefined {
   // Only real work (tasks 1-6) pulls a unit towards a spot; an attacker walks there itself.
-  if (!map || v.task === 0 || v.task > 6 || isBuilding(v.kind)) return undefined;
+  if (!map || v.task === 0 || v.task > 6 || v.act !== 2 || isBuilding(v.kind)) return undefined;
   if (v.task <= 4) return [(v.target % map.size) + 0.5, Math.floor(v.target / map.size) + 0.5];
   const b = views.get(v.target);
   if (!b) return undefined;
@@ -465,6 +471,27 @@ function setBlocked(v: View, value: number): void {
 function send(cmd: Command): void {
   const msg: ClientMessage = { t: 'cmd', cmd };
   session?.send(msg);
+  // Remember which villager got an order, so that T can give another one the same job.
+  if ('ids' in cmd && cmd.type !== 'copy') {
+    const v = cmd.ids.map((id) => views.get(id)).find((u) => u?.kind === 'villager');
+    if (v) {
+      const at = orderedVillagers.indexOf(v.id);
+      if (at >= 0) orderedVillagers.splice(at, 1);
+      orderedVillagers.push(v.id);
+      if (orderedVillagers.length > 8) orderedVillagers.shift();
+    }
+  }
+}
+
+/** T: the selected villagers take on the job of the villager that was given an order last. */
+function copyLastJob(): void {
+  const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
+  if (ids.length === 0) return;
+  const from = [...orderedVillagers].reverse().find((id) => !ids.includes(id) && views.get(id)?.owner === me);
+  if (from !== undefined) {
+    send({ type: 'copy', ids, from });
+    play('order');
+  }
 }
 
 function renderPlayers(): void {
@@ -494,6 +521,7 @@ function onMessage(msg: ServerMessage): void {
     resetGame();
     me = myOwnSlot = msg.you;
     map = generateMap(msg.seed, msg.size);
+    popLimit = msg.popLimit;
     buildTerrain(map);
     roster = msg.players;
     $('room-code').textContent = msg.room;
@@ -521,7 +549,8 @@ function onMessage(msg: ServerMessage): void {
         if (Math.abs(turn) > 0.01) v.face = turn > 0 ? 1 : -1;
         if (hp < v.hp && v.owner === me) underAttack(v, now);
         if (v.owner === me && isBuilding(v.kind) && v.extra < 100 && extra >= 100) play('built', 400);
-        Object.assign(v, { x, y, hp, act, extra, task, target });
+        // A monk may have converted it, so the owner can change too.
+        Object.assign(v, { owner, x, y, hp, act, extra, task, target });
       } else {
         const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, struck: 0, hurt: 0, face: 1, px: x, py: y, x, y };
         views.set(id, created);
@@ -552,6 +581,11 @@ function onMessage(msg: ServerMessage): void {
       if (a) a.struck = now;
       if (b) b.hurt = now + 120;
       if ((a && canSee(a)) || (b && canSee(b))) play('hit', 110);
+    }
+    for (const [from, to, kind] of msg.blessings) {
+      const a = views.get(from);
+      const b = views.get(to);
+      if (a && b && (canSee(a) || canSee(b))) blessings.push({ from, to, kind, t: now });
     }
     for (const [kindIdx, x, y] of msg.deaths) {
       const kind = KINDS[kindIdx];
@@ -715,6 +749,9 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
   const sizeBox = $<HTMLSelectElement>('size-select');
   sizeBox.value = settings.mapSize;
   sizeBox.disabled = !hosting;
+  const popBox = $<HTMLSelectElement>('pop-select');
+  popBox.value = String(settings.popLimit);
+  popBox.disabled = !hosting;
   const teams = new Set(roster.map((p) => p.team)).size;
   $('room-hint').textContent = roster.length < 2
     ? 'You are alone. Share the link, or add a computer opponent.'
@@ -751,6 +788,7 @@ function switchTeam(to?: number, keepSelection = false): void {
 
 $('start-btn').addEventListener('click', () => session?.host?.start());
 $('add-ai-btn').addEventListener('click', () => session?.host?.addComputer());
+$('pop-select').addEventListener('change', (ev) => session?.host?.setPopLimit(Number((ev.target as HTMLSelectElement).value)));
 $('size-select').addEventListener('change', (ev) => session?.host?.setMapSize((ev.target as HTMLSelectElement).value));
 $('quick-box').addEventListener('change', (ev) => session?.host?.setQuickStart((ev.target as HTMLInputElement).checked));
 $('leave-btn').addEventListener('click', () => session?.close());
@@ -917,7 +955,8 @@ function placeAtCursor(keep: boolean): void {
   const [x, y] = placementSpot();
   const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
   if (!canPlace(map, placing, x, y) || !canAfford(DEFS[placing].cost)) return;
-  send({ type: 'place', ids, kind: placing, x, y });
+  // With Shift the site goes on the villagers' list instead of replacing what they are building.
+  send({ type: 'place', ids, kind: placing, x, y, queue: keep });
   play('order');
   if (!keep) placing = undefined;
 }
@@ -926,8 +965,12 @@ function placeAtCursor(keep: boolean): void {
 function finishWall(keep: boolean): void {
   if (!wallStart || !map) return;
   const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
+  // The pieces of a wall go onto the builders' list one after the other.
+  let first = !keep;
   for (const [x, y] of lineTiles(wallStart, placementSpot())) {
-    if (canPlace(map, 'wall', x, y)) send({ type: 'place', ids, kind: 'wall', x, y });
+    if (!canPlace(map, 'wall', x, y)) continue;
+    send({ type: 'place', ids, kind: 'wall', x, y, queue: !first });
+    first = false;
   }
   wallStart = undefined;
   if (!keep) placing = undefined;
@@ -1159,6 +1202,7 @@ window.addEventListener('keydown', (ev) => {
   if (key === 'f') toggleFullscreen();
   if (key === 'm') $('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)';
   if (key === 'x') send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
+  if (key === 't') copyLastJob();
   if (key === 'delete' || key === 'backspace') {
     for (const id of selected) if (views.get(id)?.owner === me) send({ type: 'delete', id });
   }
@@ -1209,6 +1253,13 @@ function selectIdleSoldiers(): void {
 }
 
 $('idle-vil-btn').addEventListener('click', nextIdleVillager);
+$('idle-vil-btn').addEventListener('dblclick', () => {
+  const idle = idleVillagers();
+  if (idle.length === 0) return;
+  selected.clear();
+  selectedTile = -1;
+  for (const v of idle) selected.add(v.id);
+});
 $('idle-mil-btn').addEventListener('click', selectIdleSoldiers);
 
 let idleSignature = '';
@@ -1235,6 +1286,21 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+$('resign-btn').addEventListener('click', () => {
+  $('menu').hidden = true;
+  if (confirm('Give up? Your king dies and you are out of the game.')) send({ type: 'resign' });
+});
+// The chat box: Enter sends, Esc closes. Keys typed here never reach the game.
+$('chat-input').addEventListener('keydown', (ev) => {
+  const box = ev.target as HTMLInputElement;
+  if (ev.key === 'Enter' && box.value.trim()) session?.send({ t: 'chat', text: box.value });
+  if (ev.key === 'Enter' || ev.key === 'Escape') {
+    box.value = '';
+    box.hidden = true;
+    box.blur();
+  }
+  ev.stopPropagation();
+});
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
 for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
 installMenuArt();
@@ -1368,6 +1434,40 @@ interface SelCard {
   group: View[];
 }
 
+/** Room for people that the player's buildings give, counting those still going up. */
+function housingNow(): number {
+  let n = 0;
+  for (const v of views.values()) if (v.owner === me && isBuilding(v.kind)) n += DEFS[v.kind].housing ?? 0;
+  return n;
+}
+
+const GATHER_WORDS: Record<number, [string, string]> = {
+  1: ['chop wood', 'Chopping wood'], 2: ['pick berries', 'Picking berries'], 3: ['mine gold', 'Mining gold'],
+  4: ['mine stone', 'Mining stone'], 5: ['farm', 'Farming'],
+};
+
+/** What a unit is doing, in a few words, for its name in the selection card. */
+function statusOf(v: View): string {
+  const other = views.get(v.target);
+  const name = other ? DEFS[other.kind].label : '';
+  const queued = Math.floor(v.extra / 1000);
+  const more = queued > 0 ? `, ${queued} more to build` : '';
+  switch (v.task) {
+    case 1: case 2: case 3: case 4: case 5:
+      return v.act === 2 ? GATHER_WORDS[v.task][1] : `Going to ${GATHER_WORDS[v.task][0]}`;
+    case 6:
+      if (!other) return 'Building';
+      return `${other.extra < 100 ? 'Building' : 'Repairing'} ${name}${more}`;
+    case 7: return other ? `Attacking ${name}` : 'Fighting';
+    case 8: return `Taking ${RESOURCES[v.target] ?? 'goods'} home`;
+    case 9: return other ? `Going into the ${name}` : 'Going inside';
+    case 10: return 'Walking';
+    case 11: return other ? `Healing ${name}` : 'Healing';
+    case 12: return other ? `Converting ${name}` : 'Converting';
+    default: return 'Idle';
+  }
+}
+
 const TILE_NAMES: Record<number, string> = { [Tile.Forest]: 'Tree', [Tile.Berries]: 'Berry bush', [Tile.Gold]: 'Gold mine', [Tile.Stone]: 'Stone mine' };
 const TILE_HINTS: Record<number, string> = {
   [Tile.Forest]: 'Villagers chop it for wood. A lumber camp at the edge of the forest saves walking.',
@@ -1426,7 +1526,7 @@ function renderPanel(): void {
     const def = DEFS[v.kind];
     const theirs = hasOf(v.owner);
     card.owner = v.owner;
-    card.name = def.label;
+    card.name = isBuilding(v.kind) ? def.label : `${def.label} (${statusOf(v)})`;
     card.portrait = icon(v.kind, v.owner);
     card.sub = v.owner === me ? (roster.find((p) => p.slot === me)?.name ?? '') : `${roster.find((p) => p.slot === v.owner)?.name ?? 'Enemy'}${isEnemy(v.owner) ? ' · enemy' : ' · ally'}`;
     detail = describeKind(v.kind, theirs, players.get(v.owner)?.age ?? 1);
@@ -1439,10 +1539,13 @@ function renderPanel(): void {
     if (def.attack) card.stats.push(['sword', String(attackOf(v.kind, theirs))]);
     if ((def.range ?? 0) > 2) card.stats.push(['bow', String(rangeOf(v.kind, theirs))]);
     if (!isBuilding(v.kind) || def.attack) card.stats.push(['shield', String(armorOf(v.kind, theirs))]);
-    if (!isBuilding(v.kind) && v.extra % 100 > 0) card.stats.push([RESOURCES[Math.floor(v.extra / 100)], `carrying ${v.extra % 100}`]);
+    if (!isBuilding(v.kind) && v.extra % 100 > 0) card.stats.push([RESOURCES[Math.floor(v.extra / 100) % 10], `carrying ${v.extra % 100}`]);
     if (v.kind === 'castle' && v.extra >= 100) {
-      card.sub = v.task === 1 ? 'The king is inside' : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
-      if (v.task === 1 && v.owner === me) buttons.push({ label: 'Send king out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
+      card.sub = v.task & 2 ? `The king is inside${v.target > 1 ? ` with ${v.target - 1} more` : ''}` : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
+    }
+    if (DEFS[v.kind].garrison && v.extra >= 100) {
+      if (v.task === 1) card.sub = `${v.target} sheltering inside`;
+      if (v.task && v.owner === me) buttons.push({ label: 'Send everyone out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
     if (queue) {
@@ -1483,9 +1586,14 @@ function renderPanel(): void {
       lines: ['Click one to select only it. Shift + 1–9 stores this group, 1–9 brings it back.'] };
   }
   if (!placing && mine.some((v) => v.kind === 'villager')) {
+    const housed = housingNow();
     for (const kind of BUILDABLE) {
-      buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked: !ageAllows(kind), short: lockedShort(kind),
-        detail: describeKind(kind, has, age), data: { build: kind } });
+      const d = describeKind(kind, has, age);
+      const full = !!DEFS[kind].housing && housed >= popLimit;
+      if (DEFS[kind].housing) d.lines.push(`The population limit in this game is ${popLimit}; you have room for ${Math.min(housed, popLimit)}.`);
+      if (full) d.warn = `Your houses already make room for the population limit of ${popLimit}.`;
+      buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked: !ageAllows(kind) || full, short: full ? 'limit' : lockedShort(kind),
+        detail: d, data: { build: kind } });
     }
   }
 
@@ -1737,8 +1845,8 @@ function renderHud(): void {
   };
   for (const r of RESOURCES) stat(r, String(p.res[r]), `${r[0].toUpperCase()}${r.slice(1)} — ${p.workers[r] ?? 0} villagers gathering it`, String(p.workers[r] ?? 0));
   // Housing is full: nothing more can be trained until a house is built.
-  const pop = stat('house', `${p.pop}/${p.cap}`, 'Population / housing');
-  if (p.pop >= p.cap && p.cap < 60) pop.classList.add('warn');
+  const pop = stat('house', `${p.pop}/${p.cap}`, `Population / housing — at most ${popLimit} in this game`, `max ${popLimit}`);
+  if (p.pop >= p.cap && p.cap < popLimit) pop.classList.add('warn');
   stat('', AGE_NAMES[p.age] ?? '', 'Your age').classList.add('age');
   stat('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Game time');
 
@@ -1805,7 +1913,7 @@ function renderMinimap(): void {
 
 function updateCamera(dt: number): void {
   // The view scrolls while the cursor rests near an edge of the window, faster the closer it is.
-  const zone = 22;
+  const zone = 44;
   const push = (distance: number) => (mouse.inside && !mouse.onButton && distance < zone ? 0.35 + 0.65 * (1 - Math.max(0, distance) / zone) : 0);
   let dx = push(canvas.width - mouse.x) - push(mouse.x);
   let dy = push(canvas.height - mouse.y) - push(mouse.y);
@@ -1843,7 +1951,8 @@ function drawBuildingView(v: View): void {
     ctx.lineWidth = 2;
     ctx.stroke();
   }
-  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: v.task === 1, now: performance.now() });
+  const sheltering = !!DEFS[v.kind].garrison;
+  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: sheltering && (v.task & 1) !== 0, now: performance.now() });
   if ((v.kind === 'farm' || v.kind === 'wall') && v.extra >= 100 && v.hp >= def.hp && !selected.has(v.id)) return;
   // Bars sit above the roof line of tall buildings.
   const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);
@@ -1932,9 +2041,9 @@ function drawTargetMark(v: View, alpha: number, width: number): void {
   ctx.stroke();
 }
 
-function drawUnitView(v: View, x: number, y: number, now: number): void {
+function drawUnitView(v: View, x: number, y: number, now: number, ghost = false): void {
   let [sx, sy] = tileToScreen(x + v.ox, y + v.oy);
-  if (selected.has(v.id)) {
+  if (selected.has(v.id) && !ghost) {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1968,8 +2077,9 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   if (foe && v.act === 3) {
     foeDir = tileToScreen(...centreOf(foe))[0] >= sx ? 1 : -1;
   }
-  const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) : -1;
-  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face);
+  const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) % 10 : -1;
+  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face, ghost);
+  if (ghost) return;
   if (slash) {
     ctx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - slash.k)})`;
     ctx.lineWidth = 3;
@@ -2155,6 +2265,56 @@ function frame(now: number): void {
   }
   drawables.sort((a, b) => a.depth - b.depth);
   for (const d of drawables) d.draw();
+
+  // Our own and allied units hidden behind a building are drawn again, faintly, on top, so they can be seen and clicked.
+  const covers: { depth: number; x0: number; x1: number; y0: number; y1: number }[] = [];
+  for (const b of shown) {
+    if (!isBuilding(b.kind) || b.kind === 'farm' || b.kind === 'wall') continue;
+    const s = sizeOf(b.kind);
+    const [bx, by] = tileToScreen(b.x, b.y);
+    covers.push({ depth: b.x + b.y + s, x0: bx - s * HW, x1: bx + s * HW, y0: by - 80, y1: by + s * HH * 2 - 6 });
+  }
+  if (covers.length > 0) {
+    ctx.globalAlpha = 0.5;
+    for (const v of shown) {
+      if (isBuilding(v.kind) || !sharedSight.has(v.owner)) continue;
+      const [x, y] = viewPos(v, alpha);
+      const [sx, sy] = tileToScreen(x + v.ox, y + v.oy);
+      const depth = x + v.ox + y + v.oy;
+      if (covers.some((c) => c.depth > depth && sx > c.x0 && sx < c.x1 && sy - 4 > c.y0 && sy - 20 < c.y1)) drawUnitView(v, x, y, now, true);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  blessings = blessings.filter((b) => now - b.t < 600);
+  for (const b of blessings) {
+    const monk = views.get(b.from);
+    const target = views.get(b.to);
+    if (!monk || !target) continue;
+    const k = (now - b.t) / 600;
+    const [tx, ty] = unitScreen(target);
+    if (b.kind === 1) {
+      // Healing: green sparkles rising from the wounded unit.
+      ctx.fillStyle = `rgba(120,255,150,${1 - k})`;
+      for (let i = 0; i < 4; i++) ctx.fillRect(Math.round(tx - 8 + i * 5 + Math.sin(i * 2 + k * 6) * 2), Math.round(ty - 8 - k * 22 - i * 3), 2, 2);
+    } else {
+      // Converting: rings in the monk's colour close in on the target, joined to the monk by a faint line.
+      const [mx, my] = unitScreen(monk);
+      ctx.strokeStyle = PLAYER_COLORS[monk.owner];
+      ctx.globalAlpha = 0.35 * (1 - k);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(mx, my - 16);
+      ctx.lineTo(tx, ty - 14);
+      ctx.stroke();
+      ctx.globalAlpha = 1 - k;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(tx, ty - 12, 16 - k * 10, 20 - k * 12, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // Arrows in flight.
   shots = shots.filter((s) => now - s.t < 220);
