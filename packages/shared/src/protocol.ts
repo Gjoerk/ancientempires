@@ -1,3 +1,4 @@
+import type { MapSizeName } from './map';
 import type { Command } from './sim';
 
 export interface PlayerInfo {
@@ -14,6 +15,7 @@ export interface PlayerInfo {
 export interface GameSettings {
   /** More starting resources and villagers, for shorter games. */
   quick: boolean;
+  mapSize: MapSizeName;
 }
 
 /**
@@ -45,7 +47,7 @@ export type ServerMessage =
   /** The room is waiting in the lobby. Sent whenever who is in it changes. */
   | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[]; settings: GameSettings }
   /** The host started the game. */
-  | { t: 'start'; you: number; room: string; seed: number; players: PlayerInfo[] }
+  | { t: 'start'; you: number; room: string; seed: number; size: number; players: PlayerInfo[] }
   | { t: 'players'; players: PlayerInfo[] }
   | { t: 'chat'; from: number; text: string }
   /** Sent while nothing else is, so guests can tell the host is still there. */

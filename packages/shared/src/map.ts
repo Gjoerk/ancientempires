@@ -1,6 +1,9 @@
 import type { Res } from './defs';
 
 export const MAP_SIZE = 80;
+/** Map sizes the host can choose from, in tiles along one edge. */
+export const MAP_SIZES = { small: 64, medium: 80, large: 112 } as const;
+export type MapSizeName = keyof typeof MAP_SIZES;
 export const MAX_PLAYERS = 4;
 /** Radius around each start tile kept free for the town centre and castle. */
 const BASE_RADIUS = 6.5;
@@ -79,10 +82,12 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
     }
   };
 
-  for (let i = 0; i < 9; i++) blob(Tile.Water, rand() * size, rand() * size, 3 + rand() * 3, 1, 15);
-  for (let i = 0; i < 52; i++) blob(Tile.Forest, rand() * size, rand() * size, 2 + rand() * 3, 0.8, 9);
-  for (let i = 0; i < 10; i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
-  for (let i = 0; i < 9; i++) blob(Tile.Stone, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
+  // The amount of scenery grows with the area of the map.
+  const area = (size * size) / (80 * 80);
+  for (let i = 0; i < Math.round(9 * area); i++) blob(Tile.Water, rand() * size, rand() * size, 3 + rand() * 3, 1, 15);
+  for (let i = 0; i < Math.round(52 * area); i++) blob(Tile.Forest, rand() * size, rand() * size, 2 + rand() * 3, 0.8, 9);
+  for (let i = 0; i < Math.round(10 * area); i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
+  for (let i = 0; i < Math.round(9 * area); i++) blob(Tile.Stone, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
 
   // A connected patch of exactly `count` tiles, grown outwards from a centre.
   const patch = (tile: Tile, cx: number, cy: number, count: number) => {

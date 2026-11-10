@@ -1,5 +1,5 @@
 import { DEFS, isTech, KINDS, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
-import { MAX_PLAYERS } from './map';
+import { MAP_SIZES, MAX_PLAYERS } from './map';
 import { runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
@@ -13,7 +13,7 @@ export class GameHost {
   /** The running game, or undefined while the room waits in the lobby. */
   state: GameState | undefined;
   readonly players = new Map<number, PlayerInfo>();
-  readonly settings: GameSettings = { quick: false };
+  readonly settings: GameSettings = { quick: false, mapSize: 'medium' };
 
   constructor(readonly room: string) {}
 
@@ -45,7 +45,7 @@ export class GameHost {
 
   /** Starts a fresh game with everyone who is in the lobby. */
   start(seed: number): void {
-    this.state = createGame(seed);
+    this.state = createGame(seed, MAP_SIZES[this.settings.mapSize]);
     for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot, this.players.get(slot)!.team, this.settings.quick);
   }
 
@@ -63,7 +63,7 @@ export class GameHost {
   }
 
   startMessage(you: number): ServerMessage {
-    return { t: 'start', you, room: this.room, seed: this.state!.seed, players: [...this.players.values()] };
+    return { t: 'start', you, room: this.room, seed: this.state!.seed, size: this.state!.map.size, players: [...this.players.values()] };
   }
 
   playersMessage(): ServerMessage {

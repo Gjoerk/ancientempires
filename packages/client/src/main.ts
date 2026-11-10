@@ -10,6 +10,7 @@ import {
   DEFAULT_SIGHT,
   DEFS,
   GameMap,
+  GameSettings,
   generateMap,
   spawn,
   isTech,
@@ -88,7 +89,8 @@ const mctx = minimap.getContext('2d')!;
 let session: Session | undefined;
 let me = -1;
 let map: GameMap | undefined;
-let terrain: HTMLCanvasElement | undefined;
+/** Ground colour of every tile, as an index into GROUND_COLORS. */
+let ground = new Uint8Array(0);
 let miniTerrain: HTMLCanvasElement | undefined;
 /** Resource tiles that have something standing on them: tile index -> tile type. */
 const props = new Map<number, number>();
@@ -323,29 +325,16 @@ const MINI_COLORS: Record<number, string> = {
   [Tile.Berries]: '#b8506a', [Tile.Gold]: '#f2cf3a', [Tile.Stone]: '#9aa0a8',
 };
 
+const GROUND_COLORS = ['#4f8a3a', '#55913d', '#4a8436', '#5a9642', '#2f6fa8', '#2b68a0', '#3476b0', '#3d6e2e', '#396a2b'];
+
+/** Works out how a tile looks on the ground and on the minimap, and what stands on it. */
 function paintTile(m: GameMap, index: number): void {
   const n = m.size;
   const x = index % n;
   const y = Math.floor(index / n);
   const tile = m.tiles[index];
   const r = hash(x, y);
-  const grass = ['#4f8a3a', '#55913d', '#4a8436', '#5a9642'];
-  const palette = tile === Tile.Water ? ['#2f6fa8', '#2b68a0', '#3476b0'] : tile === Tile.Forest ? ['#3d6e2e', '#396a2b'] : grass;
-  const t = terrain!.getContext('2d')!;
-  const cx = (x - y) * HW + n * HW;
-  const cy = (x + y) * HH;
-  t.fillStyle = palette[Math.floor(r * palette.length)];
-  t.beginPath();
-  t.moveTo(cx, cy);
-  t.lineTo(cx + HW, cy + HH);
-  t.lineTo(cx, cy + HH * 2);
-  t.lineTo(cx - HW, cy + HH);
-  t.closePath();
-  t.fill();
-  if (tile === Tile.Grass && r > 0.8) {
-    t.fillStyle = '#6aa64c';
-    t.fillRect(cx - 8 + (Math.floor(r * 60) % 16), cy + 10 + (Math.floor(r * 90) % 10), 2, 2);
-  }
+  ground[index] = tile === Tile.Water ? 4 + Math.floor(r * 3) : tile === Tile.Forest ? 7 + Math.floor(r * 2) : Math.floor(r * 4);
   const mt = miniTerrain!.getContext('2d')!;
   mt.fillStyle = MINI_COLORS[tile];
   mt.fillRect(x, y, 1, 1);
@@ -354,13 +343,53 @@ function paintTile(m: GameMap, index: number): void {
 }
 
 function buildTerrain(m: GameMap): void {
-  terrain = document.createElement('canvas');
-  terrain.width = m.size * HW * 2;
-  terrain.height = m.size * HH * 2;
+  ground = new Uint8Array(m.size * m.size);
   miniTerrain = document.createElement('canvas');
   miniTerrain.width = miniTerrain.height = m.size;
   props.clear();
   for (let i = 0; i < m.tiles.length; i++) paintTile(m, i);
+}
+
+/** The range of tiles that can be on screen: [x0, y0, x1, y1]. */
+function visibleTiles(): [number, number, number, number] {
+  const n = map!.size;
+  const corners = [screenToTile(0, 0), screenToTile(canvas.width, 0), screenToTile(0, canvas.height), screenToTile(canvas.width, canvas.height)];
+  return [
+    Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0]))) - 1), Math.max(0, Math.floor(Math.min(...corners.map((c) => c[1]))) - 1),
+    Math.min(n - 1, Math.ceil(Math.max(...corners.map((c) => c[0]))) + 1), Math.min(n - 1, Math.ceil(Math.max(...corners.map((c) => c[1]))) + 1),
+  ];
+}
+
+/** Draws the ground for the tiles on screen, one fill per colour. */
+function drawGround(): void {
+  const n = map!.size;
+  const [x0, y0, x1, y1] = visibleTiles();
+  const paths = GROUND_COLORS.map(() => new Path2D());
+  const specks = new Path2D();
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const [cx, cy] = tileToScreen(tx, ty);
+      if (cx < -HW || cx > canvas.width + HW || cy < -HH * 2 || cy > canvas.height) continue;
+      const x = Math.round(cx);
+      const y = Math.round(cy);
+      const c = ground[ty * n + tx];
+      const path = paths[c];
+      // A hair wider than the tile so that no seams show between neighbours.
+      path.moveTo(x, y - 0.5);
+      path.lineTo(x + HW + 0.5, y + HH);
+      path.lineTo(x, y + HH * 2 + 0.5);
+      path.lineTo(x - HW - 0.5, y + HH);
+      path.closePath();
+      const r = hash(tx, ty);
+      if (c < 4 && r > 0.8) specks.rect(x - 8 + (Math.floor(r * 60) % 16), y + 10 + (Math.floor(r * 90) % 10), 2, 2);
+    }
+  }
+  GROUND_COLORS.forEach((color, i) => {
+    ctx.fillStyle = color;
+    ctx.fill(paths[i]);
+  });
+  ctx.fillStyle = '#6aa64c';
+  ctx.fill(specks);
 }
 
 function setTile(index: number, tile: number): void {
@@ -401,14 +430,14 @@ function onMessage(msg: ServerMessage): void {
   if (msg.t === 'lobby') {
     resetGame();
     roster = msg.players;
-    renderRoom(msg.room, msg.you, msg.host, msg.settings.quick);
+    renderRoom(msg.room, msg.you, msg.host, msg.settings);
     history.replaceState(null, '', `?room=${msg.room}`);
     $('lobby').style.display = 'none';
     $('waiting').style.display = '';
   } else if (msg.t === 'start') {
     resetGame();
     me = myOwnSlot = msg.you;
-    map = generateMap(msg.seed);
+    map = generateMap(msg.seed, msg.size);
     buildTerrain(map);
     roster = msg.players;
     $('room-code').textContent = msg.room;
@@ -579,7 +608,7 @@ function showLobby(message: string): void {
 }
 
 /** The waiting room: who is in, and for the host the controls to set up and start. */
-function renderRoom(room: string, you: number, host: number, quick: boolean): void {
+function renderRoom(room: string, you: number, host: number, settings: GameSettings): void {
   const hosting = !!session?.host;
   $('room-title').textContent = `Room ${room}`;
   $<HTMLInputElement>('room-link').value = `${location.origin}${location.pathname}?room=${room}`;
@@ -617,8 +646,11 @@ function renderRoom(room: string, you: number, host: number, quick: boolean): vo
   $('room-wait').hidden = hosting;
   $<HTMLButtonElement>('add-test-btn').disabled = $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= 4;
   const quickBox = $<HTMLInputElement>('quick-box');
-  quickBox.checked = quick;
+  quickBox.checked = settings.quick;
   quickBox.disabled = !hosting;
+  const sizeBox = $<HTMLSelectElement>('size-select');
+  sizeBox.value = settings.mapSize;
+  sizeBox.disabled = !hosting;
   const teams = new Set(roster.map((p) => p.team)).size;
   $('room-hint').textContent = roster.length < 2
     ? 'You are alone. Share the link, or add a computer opponent.'
@@ -656,6 +688,7 @@ function switchTeam(to?: number, keepSelection = false): void {
 $('start-btn').addEventListener('click', () => session?.host?.start());
 $('add-test-btn').addEventListener('click', () => session?.host?.addTestPlayer());
 $('add-ai-btn').addEventListener('click', () => session?.host?.addComputer());
+$('size-select').addEventListener('change', (ev) => session?.host?.setMapSize((ev.target as HTMLSelectElement).value));
 $('quick-box').addEventListener('change', (ev) => session?.host?.setQuickStart((ev.target as HTMLInputElement).checked));
 $('leave-btn').addEventListener('click', () => session?.close());
 $('switch-btn').addEventListener('click', () => switchTeam());
@@ -1100,50 +1133,6 @@ $('chat-btn').addEventListener('click', () => {
   box.focus();
 });
 
-/** Switches the look of the interface and remembers the choice. */
-function setTheme(name: string): void {
-  if (!['parchment', 'oak', 'stone'].includes(name)) name = 'parchment';
-  document.body.dataset.theme = name;
-  $<HTMLSelectElement>('theme-select').value = name;
-  for (const b of document.querySelectorAll<HTMLElement>('.looks button')) b.classList.toggle('on', b.dataset.look === name);
-  try {
-    localStorage.setItem('kingsfall-look', name);
-  } catch {
-    // Not remembered, but applied.
-  }
-}
-$('theme-select').addEventListener('change', (ev) => setTheme((ev.target as HTMLSelectElement).value));
-for (const b of document.querySelectorAll<HTMLElement>('.looks button')) b.addEventListener('click', () => setTheme(b.dataset.look!));
-let savedLook = new URLSearchParams(location.search).get('look') ?? '';
-try {
-  savedLook ||= localStorage.getItem('kingsfall-look') ?? '';
-} catch {
-  // Storage unavailable: start with the default look.
-}
-setTheme(savedLook);
-$('resign-btn').addEventListener('click', () => {
-  if (confirm('Give up? Your king dies and you are out of the game.')) send({ type: 'resign' });
-});
-$('chat-input').addEventListener('keydown', (ev) => {
-  const box = ev.target as HTMLInputElement;
-  if (ev.key === 'Enter' && box.value.trim()) session?.send({ t: 'chat', text: box.value });
-  if (ev.key === 'Enter' || ev.key === 'Escape') {
-    box.value = '';
-    box.hidden = true;
-    box.blur();
-  }
-  ev.stopPropagation();
-});
-$('mute-btn').textContent = isMuted() ? 'Sound off (M)' : 'Sound on (M)';
-$('mute-btn').addEventListener('click', () => ($('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)'));
-window.addEventListener('pointerdown', unlockSound);
-window.addEventListener('keydown', unlockSound);
-// Pointing at an upgrade or trade button explains it in the info line.
-$('actions').addEventListener('mouseover', (ev) => {
-  const button = (ev.target as HTMLElement).closest('button');
-  if (button?.title) $('info').textContent = button.title;
-});
-$('actions').addEventListener('mouseout', () => (panelSignature = ''));
 $('help-btn').addEventListener('click', () => {
   $('menu').hidden = true;
   $('help').hidden = !$('help').hidden;
@@ -1651,14 +1640,13 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
   ctx.fillStyle = '#10140f';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!map || !terrain || me < 0) return;
+  if (!map || me < 0) return;
   updateCamera(dt);
   if (explored.length !== map.size * map.size) explored = new Uint8Array(map.size * map.size);
   updateWorkOffsets(now, dt);
   updateFog(now);
 
-  const [ox, oy] = worldToScreen(-map.size * HW, 0);
-  ctx.drawImage(terrain, Math.round(ox), Math.round(oy));
+  drawGround();
 
   if (placing) {
     // Ghost of the footprint; a wall shows the whole line being dragged.

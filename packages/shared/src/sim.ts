@@ -117,9 +117,9 @@ const sizeOf = (e: Entity) => DEFS[e.kind].size ?? 1;
 const rectOf = (e: Entity): Rect => ({ x: e.x, y: e.y, s: sizeOf(e) });
 const tileRect = (map: GameMap, tile: number): Rect => ({ x: tile % map.size, y: Math.floor(tile / map.size), s: 1 });
 
-export function createGame(seed: number): GameState {
+export function createGame(seed: number, size?: number): GameState {
   return {
-    tick: 0, seed, map: generateMap(seed), entities: new Map(), players: new Map(), nextId: 1,
+    tick: 0, seed, map: generateMap(seed, size), entities: new Map(), players: new Map(), nextId: 1,
     changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(),
   };
 }

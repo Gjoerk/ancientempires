@@ -1,5 +1,5 @@
 import { Peer, DataConnection, PeerOptions } from 'peerjs';
-import { ClientMessage, GameHost, ServerMessage, TICK_MS, TICK_RATE } from '@kingsfall/shared';
+import { ClientMessage, GameHost, MAP_SIZES, ServerMessage, TICK_MS, TICK_RATE } from '@kingsfall/shared';
 
 // There is no game server. One player's browser hosts the game and the others
 // connect to it directly over WebRTC. Only the initial handshake goes through
@@ -19,6 +19,7 @@ export interface HostControls {
   removeExtra(slot: number): void;
   setTeam(slot: number, team: number): void;
   setQuickStart(on: boolean): void;
+  setMapSize(size: string): void;
   /** Switches which of the host's own players the host's commands go to. */
   control(slot: number): boolean;
 }
@@ -181,6 +182,11 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       },
       setTeam(slot, team) {
         game.setTeam(slot, team);
+        sendLobby();
+      },
+      setMapSize(size) {
+        if (game.state || !(size in MAP_SIZES)) return;
+        game.settings.mapSize = size as keyof typeof MAP_SIZES;
         sendLobby();
       },
       setQuickStart(on) {
