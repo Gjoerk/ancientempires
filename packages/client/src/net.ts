@@ -47,6 +47,11 @@ function peerOptions(): PeerOptions {
   };
 }
 
+/** Chat text as it is passed on: plain, single-line and short. */
+function cleanChat(text: unknown): string {
+  return (typeof text === 'string' ? text : '').replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
 export function normaliseCode(code: string): string {
   return code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 }
@@ -118,6 +123,8 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
         sendLobby();
       } else if (msg.t === 'cmd' && slot !== undefined) {
         game.command(slot, msg.cmd);
+      } else if (msg.t === 'chat' && slot !== undefined && cleanChat(msg.text)) {
+        broadcast({ t: 'chat', from: slot, text: cleanChat(msg.text) });
       }
     });
     const drop = () => {
@@ -143,6 +150,7 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   return {
     send: (msg) => {
       if (msg.t === 'cmd' && controlSlot >= 0) game.command(controlSlot, msg.cmd);
+      if (msg.t === 'chat' && mySlot >= 0) broadcast({ t: 'chat', from: mySlot, text: cleanChat(msg.text) });
     },
     close: () => close(''),
     host: {

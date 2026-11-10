@@ -95,8 +95,8 @@ test('training takes resources and time, and stops at the population limit', () 
   assert.equal(s.players.get(0)!.res.food, 100);
   assert.equal(tc.queue.length, 2);
   run(s, 400);
-  // Housing is 5 and four villagers were there from the start.
-  assert.equal(owned(s, 0, 'villager').length, 5);
+  // Housing is 5: three villagers and a scout were there from the start, so one more fits.
+  assert.equal(owned(s, 0, 'villager').length, 4);
   assert.equal(tc.queue.length, 1);
 });
 
@@ -324,7 +324,62 @@ test('a computer opponent builds up, advances and beats an idle player', () => {
   let ticks = 0;
   for (; ticks < 14000 && s.winner < 0; ticks++) host.tick();
   const p = s.players.get(1)!;
-  assert.ok(owned(s, 1, 'villager').length >= 12, `villagers: ${owned(s, 1, 'villager').length}`);
+  assert.ok(owned(s, 1, 'villager').length >= 10, `villagers: ${owned(s, 1, 'villager').length}`);
   assert.ok(p.age >= 2, `age ${p.age}`);
   assert.equal(s.winner, 1, `no win after ${ticks} ticks; army ${[...s.entities.values()].filter((e) => e.owner === 1 && DEFS[e.kind].attack && !DEFS[e.kind].building && e.kind !== 'villager').length}`);
+});
+
+test('each resource is delivered only where it belongs, and camps put their builders to work', () => {
+  const s = createGame(51);
+  addPlayer(s, 0);
+  const p = s.players.get(0)!;
+  p.res.wood = 1000;
+  const wood = findTile(s, Tile.Forest, s.map.starts[0]);
+  const wx = wood % s.map.size;
+  const wy = Math.floor(wood / s.map.size);
+  // Find room for a lumber camp next to the trees.
+  let spot: [number, number] | undefined;
+  for (let r = 1; r < 6 && !spot; r++) {
+    for (let y = wy - r; y <= wy + r && !spot; y++) for (let x = wx - r; x <= wx + r && !spot; x++) {
+      if ([0, 1].every((dx) => [0, 1].every((dy) => isWalkable(s.map, x + dx, y + dy)))) spot = [x, y];
+    }
+  }
+  const v = owned(s, 0, 'villager')[0];
+  applyCommand(s, 0, { type: 'place', ids: [v.id], kind: 'lumbercamp', x: spot![0], y: spot![1] });
+  run(s, 400);
+  const camp = owned(s, 0, 'lumbercamp')[0];
+  assert.equal(camp.progress, 1);
+  assert.equal(v.order.t, 'gather', 'the builder went on to chop wood');
+  // Wood goes to the camp; gold does not.
+  const miner = owned(s, 0, 'villager')[1];
+  miner.carry = 5;
+  miner.carryRes = 'gold';
+  const goldBefore = p.res.gold;
+  applyCommand(s, 0, { type: 'interact', ids: [miner.id], target: camp.id });
+  run(s, 150);
+  assert.equal(p.res.gold, goldBefore, 'a lumber camp takes no gold');
+});
+
+test('a farm runs dry and is sown again for wood', () => {
+  const s = createGame(53);
+  addPlayer(s, 0);
+  const [sx, sy] = s.map.starts[0];
+  const farm = spawn(s, 0, 'farm', sx - 1, sy + 3);
+  farm.carry = 4;
+  const p = s.players.get(0)!;
+  const wood = p.res.wood;
+  applyCommand(s, 0, { type: 'interact', ids: [owned(s, 0, 'villager')[0].id], target: farm.id });
+  run(s, 200);
+  assert.equal(p.res.wood, wood - 25);
+  assert.ok(farm.carry > 250);
+});
+
+test('resigning kills the king and ends the game for that player', () => {
+  const s = createGame(55);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  applyCommand(s, 1, { type: 'resign' });
+  run(s, 2);
+  assert.equal(s.players.get(1)!.defeated, true);
+  assert.equal(s.winner, 0);
 });

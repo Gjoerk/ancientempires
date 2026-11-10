@@ -26,7 +26,8 @@ export type EntitySnapshot = [number, number, number, number, number, number, nu
 
 /**
  * [slot, food, wood, gold, stone, population, housing, defeated (0/1), age,
- *  researched technologies as a bit mask over TECH_IDS, technologies being researched likewise]
+ *  researched technologies as a bit mask over TECH_IDS, technologies being researched likewise,
+ *  villagers gathering food, wood, gold, stone]
  */
 export type PlayerSnapshot = number[];
 
@@ -36,7 +37,8 @@ export type QueueSnapshot = number[];
 /** Sent by a player to the host. */
 export type ClientMessage =
   | { t: 'join'; name: string }
-  | { t: 'cmd'; cmd: Command };
+  | { t: 'cmd'; cmd: Command }
+  | { t: 'chat'; text: string };
 
 /** Sent by the host to players. */
 export type ServerMessage =
@@ -45,6 +47,7 @@ export type ServerMessage =
   /** The host started the game. */
   | { t: 'start'; you: number; room: string; seed: number; players: PlayerInfo[] }
   | { t: 'players'; players: PlayerInfo[] }
+  | { t: 'chat'; from: number; text: string }
   /** Sent while nothing else is, so guests can tell the host is still there. */
   | { t: 'ping' }
   | {

@@ -1,5 +1,5 @@
 import {
-  armorOf, attackOf, bonusOf, CARRY_CAPACITY, cooldownOf, TRADE_GOODS, Cost, DEFAULT_SIGHT, DEFS, FARM_RATE, GATHER_RATE, isTech, Kind, KINDS, maxHpOf, POP_MAX,
+  armorOf, attackOf, bonusOf, CARRY_CAPACITY, cooldownOf, TRADE_GOODS, Cost, DEFAULT_SIGHT, DEFS, FARM_FOOD, FARM_RATE, GATHER_RATE, GATHER_TECH, RESEED_COST, isTech, Kind, KINDS, maxHpOf, POP_MAX,
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, Tile, TILE_RESOURCE } from './map';
@@ -103,6 +103,8 @@ export type Command =
   /** Destroys one of the player's own units or buildings. */
   | { type: 'delete'; id: number }
   | { type: 'cancel'; building: number }
+  /** Give up: the player's king dies. */
+  | { type: 'resign' }
   /** Send whoever is inside a castle back out. */
   | { type: 'eject'; building: number };
 
@@ -144,6 +146,8 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
   };
   state.entities.set(e.id, e);
   if (def.building) setBlocked(state.map, rectOf(e), 1);
+  // A farm's `carry` is the food left before it must be sown again.
+  if (kind === 'farm') e.carry = FARM_FOOD;
   if (kind === 'gate') state.map.gate[ty * state.map.size + tx] = teamOf(state, owner) + 1;
   return e;
 }
@@ -192,9 +196,11 @@ export function addPlayer(state: GameState, slot: number, team = slot, quick = f
   const [sx, sy] = state.map.starts[slot];
   spawn(state, slot, 'towncenter', sx - 4, sy - 2);
   spawn(state, slot, 'castle', sx + 1, sy - 2);
+  // A king, a scout to explore with, and villagers; together they fill the town centre's housing.
   const spots = freeTilesNear(state.map, sx - 1, sy + 1, quick ? 9 : 5);
   spawn(state, slot, 'king', spots[0][0], spots[0][1]);
-  for (let i = 1; i < spots.length; i++) spawn(state, slot, 'villager', spots[i][0], spots[i][1]);
+  spawn(state, slot, 'scout', spots[1][0], spots[1][1]);
+  for (let i = 2; i < spots.length; i++) spawn(state, slot, 'villager', spots[i][0], spots[i][1]);
   if (quick) spawn(state, slot, 'house', sx - 4, sy + 2);
   if (new Set([...state.players.values()].filter((p) => !p.defeated).map((p) => p.team)).size >= 2) state.contested = true;
 }
@@ -396,7 +402,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
       } else if (target.kind === 'farm' && e.kind === 'villager' && farmIsFree(state, target, e)) {
         e.order = gatherOrder(-1, target.id, 'food');
       } else if (isBuilding(target)) {
-        if (e.kind === 'villager' && e.carry > 0 && DEFS[target.kind].dropoff) {
+        if (e.kind === 'villager' && e.carry > 0 && DEFS[target.kind].dropoff?.includes(e.carryRes) && target.progress >= 1) {
           // Deliver what is carried, then stand by.
           e.order = { t: 'gather', tile: -1, farm: -1, res: e.carryRes, phase: 'return', drop: target.id };
         } else {
@@ -471,6 +477,12 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
       e.path = [];
       e.order = { t: 'idle' };
     }
+  } else if (cmd.type === 'resign') {
+    for (const e of [...state.entities.values()]) {
+      if (e.owner !== slot || e.kind !== 'king') continue;
+      e.inside = -1;
+      kill(state, e);
+    }
   } else if (cmd.type === 'delete') {
     const e = state.entities.get(cmd.id);
     // The king cannot be thrown away, and neither can a castle while he is inside.
@@ -526,7 +538,7 @@ function nearestDropoff(state: GameState, e: Entity): Entity | undefined {
   let best: Entity | undefined;
   let bestD = Infinity;
   for (const b of state.entities.values()) {
-    if (b.owner !== e.owner || !DEFS[b.kind].dropoff || b.progress < 1) continue;
+    if (b.owner !== e.owner || !DEFS[b.kind].dropoff?.includes(e.carryRes) || b.progress < 1) continue;
     const d = distance(e, b);
     if (d < bestD) {
       bestD = d;
@@ -600,10 +612,18 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
   // phase 'work'
   const has = hasTech(state, e.owner);
   const capacity = CARRY_CAPACITY + (has('handcart') ? 5 : 0);
-  e.work += ((o.farm >= 0 ? FARM_RATE : GATHER_RATE) * (has('tools') ? 1.2 : 1)) / TICK_RATE;
+  if (farm && farm.carry <= 0) {
+    // The field is exhausted: sow it again if there is wood for it, otherwise wait.
+    const owner = state.players.get(e.owner)!;
+    if (owner.res.wood < RESEED_COST) return;
+    owner.res.wood -= RESEED_COST;
+    farm.carry = FARM_FOOD;
+  }
+  e.work += ((o.farm >= 0 ? FARM_RATE : GATHER_RATE) * (has(GATHER_TECH[o.res]) ? 1.2 : 1)) / TICK_RATE;
   while (e.work >= 1 && e.carry < capacity) {
     e.work -= 1;
     e.carry++;
+    if (farm && --farm.carry <= 0) break;
     if (o.farm < 0 && --map.amount[o.tile] <= 0) {
       depleteTile(state, o.tile);
       break;
@@ -623,6 +643,12 @@ function stepBuild(state: GameState, e: Entity, o: Extract<Order, { t: 'build' }
   const full = DEFS[site.kind].hp;
   if (site.progress >= 1 && (site.hp >= full || site.kind === 'farm')) {
     if (site.kind === 'farm' && farmIsFree(state, site, e)) return void (e.order = gatherOrder(-1, site.id, 'food'));
+    // Whoever builds a camp or mill starts gathering what it is for, if some is close by.
+    const stores = site.kind === 'towncenter' ? undefined : DEFS[site.kind].dropoff;
+    for (const res of stores ?? []) {
+      const tile = nearestResourceTile(state.map, site.y * state.map.size + site.x, res, 6);
+      if (tile >= 0) return void (e.order = gatherOrder(tile, -1, res));
+    }
     // Help with another unfinished building close by, if there is one.
     for (const other of state.entities.values()) {
       if (other.owner === e.owner && other.progress < 1 && distance(e, other) < 8) return void (o.id = other.id);

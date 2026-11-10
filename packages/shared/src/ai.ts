@@ -78,10 +78,10 @@ export function runAi(state: GameState, slot: number): void {
   }
 
   // One new building at a time, so the wood is not spread over half-finished sites.
-  const build = (kind: Kind): boolean => {
+  const build = (kind: Kind, near: [number, number] = [sx, sy]): boolean => {
     const def = DEFS[kind];
     if (sites.length > 0 || (def.age ?? 1) > p.age || !canAfford(p, def.cost)) return false;
-    const spot = findSite(map, kind, sx, sy);
+    const spot = findSite(map, kind, near[0], near[1]);
     const builder = villagers.find((v) => v.order.t === 'idle') ?? villagers.find((v) => v.order.t === 'gather' && v.order.res === 'wood') ?? villagers[0];
     if (!spot || !builder) return false;
     applyCommand(state, slot, { type: 'place', ids: [builder.id], kind, x: spot[0], y: spot[1] });
@@ -95,9 +95,14 @@ export function runAi(state: GameState, slot: number): void {
   }
 
   const farms = built('farm');
+  const woodTile = nearestTile(map, RES_TILES.wood, sx, sy, 24);
+  const goldTile = nearestTile(map, RES_TILES.gold, sx, sy, 24);
   const berriesLeft = nearestTile(map, RES_TILES.food, sx, sy, 16) >= 0;
   if (p.pop >= p.cap - 2 && p.cap < POP_MAX) build('house');
   else if (of('barracks').length === 0 && villagers.length >= 7) build('barracks');
+  else if (of('lumbercamp').length === 0 && villagers.length >= 8 && woodTile >= 0) build('lumbercamp', [woodTile % map.size, Math.floor(woodTile / map.size)]);
+  else if (of('miningcamp').length === 0 && villagers.length >= 9 && goldTile >= 0) build('miningcamp', [goldTile % map.size, Math.floor(goldTile / map.size)]);
+  else if (of('mill').length === 0 && farms.length >= 3) build('mill');
   else if (!berriesLeft && farms.length + of('farm').filter((f) => f.progress < 1).length < 8 && p.res.food < 300) build('farm');
   else if (p.age >= 2 && of('range').length === 0) build('range');
   else if (p.age >= 2 && of('blacksmith').length === 0 && soldiers.length >= 4) build('blacksmith');
@@ -118,8 +123,10 @@ export function runAi(state: GameState, slot: number): void {
     const next = TECH_IDS.find((id) => TECHS[id].at === 'blacksmith' && wants(id) && canAfford(p, TECHS[id].cost) && id !== 'arrowslits');
     if (next) applyCommand(state, slot, { type: 'train', building: smith.id, kind: next });
   }
-  const store = built('storehouse')[0] ?? undefined;
-  if (store && store.queue.length === 0 && wants('tools')) applyCommand(state, slot, { type: 'train', building: store.id, kind: 'tools' });
+  for (const [kind, tech] of [['lumbercamp', 'axes'], ['miningcamp', 'picks'], ['mill', 'ploughs']] as const) {
+    const camp = built(kind)[0];
+    if (camp && camp.queue.length === 0 && wants(tech) && !saving) applyCommand(state, slot, { type: 'train', building: camp.id, kind: tech });
+  }
 
   // Soldiers: a mixed army, once the village can pay for it.
   if (soldiers.length < ARMY_LIMIT && villagers.length >= 8 && !saving) {

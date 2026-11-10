@@ -9,17 +9,25 @@ export const HH = 16;
 
 type Ctx = CanvasRenderingContext2D;
 
-/** Draws rows of palette characters with the bottom centre at (x, y). */
-function blit(ctx: Ctx, rows: string[], palette: Record<string, string>, x: number, y: number, px = 2): void {
+/**
+ * Draws rows of palette characters with the bottom centre at (x, y).
+ * `flip` mirrors the sprite; `step` (1 or 2) lifts one leg for a walking frame.
+ */
+function blit(
+  ctx: Ctx, rows: string[], palette: Record<string, string>, x: number, y: number, px = 2, flip = false, step = 0,
+): void {
   const w = rows[0].length;
   const ox = Math.round(x - (w * px) / 2);
   const oy = Math.round(y - rows.length * px);
   for (let r = 0; r < rows.length; r++) {
+    const legs = step > 0 && r >= rows.length - 3;
     for (let c = 0; c < w; c++) {
       const color = palette[rows[r][c]];
       if (!color) continue;
+      // While walking, the legs on one half of the sprite are drawn a pixel higher, alternating.
+      const lift = legs && (c < w / 2) === (step === 1) ? px : 0;
       ctx.fillStyle = color;
-      ctx.fillRect(ox + c * px, oy + r * px, px, px);
+      ctx.fillRect(ox + (flip ? w - 1 - c : c) * px, oy + r * px - lift, px, px);
     }
   }
 }
@@ -111,6 +119,20 @@ const UNIT_SPRITES: Partial<Record<Kind, string[]>> = {
     '.kkkkkkkkkkkkk..',
     '..nn......nn....',
     '..nn......nn....',
+  ],
+  scout: [
+    '....hhhh......',
+    '....ssss......',
+    '....sees......',
+    '...tttttt..nn.',
+    '..sttttts.oooo',
+    '..ooooooooooeo',
+    '.oootttoooooo.',
+    'noooooooooo...',
+    'n.ooooooooo...',
+    '..oo.....oo...',
+    '..oo.....oo...',
+    '..nn.....nn...',
   ],
   rider: [
     '....mmmm......',
@@ -208,14 +230,18 @@ function drawTool(ctx: Ctx, x: number, y: number, w: Work): void {
 
 export function drawUnit(
   ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1, activity = 0, now = 0,
+  face = 1,
 ): void {
-  const big = kind === 'king' || kind === 'rider' || kind === 'ram';
+  const big = kind === 'king' || kind === 'rider' || kind === 'scout' || kind === 'ram';
+  // Sprites are drawn facing right and mirrored to face left.
+  const flip = (work ? work.dir : face) < 0;
+  const step = activity === 1 ? 1 + (Math.floor(now / 140) % 2) : 0;
   // A sprite pack may provide this unit, optionally with separate images per activity.
   const state = work ? `work.${WORK_NAMES[work.task]}` : ['idle', 'walk', 'work', 'attack'][activity] ?? 'idle';
   const custom = findSprite([`unit.${kind}.${state}`, `unit.${kind}.${state.split('.')[0]}`, `unit.${kind}`]);
   if (custom) {
     if (custom.def.shadow !== false) shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
-    drawSprite(ctx, custom, PLAYER_COLORS[owner % PLAYER_COLORS.length], x, y - bob, now, work ? work.dir < 0 : false);
+    drawSprite(ctx, custom, PLAYER_COLORS[owner % PLAYER_COLORS.length], x, y - bob, now, flip);
     // Without a dedicated working image, the built-in tool is swung over the sprite.
     if (work && !custom.key.includes('.work')) drawTool(ctx, x, y - bob, work);
     return;
@@ -228,11 +254,12 @@ export function drawUnit(
   if (carry >= 0 && !work) {
     // A bundle of whatever is being carried home, on the back.
     ctx.fillStyle = CARRY_COLORS[carry];
-    ctx.fillRect(Math.round(x - 11), Math.round(y - 17 - bob), 6, 6);
+    const bx = flip ? 5 : -11;
+    ctx.fillRect(Math.round(x + bx), Math.round(y - 17 - bob), 6, 6);
     ctx.fillStyle = 'rgba(0,0,0,.25)';
-    ctx.fillRect(Math.round(x - 11), Math.round(y - 12 - bob), 6, 1);
+    ctx.fillRect(Math.round(x + bx), Math.round(y - 12 - bob), 6, 1);
   }
-  blit(ctx, UNIT_SPRITES[kind] ?? UNIT_SPRITES.villager!, palette, x, y - bob);
+  blit(ctx, UNIT_SPRITES[kind] ?? UNIT_SPRITES.villager!, palette, x, y - bob, 2, flip, step);
   if (work) drawTool(ctx, x, y - bob, work);
 }
 

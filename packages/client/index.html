@@ -21,6 +21,11 @@
     #actions button:hover { background: #3a3324; }
     #actions button.poor { opacity: .5; }
     #actions button.locked { opacity: .3; cursor: default; }
+    #resources small { color: #9a927c; font-size: 11px; }
+    #chat-log { position: fixed; top: 48px; left: 12px; display: grid; gap: 2px; pointer-events: none; text-shadow: 0 1px 2px #000; max-width: 60vw; }
+    #chat-log div { background: rgba(16,20,15,.6); padding: 1px 6px; }
+    #chat-input { position: fixed; bottom: 182px; left: 12px; width: min(460px, calc(100vw - 24px)); font: inherit; padding: 6px 8px;
+      border: 2px solid #5a4a2a; background: #1d1a14; color: inherit; }
     #toast { position: fixed; top: 44px; right: 12px; padding: 6px 12px; border: 2px solid #d43b3b; background: #1d1a14; }
     #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; border: 2px solid #5a4a2a;
       background: #1d1a14; max-width: min(560px, calc(100vw - 32px)); line-height: 1.6; }
@@ -68,6 +73,7 @@
       <button id="end-btn" type="button">End game</button>
     </span>
     <button id="mute-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Sound on (M)</button>
+    <button id="resign-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Resign</button>
     <button id="full-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Fullscreen (F)</button>
     <button id="help-btn" type="button" style="font:inherit;font-size:12px;padding:2px 8px;border:1px solid #5a4a2a;background:#2b261c;color:inherit;cursor:pointer">Help (H)</button>
     <span class="dim" hidden>Room <b id="room-code"></b></span>
@@ -81,6 +87,8 @@
   </div>
   <div id="banner" hidden></div>
   <div id="toast" hidden></div>
+  <div id="chat-log"></div>
+  <input id="chat-input" maxlength="140" placeholder="Message to everyone — Enter to send, Esc to cancel" hidden>
   <div id="help" hidden>
     <h2>Controls</h2>
     <b>Left-click / drag</b> select · <b>double-click</b> all of that kind on screen · <b>Shift</b> adds to the selection<br>
@@ -88,7 +96,9 @@
     <b>Right-click with a building selected</b> sets where its new units gather<br>
     <b>X</b> stop · <b>Delete</b> destroy your selected unit or building<br>
     <b>Shift + 1–9</b> store a group · <b>1–9</b> select it<br>
-    <b>.</b> next idle villager · <b>Space</b> jump to the last attack on you<br>
+    <b>.</b> next idle villager · <b>,</b> all idle soldiers · <b>Space</b> jump to the last attack on you<br>
+    <b>Enter</b> chat with the other players<br>
+    <b>Mill, lumber camp, mining camp</b> build them next to food, wood, gold or stone so villagers walk less.<br>
     <b>WASD / arrows / cursor at the window edge</b> scroll · <b>F</b> fullscreen · <b>M</b> sound on/off<br>
     <b>Minimap</b> left-click or drag to look there · right-click to send the selected units there<br>
     <b>Walls</b> are dragged out as a line and block everyone. A <b>gate</b> lets you and your allies through.<br>

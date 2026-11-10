@@ -56,6 +56,8 @@ interface View {
   /** When this unit last struck a blow, and when it was last hit (for animations). */
   struck: number;
   hurt: number;
+  /** 1 facing right on screen, -1 facing left. */
+  face: number;
   // Position at the previous snapshot and at the latest one, for interpolation.
   px: number;
   py: number;
@@ -72,6 +74,8 @@ interface PlayerView {
   /** Bit masks over TECH_IDS. */
   techs: number;
   researching: number;
+  /** Villagers gathering each resource. */
+  workers: Record<string, number>;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -94,6 +98,7 @@ const queues = new Map<number, number[]>();
 const selected = new Set<number>();
 let shots: { from: [number, number]; to: [number, number]; t: number }[] = [];
 let winner = -1;
+let gameTick = 0;
 let snapTime = 0;
 let centred = false;
 const cam = { x: 0, y: 0 };
@@ -420,11 +425,13 @@ function onMessage(msg: ServerMessage): void {
       if (v) {
         // Continue from wherever the unit is currently drawn, so motion stays smooth.
         [v.px, v.py] = viewPos(v, alpha);
+        const turn = x - v.x - (y - v.y);
+        if (Math.abs(turn) > 0.01) v.face = turn > 0 ? 1 : -1;
         if (hp < v.hp && v.owner === me) underAttack(v, now);
         if (v.owner === me && isBuilding(v.kind) && v.extra < 100 && extra >= 100) play('built', 400);
         Object.assign(v, { x, y, hp, act, extra, task, target });
       } else {
-        const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, struck: 0, hurt: 0, px: x, py: y, x, y };
+        const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, struck: 0, hurt: 0, face: 1, px: x, py: y, x, y };
         views.set(id, created);
         setBlocked(created, 1);
         if (owner === me && !isBuilding(created.kind) && msg.tick > 20) play('trained', 300);
@@ -466,7 +473,8 @@ function onMessage(msg: ServerMessage): void {
     queues.clear();
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
     let defeatChanged = false;
-    for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching] of msg.players) {
+    gameTick = msg.tick;
+    for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching, w0, w1, w2, w3] of msg.players) {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
       if (slot === me && old) {
@@ -474,7 +482,10 @@ function onMessage(msg: ServerMessage): void {
         else if (techs !== old.techs) play('research');
         if (defeated === 1 && !old.defeated) play('defeat');
       }
-      players.set(slot, { res: { food, wood, gold, stone }, pop, cap, defeated: defeated === 1, age, techs, researching });
+      players.set(slot, {
+        res: { food, wood, gold, stone }, pop, cap, defeated: defeated === 1, age, techs, researching,
+        workers: { food: w0, wood: w1, gold: w2, stone: w3 },
+      });
     }
     if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
     if (defeatChanged) renderPlayers();
@@ -487,9 +498,22 @@ function onMessage(msg: ServerMessage): void {
         centred = true;
       }
     }
+  } else if (msg.t === 'chat') {
+    showChat(msg.from, msg.text);
   } else if (msg.t === 'error') {
     $('lobby-msg').textContent = msg.message;
   }
+}
+
+function showChat(from: number, text: string): void {
+  const line = document.createElement('div');
+  const who = document.createElement('b');
+  who.textContent = `${roster.find((p) => p.slot === from)?.name ?? 'Someone'}: `;
+  who.style.color = PLAYER_COLORS[from] ?? '';
+  line.append(who, text);
+  $('chat-log').append(line);
+  setTimeout(() => line.remove(), 12000);
+  play('trained', 0);
 }
 
 /** Tells the player when something of theirs is attacked where they are not looking. */
@@ -527,6 +551,8 @@ function resetGame(): void {
   puffs = [];
   alert = attackFlash = undefined;
   $('toast').hidden = true;
+  $('chat-log').textContent = '';
+  $('chat-input').hidden = true;
   hudSignature = panelSignature = '';
   $('top').hidden = true;
   $('bottom').hidden = true;
@@ -862,6 +888,20 @@ window.addEventListener('keydown', (ev) => {
     placing = wallStart = undefined;
     $('help').hidden = true;
   }
+  if (key === 'enter' && me >= 0) {
+    ev.preventDefault();
+    const box = $<HTMLInputElement>('chat-input');
+    box.hidden = false;
+    box.focus();
+    return;
+  }
+  if (key === ',') {
+    // Select every soldier that is standing around.
+    selected.clear();
+    for (const v of views.values()) {
+      if (v.owner === me && v.act === 0 && !isBuilding(v.kind) && v.kind !== 'villager' && v.kind !== 'king') selected.add(v.id);
+    }
+  }
   if (key === 'h') $('help').hidden = !$('help').hidden;
   if (key === 'f') toggleFullscreen();
   if (key === 'm') $('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)';
@@ -907,6 +947,19 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+$('resign-btn').addEventListener('click', () => {
+  if (confirm('Give up? Your king dies and you are out of the game.')) send({ type: 'resign' });
+});
+$('chat-input').addEventListener('keydown', (ev) => {
+  const box = ev.target as HTMLInputElement;
+  if (ev.key === 'Enter' && box.value.trim()) session?.send({ t: 'chat', text: box.value });
+  if (ev.key === 'Enter' || ev.key === 'Escape') {
+    box.value = '';
+    box.hidden = true;
+    box.blur();
+  }
+  ev.stopPropagation();
+});
 $('mute-btn').textContent = isMuted() ? 'Sound off (M)' : 'Sound on (M)';
 $('mute-btn').addEventListener('click', () => ($('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)'));
 window.addEventListener('pointerdown', unlockSound);
@@ -1088,7 +1141,9 @@ function renderHud(): void {
   const p = players.get(me);
   if (!p) return;
   const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0).length;
-  const signature = [p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, idle, p.defeated, winner, p.age].join();
+  const seconds = Math.floor(gameTick / 10);
+  const signature = [p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, idle, p.defeated, winner, p.age, seconds,
+    ...RESOURCES.map((r) => p.workers[r])].join();
   if (signature === hudSignature) return;
   hudSignature = signature;
   const el = $('resources');
@@ -1100,8 +1155,18 @@ function renderHud(): void {
     span.append(`${label} `, b);
     el.append(span);
   };
-  for (const r of RESOURCES) add(r[0].toUpperCase() + r.slice(1), String(p.res[r]));
+  for (const r of RESOURCES) {
+    add(r[0].toUpperCase() + r.slice(1), String(p.res[r]));
+    // Villagers working on this resource.
+    const note = document.createElement('small');
+    note.textContent = ` ${p.workers[r] ?? 0}`;
+    note.title = `Villagers gathering ${r}`;
+    el.lastElementChild!.append(note);
+  }
   add('Pop', `${p.pop}/${p.cap}`);
+  // Housing is full: nothing more can be trained until a house is built.
+  if (p.pop >= p.cap && p.cap < 60) (el.lastElementChild!.lastElementChild as HTMLElement).style.color = '#ff6a5a';
+  add('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
   add('', AGE_NAMES[p.age] ?? '');
   if (idle > 0) add('Idle villagers (.)', String(idle));
 
@@ -1284,7 +1349,7 @@ function drawTargetMark(v: View, alpha: number, width: number): void {
     return;
   }
   const [x, y] = unitScreen(v);
-  const big = v.kind === 'rider' || v.kind === 'ram';
+  const big = v.kind === 'rider' || v.kind === 'scout' || v.kind === 'ram';
   ctx.beginPath();
   ctx.ellipse(x, y, big ? 17 : 13, big ? 8.5 : 6.5, 0, 0, Math.PI * 2);
   ctx.stroke();
@@ -1321,8 +1386,13 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
     sy += ((fy - sy) / d) * reach;
     if (!ranged && v.kind !== 'ram') slash = { dir: fx >= sx ? 1 : -1, k: swing };
   }
+  // Fighters keep facing whoever they are attacking.
+  let foeDir = 0;
+  if (foe && v.act === 3) {
+    foeDir = tileToScreen(...centreOf(foe))[0] >= sx ? 1 : -1;
+  }
   const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) : -1;
-  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now);
+  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face);
   if (slash) {
     ctx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - slash.k)})`;
     ctx.lineWidth = 3;

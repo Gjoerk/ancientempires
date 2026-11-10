@@ -41,20 +41,20 @@ The map is isometric. One tile is a diamond 64 px wide and 32 px high.
   covering N × N tiles has a ground diamond N × 64 px wide and N × 32 px high.
   Custom building sprites get no automatic shadow, so paint it into the image.
 
-Footprints: house, farm, storehouse, blacksmith 2 × 2 · town centre, barracks, archery range, stable,
+Footprints: house, farm, mill, lumber camp, mining camp, blacksmith 2 × 2 · town centre, barracks, archery range, stable,
 market, siege workshop 3 × 3 · watchtower, wall, gate 1 × 1 · castle 4 × 4.
 
 ## Keys
 
 The most specific key that exists is used.
 
-**Units** — `unit.<kind>` with kind one of `villager`, `king`, `swordsman`, `spearman`, `archer`, `rider`, `ram`.
+**Units** — `unit.<kind>` with kind one of `villager`, `king`, `swordsman`, `spearman`, `archer`, `rider`, `scout`, `ram`.
 Optional per activity: `unit.<kind>.idle`, `.walk`, `.attack`, `.work`, and for villagers
 `.work.wood`, `.work.berries`, `.work.gold`, `.work.stone`, `.work.farm`, `.work.build`.
-Work sprites should face right; they are mirrored when the work is on the left.
+All unit sprites should face right; they are mirrored when the unit faces left.
 If a villager has no `.work` sprite, the built-in tool animation is drawn over the sprite.
 
-**Buildings** — `building.<kind>` with kind one of `towncenter`, `house`, `storehouse`, `farm`,
+**Buildings** — `building.<kind>` with kind one of `towncenter`, `house`, `mill`, `lumbercamp`, `miningcamp`, `farm`,
 `barracks`, `range`, `stable`, `tower`, `castle`, `blacksmith`, `market`, `workshop`, `wall`, `gate`.
 Optional: `building.<kind>.site` (under construction), `building.site` (any building under
 construction), `building.castle.king` (castle with a king inside; replaces the `flag` option).

@@ -82,7 +82,13 @@ export class GameHost {
     const queues: QueueSnapshot[] = [];
     const rallies: [number, number, number][] = [];
     const mask = (set: Set<string>) => TECH_IDS.reduce((m, id, i) => (set.has(id) ? m | (1 << i) : m), 0);
+    const workers = new Map<number, Record<string, number>>();
     for (const e of s.entities.values()) {
+      if (e.order.t === 'gather') {
+        const count = workers.get(e.owner) ?? {};
+        count[e.order.res] = (count[e.order.res] ?? 0) + 1;
+        workers.set(e.owner, count);
+      }
       if (e.inside >= 0) continue;
       const building = DEFS[e.kind].building;
       const [task, target] = building ? [e.kind === 'castle' && hasKingInside(s, e) ? 1 : 0, 0] : taskOf(e);
@@ -102,7 +108,7 @@ export class GameHost {
       t: 'snap', tick: s.tick, ents, queues,
       players: [...s.players.values()].map((p) => [
         p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
-        p.age, mask(p.techs), mask(p.researching),
+        p.age, mask(p.techs), mask(p.researching), ...RESOURCES.map((r) => workers.get(p.slot)?.[r] ?? 0),
       ]),
       tiles: s.tileEvents, shots: s.shots, hits: s.hits, deaths: s.deaths, rallies, winner: s.winner,
     };

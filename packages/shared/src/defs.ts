@@ -4,8 +4,8 @@ export type Cost = Partial<Record<Res, number>>;
 
 /** Every unit and building type. The index in this list is what goes over the wire. */
 export const KINDS = [
-  'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider',
-  'towncenter', 'house', 'storehouse', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
+  'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider', 'scout',
+  'towncenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
   'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate',
 ] as const;
 export type Kind = (typeof KINDS)[number];
@@ -38,8 +38,8 @@ export interface KindDef {
   /** Population room this building provides. */
   housing?: number;
   trains?: Kind[];
-  /** Villagers can deliver resources here. */
-  dropoff?: boolean;
+  /** Resources villagers can deliver here. */
+  dropoff?: Res[];
 }
 
 /** Melee fighters must stand right next to their target. */
@@ -54,7 +54,7 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   spearman: {
     label: 'Spearman', hp: 45, cost: { food: 35, wood: 25 }, time: 12, speed: 2.2,
-    attack: 4, range: MELEE, cooldown: 1.5, sight: 6, bonus: { rider: 20 },
+    attack: 4, range: MELEE, cooldown: 1.5, sight: 6, bonus: { rider: 20, scout: 12 },
   },
   archer: {
     label: 'Archer', hp: 30, cost: { wood: 25, gold: 45 }, time: 14, age: 2, speed: 2.2,
@@ -64,16 +64,24 @@ export const DEFS: Record<Kind, KindDef> = {
     label: 'Rider', hp: 90, cost: { food: 80, gold: 40 }, time: 18, age: 2, speed: 3.4,
     attack: 9, range: MELEE, cooldown: 1.6, armor: 1, sight: 6, bonus: { archer: 4 },
   },
+  scout: {
+    label: 'Scout', hp: 45, cost: { food: 80 }, time: 14, age: 2, speed: 3.6,
+    attack: 3, range: MELEE, cooldown: 1.6, sight: 9, bonus: { archer: 2 },
+  },
   ram: {
     label: 'Battering Ram', hp: 180, cost: { wood: 160, gold: 60 }, time: 25, age: 3, speed: 1.4,
     attack: 3, range: MELEE, cooldown: 2.5, armor: 4, sight: 4, vsBuildings: 45,
   },
   towncenter: {
     label: 'Town Centre', building: true, hp: 800, cost: { wood: 275, stone: 100 }, time: 60, age: 2, size: 3,
-    armor: 3, sight: 8, housing: 5, trains: ['villager'], dropoff: true,
+    armor: 3, sight: 8, housing: 5, trains: ['villager'], dropoff: ['food', 'wood', 'gold', 'stone'],
   },
   house: { label: 'House', building: true, hp: 200, cost: { wood: 30 }, time: 12, size: 2, armor: 3, housing: 5 },
-  storehouse: { label: 'Storehouse', building: true, hp: 250, cost: { wood: 80 }, time: 15, size: 2, armor: 3, dropoff: true },
+  mill: { label: 'Mill', building: true, hp: 250, cost: { wood: 100 }, time: 15, size: 2, armor: 3, dropoff: ['food'] },
+  lumbercamp: { label: 'Lumber Camp', building: true, hp: 250, cost: { wood: 100 }, time: 15, size: 2, armor: 3, dropoff: ['wood'] },
+  miningcamp: {
+    label: 'Mining Camp', building: true, hp: 250, cost: { wood: 100 }, time: 15, size: 2, armor: 3, dropoff: ['gold', 'stone'],
+  },
   farm: { label: 'Farm', building: true, hp: 100, cost: { wood: 50 }, time: 8, size: 2, armor: 1, sight: 3 },
   barracks: {
     label: 'Barracks', building: true, hp: 450, cost: { wood: 150 }, time: 25, size: 3, armor: 3,
@@ -82,7 +90,9 @@ export const DEFS: Record<Kind, KindDef> = {
   range: {
     label: 'Archery Range', building: true, hp: 400, cost: { wood: 150 }, time: 25, age: 2, size: 3, armor: 3, trains: ['archer'],
   },
-  stable: { label: 'Stable', building: true, hp: 400, cost: { wood: 150 }, time: 25, age: 2, size: 3, armor: 3, trains: ['rider'] },
+  stable: {
+    label: 'Stable', building: true, hp: 400, cost: { wood: 150 }, time: 25, age: 2, size: 3, armor: 3, trains: ['scout', 'rider'],
+  },
   blacksmith: { label: 'Blacksmith', building: true, hp: 350, cost: { wood: 120 }, time: 20, age: 2, size: 2, armor: 3 },
   market: { label: 'Market', building: true, hp: 350, cost: { wood: 150 }, time: 22, age: 2, size: 3, armor: 3 },
   workshop: {
@@ -105,7 +115,7 @@ export const DEFAULT_SIGHT = 6;
 
 /** Buildings a villager can construct, in menu order. */
 export const BUILDABLE: Kind[] = [
-  'house', 'farm', 'storehouse', 'barracks', 'wall', 'gate',
+  'house', 'farm', 'mill', 'lumbercamp', 'miningcamp', 'barracks', 'wall', 'gate',
   'range', 'stable', 'blacksmith', 'market', 'tower', 'towncenter',
   'workshop', 'castle',
 ];
@@ -113,7 +123,7 @@ export const BUILDABLE: Kind[] = [
 export const AGE_NAMES = ['', 'Village Age', 'Town Age', 'Kingdom Age'];
 
 export const TECH_IDS = [
-  'age2', 'age3', 'loom', 'tools', 'handcart', 'weapons', 'armour',
+  'age2', 'age3', 'loom', 'handcart', 'ploughs', 'axes', 'picks', 'weapons', 'armour',
   'pikes', 'jacks', 'blades', 'shields', 'longbows', 'quickdraw', 'lances', 'barding', 'ironhead', 'arrowslits',
 ] as const;
 export type TechId = (typeof TECH_IDS)[number];
@@ -146,7 +156,7 @@ export interface TechDef {
   boost?: Boost;
 }
 
-const SOLDIERS: Kind[] = ['spearman', 'swordsman', 'archer', 'rider', 'ram'];
+const SOLDIERS: Kind[] = ['spearman', 'swordsman', 'archer', 'rider', 'scout', 'ram'];
 
 export const TECHS: Record<TechId, TechDef> = {
   age2: { label: 'Advance to Town Age', effect: 'Unlocks soldiers, towers, blacksmith and market', cost: { food: 400 }, time: 40, at: 'towncenter', age: 1 },
@@ -158,8 +168,10 @@ export const TECHS: Record<TechId, TechDef> = {
     label: 'Loom', effect: 'Villagers +15 HP, +1 armour', cost: { gold: 50 }, time: 15, at: 'towncenter', age: 1,
     boost: { kinds: ['villager'], hp: 15, armor: 1 },
   },
-  tools: { label: 'Better Tools', effect: 'Villagers gather 20% faster', cost: { food: 100, wood: 75 }, time: 20, at: 'storehouse', age: 1 },
-  handcart: { label: 'Handcart', effect: 'Villagers carry 5 more', cost: { food: 150, wood: 100 }, time: 25, at: 'storehouse', age: 2 },
+  handcart: { label: 'Handcart', effect: 'Villagers carry 5 more', cost: { food: 150, wood: 100 }, time: 25, at: 'towncenter', age: 2 },
+  ploughs: { label: 'Ploughs', effect: 'Food is gathered 20% faster', cost: { food: 75, wood: 75 }, time: 20, at: 'mill', age: 1 },
+  axes: { label: 'Sharp Axes', effect: 'Wood is cut 20% faster', cost: { food: 100, wood: 50 }, time: 20, at: 'lumbercamp', age: 1 },
+  picks: { label: 'Iron Picks', effect: 'Gold and stone are mined 20% faster', cost: { food: 100, wood: 75 }, time: 20, at: 'miningcamp', age: 1 },
 
   // Blacksmith: two upgrades for the whole army, then two for each kind of soldier.
   weapons: {
@@ -195,12 +207,12 @@ export const TECHS: Record<TechId, TechDef> = {
     boost: { kinds: ['archer'], cooldown: 0.75 },
   },
   lances: {
-    label: 'Rider: Lances', effect: 'Riders +3 attack', cost: { food: 140, gold: 90 }, time: 25, at: 'blacksmith', age: 2,
-    boost: { kinds: ['rider'], attack: 3 },
+    label: 'Rider: Lances', effect: 'Riders and scouts +3 attack', cost: { food: 140, gold: 90 }, time: 25, at: 'blacksmith', age: 2,
+    boost: { kinds: ['rider', 'scout'], attack: 3 },
   },
   barding: {
-    label: 'Rider: Horse Armour', effect: 'Riders +25 HP, +1 armour', cost: { food: 140, gold: 90 }, time: 25, at: 'blacksmith', age: 2,
-    boost: { kinds: ['rider'], hp: 25, armor: 1 },
+    label: 'Rider: Horse Armour', effect: 'Riders and scouts +25 HP, +1 armour', cost: { food: 140, gold: 90 }, time: 25, at: 'blacksmith', age: 2,
+    boost: { kinds: ['rider', 'scout'], hp: 25, armor: 1 },
   },
   ironhead: {
     label: 'Ram: Iron Head', effect: 'Rams +20 damage to buildings', cost: { wood: 150, gold: 100 }, time: 30, at: 'blacksmith', age: 3,
@@ -263,6 +275,11 @@ export const CARRY_CAPACITY = 10;
 /** Resources gathered per second. */
 export const GATHER_RATE = 1;
 export const FARM_RATE = 0.7;
+/** Food a farm yields before it has to be sown again, and the wood that costs. */
+export const FARM_FOOD = 300;
+export const RESEED_COST = 25;
+/** The technology that speeds up gathering each resource. */
+export const GATHER_TECH: Record<Res, TechId> = { food: 'ploughs', wood: 'axes', gold: 'picks', stone: 'picks' };
 export const QUEUE_MAX = 5;
 export const START_RESOURCES: Record<Res, number> = { food: 200, wood: 200, gold: 100, stone: 100 };
 /** Quick start: more to spend and more villagers, for shorter games. */

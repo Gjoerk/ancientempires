@@ -219,20 +219,59 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.pyramid(1.0, 1.0, 2.0, 2.0, 56, 15, team);
   },
 
-  // Open-sided shed stacked with crates, sacks and logs.
-  storehouse(pen, team) {
+  // Open-sided shed with stacked logs and a chopping block.
+  lumbercamp(pen, team) {
     pen.box(0.12, 0.12, 1.88, 1.88, 0, 2, '#8a7350');
     pen.box(0.2, 0.2, 1.8, 0.32, 2, 17, WOOD);
     pen.box(0.2, 0.2, 0.32, 1.8, 2, 17, WOOD);
-    pen.box(0.45, 0.45, 0.95, 0.95, 2, 11, '#b89358');
-    pen.box(1.05, 0.45, 1.65, 0.7, 2, 7, TIMBER);
-    pen.box(1.05, 0.72, 1.65, 0.97, 2, 7, shade(TIMBER, 1.2));
-    pen.box(0.45, 1.05, 0.85, 1.45, 2, 8, '#a8824a');
-    pen.box(1.1, 1.1, 1.45, 1.45, 2, 8, '#d8cfae');
-    pen.box(1.48, 1.2, 1.7, 1.5, 2, 6, '#cfc49e');
+    for (let i = 0; i < 3; i++) pen.box(0.45, 0.45 + i * 0.22, 1.5, 0.65 + i * 0.22, 2, 7, i % 2 ? shade(TIMBER, 1.25) : TIMBER);
+    for (let i = 0; i < 2; i++) pen.box(0.5, 0.56 + i * 0.22, 1.45, 0.76 + i * 0.22, 7, 12, i % 2 ? TIMBER : shade(TIMBER, 1.25));
+    pen.box(0.5, 1.25, 0.85, 1.6, 2, 8, '#a8824a');
+    pen.box(1.15, 1.2, 1.4, 1.45, 2, 7, shade(TIMBER, 1.1));
+    pen.line(pen.p(1.27, 1.32, 7), pen.p(1.45, 1.2, 17), '#7a5230', 2);
     for (const [u, v] of [[1.7, 0.2], [0.2, 1.7], [1.7, 1.7]]) pen.box(u, v, u + 0.1, v + 0.1, 2, 18, TIMBER);
     pen.gable(0.04, 0.04, 1.96, 1.96, 18, 9, '#7d5a34', '#7d5a34', false);
     pen.onU(1.8, 0.85, 1.15, 9, 17, team);
+  },
+
+  // Low stone-and-timber hut with heaps of ore and a cart.
+  miningcamp(pen, team) {
+    pen.ground(0.1, 0.1, 1.9, 1.9, '#9a8f7c');
+    pen.box(0.25, 0.25, 1.4, 1.05, 0, 13, '#857a6a');
+    pen.onV(1.05, 0.6, 1.0, 0, 10, '#22160c');
+    pen.onU(1.4, 0.25, 1.05, 9, 13, team);
+    pen.gable(0.15, 0.15, 1.5, 1.15, 13, 8, '#5f4326', '#857a6a', true);
+    pen.box(1.5, 0.45, 1.85, 0.8, 0, 6, '#85898f');
+    pen.box(1.56, 0.5, 1.8, 0.74, 6, 9, '#a6aab0');
+    pen.box(0.3, 1.3, 0.7, 1.7, 0, 6, '#7a6f5a');
+    pen.box(0.36, 1.36, 0.64, 1.64, 6, 9, '#f2cf3a');
+    pen.box(1.0, 1.35, 1.6, 1.7, 3, 9, WOOD);
+    pen.box(1.06, 1.4, 1.54, 1.65, 9, 11, '#85898f');
+    pen.disc(pen.p(1.1, 1.72, 3), 4, '#3a2a1a');
+    pen.disc(pen.p(1.5, 1.72, 3), 4, '#3a2a1a');
+  },
+
+  // Round stone windmill with turning sails.
+  mill(pen, team, state) {
+    pen.box(0.3, 1.2, 0.75, 1.65, 0, 6, '#d8cfae');
+    pen.box(1.3, 1.35, 1.7, 1.7, 0, 5, HAY);
+    pen.box(0.5, 0.4, 1.5, 1.4, 0, 30, '#d9c8a0');
+    pen.onU(1.5, 0.78, 1.02, 0, 12, '#3a2a1a');
+    pen.onV(1.4, 0.85, 1.05, 14, 21, '#39404c');
+    pen.onU(1.5, 0.4, 1.4, 26, 30, team);
+    pen.pyramid(0.4, 0.3, 1.6, 1.5, 30, 16, '#7a3b2a');
+    // Four sails on a hub in front of the tower.
+    const hub = pen.p(1.55, 0.9, 30);
+    const turn = state.now / 1400;
+    for (let i = 0; i < 4; i++) {
+      const a = turn + (i * Math.PI) / 2;
+      const tip: Pt = [hub[0] + Math.cos(a) * 26, hub[1] + Math.sin(a) * 26];
+      const side: Pt = [Math.cos(a + Math.PI / 2) * 5, Math.sin(a + Math.PI / 2) * 5];
+      const from: Pt = [hub[0] + Math.cos(a) * 6, hub[1] + Math.sin(a) * 6];
+      pen.poly('#efe6cf', [from, tip, [tip[0] + side[0], tip[1] + side[1]], [from[0] + side[0], from[1] + side[1]]]);
+      pen.line(hub, tip, TIMBER, 2);
+    }
+    pen.disc(hub, 3, '#3a2a1a');
   },
 
   // Stone drill hall with battlements, a corner turret and banners by the gate.
