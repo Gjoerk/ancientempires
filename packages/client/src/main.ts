@@ -558,7 +558,7 @@ function underAttack(v: View, now: number): void {
   if (alert && now - alert.t < 7000) return;
   const [cx, cy] = centreOf(v);
   const [sx, sy] = tileToScreen(cx, cy);
-  if (sx > 0 && sy > 40 && sx < canvas.width && sy < canvas.height - 170) return;
+  if (sx > 0 && sy > 40 && sx < canvas.width && sy < canvas.height - 230 / zoom) return;
   alert = { x: cx, y: cy, t: now };
   play('alarm');
   const toast = $('toast');
@@ -1352,7 +1352,8 @@ function renderPanel(): void {
     if (b.locked) el.className = 'locked';
     else if (b.cost && !canAfford(b.cost)) el.className = 'poor';
     actions.append(el);
-  }
+  }  // The panel may have grown to fit another row; things floating above it follow.
+  document.documentElement.style.setProperty('--bottom-h', `${$('bottom').offsetHeight}px`);
 }
 
 let hudSignature = '';

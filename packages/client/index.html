@@ -68,7 +68,8 @@
 
     /* Bottom bar: what is selected, what it can do, and the map. */
     /* The wood shows only as a frame; the middle is plain and dark so that buttons and text stand out. */
-    #bottom { bottom: 0; height: 214px; display: flex; gap: 10px; padding: 8px 10px; box-sizing: border-box;
+    /* At least two rows of buttons; on narrower windows it grows to show up to three. */
+    #bottom { bottom: 0; min-height: 226px; max-height: 300px; display: flex; gap: 10px; padding: 8px 10px; box-sizing: border-box;
       border: 9px solid transparent; border-bottom-width: 7px;
       background: linear-gradient(var(--plain), var(--plain)) padding-box, var(--bar) border-box;
       box-shadow: inset 0 0 0 1px var(--trim), 0 -3px 10px rgba(0, 0, 0, .45); }
@@ -76,20 +77,26 @@
       box-shadow: inset 0 0 0 1px var(--trim); border-radius: 4px; }
     #panel { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
     #info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; min-height: 1.35em; }
-    #actions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow-y: auto; flex: 1; scrollbar-width: thin; }
-    #actions button { width: 88px; height: 72px; padding: 3px 2px 2px; display: grid; grid-template-rows: 36px 15px 14px; justify-items: center;
-      font-size: 11.5px; line-height: 14px; overflow: hidden; }
-    #actions button img.pic { width: 36px; height: 36px; }
-    #actions button .lbl { width: 80px; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    #actions button .cost { display: flex; gap: 4px; align-items: center; opacity: .95; white-space: nowrap; max-width: 80px; overflow: hidden; font-size: 11px; }
-    #actions button .cost img { width: 12px; height: 12px; margin-right: 2px; vertical-align: -3px; background: #eadfbd; border-radius: 3px; padding: 1px; }
+    #actions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow-y: auto; flex: 1; scrollbar-width: thin;
+      max-height: 238px; }
+    /* Button: 76px tall = 2 border + 2 top padding + icon 30 + gap 2 + name 14 + gap 1 + cost 16 + 3 bottom padding + 2 border
+       leaves 4px to spare, so nothing is ever pushed past the bottom edge. */
+    #actions button { box-sizing: border-box; width: 88px; height: 76px; padding: 2px 3px 3px; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-start; gap: 0; overflow: hidden; font-size: 11.5px; line-height: 14px; }
+    #actions button img.pic { flex: none; width: 30px; height: 30px; margin-bottom: 2px; }
+    #actions button .lbl { flex: none; display: block; width: 100%; height: 14px; line-height: 14px; text-align: center;
+      overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-bottom: 1px; }
+    #actions button .cost { flex: none; display: flex; justify-content: center; gap: 4px; align-items: center; height: 16px; line-height: 16px;
+      width: 100%; white-space: nowrap; overflow: hidden; font-size: 11px; opacity: .95; }
+    #actions button .cost > span { display: inline-flex; align-items: center; }
+    #actions button .cost img { box-sizing: border-box; width: 13px; height: 13px; margin-right: 2px; background: #eadfbd; border-radius: 3px; padding: 1px; }
     #actions button.poor .cost { color: #ff7b6b; }
     #actions button.poor img.pic { filter: saturate(.4) brightness(.8); }
     #actions button.locked { opacity: .38; cursor: default; }
     #map-frame { flex: none; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
     #minimap { width: 360px; height: 180px; cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
 
-    #touch-tools { position: fixed; right: 8px; bottom: 222px; display: flex; gap: 6px; }
+    #touch-tools { position: fixed; right: 8px; bottom: calc(var(--bottom-h, 226px) + 8px); display: flex; gap: 6px; }
     #touch-tools[hidden] { display: none; }
     #touch-tools button.on { outline: 3px solid var(--accent); }
 
@@ -99,7 +106,7 @@
     #chat-log { position: fixed; top: 52px; left: 10px; display: grid; gap: 2px; pointer-events: none; max-width: 60vw; color: #fff;
       text-shadow: 0 1px 2px #000; font-variant: normal; }
     #chat-log div { background: rgba(0, 0, 0, .5); padding: 1px 8px; border-radius: 3px; }
-    #chat-input { position: fixed; bottom: 224px; left: 10px; width: min(460px, calc(100vw - 20px)); box-sizing: border-box;
+    #chat-input { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; width: min(460px, calc(100vw - 20px)); box-sizing: border-box;
       background: var(--page); color: #fff; font-variant: normal; }
     #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; line-height: 1.6;
       width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; box-sizing: border-box; z-index: 6; }
@@ -123,6 +130,11 @@
     #room-players .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #lobby-msg { min-height: 1.4em; color: var(--accent); margin: 0; }
 
+    /* Narrower PC windows: a smaller minimap leaves room for six buttons per row. */
+    @media (max-width: 1200px) {
+      #minimap { width: 260px; height: 130px; }
+    }
+
     /* Phones and small windows: tighter bars, buttons in one scrolling row. */
     @media (max-width: 820px), (max-height: 520px) {
       html, body { font-size: 13px; }
@@ -133,15 +145,14 @@
       .stat small { display: none; }
       #players { display: none; }
       #menu-btn { margin-left: auto; padding: 3px 9px; }
-      #bottom { height: 118px; padding: 4px 6px; gap: 6px; border-width: 5px 5px 4px; }
+      #bottom { height: 122px; min-height: 0; padding: 4px 6px; gap: 6px; border-width: 5px 5px 4px; }
       #portrait { width: 56px; height: 56px; }
       #info { font-size: 12px; }
-      #actions { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
-      #actions button { flex: none; width: 78px; height: 68px; font-size: 11px; }
-      #actions button .lbl { width: 72px; }
+      #actions { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; max-height: none; }
+      /* 70px tall = 2 + 2 + icon 26 + 2 + name 14 + 1 + cost 16 + 3 + 2, with 2px to spare. */
+      #actions button { flex: none; width: 80px; height: 70px; font-size: 11px; }
+      #actions button img.pic { width: 26px; height: 26px; }
       #minimap { width: 150px; height: 75px; }
-      #touch-tools { bottom: 124px; }
-      #chat-input { bottom: 126px; }
       #banner { font-size: 15px; top: 48px; }
     }
     @media (max-width: 480px) {
