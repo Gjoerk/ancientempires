@@ -8,26 +8,27 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap">
   <style>
-    /* Carved oak: dark wood, gold trim. Everything below is styled through these variables. */
+    /* Dark green and gold. Everything below is styled through these variables. */
     body {
       --font: Georgia, "Times New Roman", serif;
-      --page: #150e08;
-      --bar: repeating-linear-gradient(91deg, #4d351f 0 7px, #43301c 7px 15px, #573c23 15px 22px, #3d2916 22px 26px);
-      --grain: radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, .22) 0 3px, transparent 7px);
-      --grain-size: 97px 53px;
-      --plain: #24170d;
-      --edge: #1c120a;
-      --trim: #c79a3a;
-      --ink: #f6e6c0;
-      --dim: #c2a77a;
-      --accent: #f0c046;
-      --btn: linear-gradient(180deg, #86603a, #543a21);
-      --btn-edge: #1c120a;
-      --btn-ink: #fbeecb;
-      --btn-hi: rgba(255, 220, 150, .4);
+      --page: #0a1510;
+      --bar: linear-gradient(180deg, #1b3a2a, #122b1f);
+      --grain: linear-gradient(transparent, transparent);
+      --grain-size: auto;
+      --plain: #0f241a;
+      --edge: #06100b;
+      --trim: #c9a54a;
+      --ink: #efe8d0;
+      --dim: #a6b89f;
+      --accent: #e8c25a;
+      --btn: linear-gradient(180deg, #24513b, #173828);
+      --btn-edge: #08160f;
+      --btn-ink: #f3ecd4;
+      --btn-hi: rgba(232, 194, 90, .25);
       --btn-lo: rgba(0, 0, 0, .5);
-      --slot: rgba(0, 0, 0, .28);
+      --slot: rgba(0, 0, 0, .3);
       --caps: normal;
+      --gold-grad: linear-gradient(180deg, #f3d77e, #c99a2e);
     }
 
     html, body { margin: 0; height: 100%; overflow: hidden; background: var(--page); color: var(--ink);
@@ -51,7 +52,7 @@
     select option { color: #222; background: #fff; }
 
     /* Top bar: what you have. */
-    #top { top: 0; border-width: 0 0 3px; padding: 4px 8px; display: flex; gap: 10px; align-items: center; white-space: nowrap;
+    #top { top: 0; border-width: 0 0 2px; border-color: var(--trim); box-shadow: 0 3px 12px rgba(0, 0, 0, .5); padding: 4px 8px; display: flex; gap: 10px; align-items: center; white-space: nowrap;
       overflow-x: auto; scrollbar-width: none; }
     #top::-webkit-scrollbar { display: none; }
     #resources { display: flex; gap: 6px; align-items: center; }
@@ -85,23 +86,23 @@
 
     /* Buttons are slots pressed into the panel that lift a little when pointed at. */
     body[data-skin="3"] { --font: "PT Sans", "Segoe UI", system-ui, sans-serif; font-size: 15px; }
-    body[data-skin="3"] #actions button { background: #1d130b; border: 0;
+    body[data-skin="3"] #actions button { background: #0b1d15; border: 0;
       box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 rgba(255, 220, 160, .08); }
-    body[data-skin="3"] #actions button:hover { filter: none; background: #2c1e12; box-shadow: 0 1px 0 rgba(255, 220, 160, .12), 0 2px 5px rgba(0, 0, 0, .5); }
-    body[data-skin="3"] #actions button.focus { outline: 0; background: #33230f; box-shadow: inset 0 0 0 1px var(--accent), 0 2px 5px rgba(0, 0, 0, .5); }
+    body[data-skin="3"] #actions button:hover { filter: none; background: #173527; box-shadow: 0 1px 0 rgba(232, 194, 90, .14), 0 2px 5px rgba(0, 0, 0, .5); }
+    body[data-skin="3"] #actions button.focus { outline: 0; background: #1d3e2e; box-shadow: inset 0 0 0 1px var(--accent), 0 2px 5px rgba(0, 0, 0, .5); }
 
     /* Menu and lobby buttons follow quietly too. */
-    body[data-skin] button:not(#actions button):not(#group button) { box-shadow: inset 0 1px 0 rgba(255, 220, 150, .15); }
+    body[data-skin] button:not(#actions button):not(#group button) { box-shadow: inset 0 1px 0 rgba(232, 194, 90, .2); }
 
     /* ---------- Bottom bar ----------------------------------------------------------------------
        Command tiles (#actions), the selection card (#sel), a details box (#details) and the minimap. */
     #bottom { bottom: 0; height: var(--bar-h, 236px); display: grid; gap: 10px; padding: 8px 10px; box-sizing: border-box;
-      border: 9px solid transparent; border-bottom-width: 7px;
-      background: linear-gradient(var(--plain), var(--plain)) padding-box, var(--bar) border-box;
-      box-shadow: inset 0 0 0 1px var(--trim), 0 -3px 10px rgba(0, 0, 0, .45); }
+      border: 0; border-top: 2px solid var(--trim);
+      background: linear-gradient(180deg, #153225, var(--plain) 40%);
+      box-shadow: inset 0 1px 0 rgba(0, 0, 0, .6), 0 -4px 14px rgba(0, 0, 0, .5); }
     /* A recessed area inside the bar. */
-    .well { background: rgba(0, 0, 0, .28); border: 1px solid #0c0804; border-radius: 4px;
-      box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55), 0 0 0 1px rgba(199, 154, 58, .22); box-sizing: border-box; min-width: 0; min-height: 0; }
+    .well { background: rgba(0, 0, 0, .26); border: 1px solid #050d09; border-radius: 4px;
+      box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55), 0 0 0 1px rgba(201, 165, 74, .2); box-sizing: border-box; min-width: 0; min-height: 0; }
     #sel { grid-area: sel; display: flex; gap: 10px; padding: 8px; overflow: hidden; }
     #portrait { flex: none; width: 84px; height: 84px; background: rgba(0, 0, 0, .3); border: 2px solid var(--edge);
       box-shadow: inset 0 0 0 1px var(--trim); border-radius: 4px; }
@@ -152,8 +153,8 @@
     /* Buttons beside the minimap that find units with nothing to do. */
     #idle { grid-area: idle; align-self: center; display: flex; flex-direction: column; gap: 6px; }
     #idle button { position: relative; width: 56px; height: 56px; padding: 0; display: grid; place-items: center; border-radius: 4px;
-      background: #1d130b; border: 0; box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 rgba(255, 220, 160, .08); }
-    #idle button:hover { filter: none; background: #2c1e12; box-shadow: 0 1px 0 rgba(255, 220, 160, .12), 0 2px 5px rgba(0, 0, 0, .5); }
+      background: #0b1d15; border: 0; box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 rgba(232, 194, 90, .1); }
+    #idle button:hover { filter: none; background: #173527; box-shadow: 0 1px 0 rgba(232, 194, 90, .14), 0 2px 5px rgba(0, 0, 0, .5); }
     #idle img { width: 40px; height: 40px; }
     #idle b { position: absolute; right: 2px; bottom: 1px; min-width: 16px; padding: 0 3px; border-radius: 8px; font-size: 12px; line-height: 16px;
       text-align: center; color: #1b120a; background: var(--accent); font-variant-numeric: lining-nums tabular-nums; }
@@ -199,18 +200,36 @@
     [hidden] { display: none !important; }
 
     /* Start screen and waiting room. */
-    #lobby, .screen { position: fixed; inset: 0; display: grid; place-items: center; background: var(--page); overflow-y: auto; z-index: 4; }
-    .card { display: grid; gap: 10px; width: min(440px, calc(100vw - 24px)); padding: 22px; box-sizing: border-box; margin: 12px 0; }
-    .card h1 { margin: 0 0 2px; font-size: 28px; letter-spacing: .14em; color: var(--accent); text-align: center;
-      text-shadow: 0 1px 0 rgba(0, 0, 0, .25); }
+    /* Start menu and waiting room: a framed card over a darkened, blurred view of a map. */
+    #lobby, .screen { position: fixed; inset: 0; display: grid; place-items: center; overflow-y: auto; z-index: 4;
+      background: radial-gradient(ellipse at 50% 45%, rgba(6, 16, 11, .35), rgba(4, 10, 7, .82));
+      -webkit-backdrop-filter: blur(3px) saturate(.85); backdrop-filter: blur(3px) saturate(.85); }
+    .card { display: grid; gap: 12px; width: min(430px, calc(100vw - 24px)); padding: 26px 28px 22px; box-sizing: border-box; margin: 16px 0;
+      background: linear-gradient(180deg, rgba(22, 48, 35, .95), rgba(11, 27, 19, .96)); border: 1px solid var(--trim); border-radius: 10px;
+      box-shadow: 0 0 0 4px rgba(6, 16, 11, .7), 0 0 0 5px rgba(201, 165, 74, .35), 0 24px 70px rgba(0, 0, 0, .65); }
+    .card .emblem { width: 56px; height: 56px; justify-self: center; margin-bottom: -6px; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .6)); }
+    .card h1 { margin: 0; font-size: 34px; letter-spacing: .2em; text-align: center; color: transparent; background: var(--gold-grad);
+      -webkit-background-clip: text; background-clip: text; text-shadow: none; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .6)); }
+    .card .tagline { text-align: center; color: var(--dim); font-size: 14px; margin-top: -6px; }
+    .card .rule { height: 1px; background: linear-gradient(90deg, transparent, var(--trim), transparent); margin: 2px 0; }
+    .card label.field { display: grid; gap: 4px; font-size: 13px; color: var(--dim); }
+    .card input, .card select { background: rgba(0, 0, 0, .35); border: 1px solid rgba(201, 165, 74, .45); border-radius: 6px; padding: 9px 11px; }
+    .card input:focus, .card select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(232, 194, 90, .25); }
     .card p { margin: 0; }
-    .card button { padding: 9px 12px; font-size: 16px; }
-    .card button.plain { opacity: .85; font-size: 14px; }
+    .card button { padding: 10px 14px; font-size: 16px; border-radius: 6px; }
+    .card button.primary { background: var(--gold-grad); color: #1d1606; border-color: #7a5a14; font-weight: 700;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 2px 6px rgba(0, 0, 0, .5); }
+    .card button.plain { background: rgba(0, 0, 0, .25); border: 1px solid rgba(201, 165, 74, .45); color: var(--ink); font-size: 14px; box-shadow: none; }
+    .card .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+    .card .or { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; color: var(--dim); font-size: 13px; }
+    .card .or::before, .card .or::after { content: ""; height: 1px; background: rgba(201, 165, 74, .35); }
+    .card .fine { font-size: 12.5px; color: var(--dim); text-align: center; }
     .card li button { padding: 2px 8px; font-size: 12px; }
-    .card select { padding: 3px 6px; font-size: 13px; }
+    .card select { padding: 4px 8px; font-size: 13px; }
     .card .check { display: flex; align-items: center; gap: 8px; }
     #room-host { display: grid; gap: 10px; }
-    #room-players { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 6px; }
+    #room-players { list-style: none; margin: 4px 0; padding: 8px; display: grid; gap: 6px; background: rgba(0, 0, 0, .22); border-radius: 6px;
+      border: 1px solid rgba(201, 165, 74, .2); }
     #room-players li { display: flex; align-items: center; gap: 6px; }
     #room-players .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #lobby-msg { min-height: 1.4em; color: var(--accent); margin: 0; }
@@ -343,7 +362,9 @@
   </div>
   <div id="waiting" class="screen" style="display:none">
     <div class="card">
+      <img class="emblem" alt="">
       <h1 id="room-title"></h1>
+      <div class="rule"></div>
       <label class="dim" for="room-link">Invite link</label>
       <input id="room-link" readonly>
       <ul id="room-players"></ul>
@@ -357,7 +378,7 @@
       <label class="check"><input id="quick-box" type="checkbox"> Quick start (more resources and villagers)</label>
       <p id="room-hint" class="dim"></p>
       <div id="room-host" hidden>
-        <button id="start-btn" type="button">Start game</button>
+        <button id="start-btn" type="button" class="primary">Start game</button>
         <button id="add-ai-btn" type="button" class="plain">Add computer opponent</button>
         <button id="add-test-btn" type="button" class="plain">Add test opponent (you play both sides)</button>
       </div>
@@ -367,13 +388,23 @@
   </div>
   <div id="lobby">
     <form id="lobby-form" class="card" autocomplete="off">
+      <img class="emblem" alt="">
       <h1>KINGSFALL</h1>
-      <input id="name" placeholder="Your name" maxlength="16" required>
-      <input id="room" placeholder="Room code" maxlength="8">
-      <button id="join-btn">Join game</button>
-      <button id="host-btn">Host new game</button>
-      <p class="dim">Protect your king. The host's browser runs the game; it ends if the host closes the tab.</p>
+      <p class="tagline">Build a realm. Protect your king.</p>
+      <div class="rule"></div>
+      <label class="field">Your name
+        <input id="name" placeholder="e.g. Gabriel" maxlength="16" required>
+      </label>
+      <button id="host-btn" class="primary">Host a new game</button>
+      <div class="or">or join a friend</div>
+      <div class="row">
+        <label class="field">Room code
+          <input id="room" placeholder="ABCD" maxlength="8">
+        </label>
+        <button id="join-btn" class="plain">Join</button>
+      </div>
       <p id="lobby-msg" role="status"></p>
+      <p class="fine">The host's browser runs the game; it ends if the host closes the tab.</p>
     </form>
   </div>
   <script type="module" src="/src/main.ts"></script>

@@ -619,6 +619,7 @@ function underAttack(v: View, now: number): void {
 /** Clears everything that belongs to a running game. */
 function resetGame(): void {
   me = -1;
+  revealAll = false;
   centred = false;
   placing = undefined;
   winner = -1;
@@ -762,6 +763,12 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
   session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers);
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
+// Enter in the room-code field joins; anywhere else in the form it hosts.
+$('room').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  $<HTMLButtonElement>('join-btn').click();
+});
 
 // --- picking and commands --------------------------------------------------
 
@@ -1203,6 +1210,8 @@ function toggleFullscreen(): void {
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
+for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
+
 // Browsers only allow sound after the player has clicked or pressed a key.
 window.addEventListener('pointerdown', unlockSound);
 window.addEventListener('keydown', unlockSound);
@@ -1948,6 +1957,48 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   if (v.hp < full || selected.has(v.id)) bar(sx, sy - (v.kind === 'king' ? 34 : 30), 22, v.hp / full, '#4ad04a');
 }
 
+/** A map generated for the background of the start menu and waiting room, with a small town on it. */
+let lobbyMap: GameMap | undefined;
+let lobbyTown: { kind: Kind; x: number; y: number }[] = [];
+const lobbyStart = performance.now();
+
+function drawLobbyScene(now: number): void {
+  if (!lobbyMap) {
+    lobbyMap = generateMap((Math.random() * 0xffffffff) >>> 0, 80);
+    const [sx, sy] = lobbyMap.starts[0];
+    lobbyTown = [
+      { kind: 'towncenter', x: sx - 4, y: sy - 2 }, { kind: 'castle', x: sx + 1, y: sy - 2 }, { kind: 'house', x: sx - 4, y: sy + 2 },
+      { kind: 'house', x: sx - 7, y: sy - 1 }, { kind: 'mill', x: sx - 1, y: sy + 3 }, { kind: 'farm', x: sx + 2, y: sy + 3 },
+      { kind: 'farm', x: sx + 4, y: sy + 3 }, { kind: 'barracks', x: sx - 8, y: sy + 2 }, { kind: 'tower', x: sx + 6, y: sy - 4 },
+    ];
+  }
+  if (map !== lobbyMap) {
+    map = lobbyMap;
+    buildTerrain(map);
+  }
+  revealAll = true;
+  // The view drifts slowly around the town.
+  const t = (now - lobbyStart) / 1000;
+  const [sx, sy] = map.starts[0];
+  [cam.x, cam.y] = tileToWorld(sx + Math.sin(t / 23) * 7, sy + 2 + Math.cos(t / 31) * 5);
+  drawGround();
+  const items: { depth: number; draw: () => void }[] = [];
+  for (const [index, tile] of props) {
+    const tx = index % map.size;
+    const ty = Math.floor(index / map.size);
+    const [x, y] = tileToScreen(tx + 0.5, ty + 0.5);
+    if (x < -40 || y < -10 || x > canvas.width + 40 || y > canvas.height + 60) continue;
+    items.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, x, y, Math.floor(hash(tx, ty) * 3), now) });
+  }
+  for (const b of lobbyTown) {
+    const s = sizeOf(b.kind);
+    const [x, y] = tileToScreen(b.x, b.y);
+    items.push({ depth: b.kind === 'farm' ? -1e9 : b.x + b.y + s, draw: () => drawBuilding(ctx, b.kind, 0, b.x * 31 + b.y, x, y, { built: 1, kingInside: true, now }) });
+  }
+  items.sort((a, b) => a.depth - b.depth);
+  for (const item of items) item.draw();
+}
+
 let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -1955,7 +2006,8 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
   ctx.fillStyle = '#0b0e0a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!map || me < 0) return;
+  if (me < 0) return drawLobbyScene(now);
+  if (!map) return;
   updateCamera(dt);
   if (explored.length !== map.size * map.size) explored = new Uint8Array(map.size * map.size);
   updateWorkOffsets(now, dt);
@@ -1971,19 +2023,6 @@ function frame(now: number): void {
       diamond(px, py, sizeOf(placing));
       ctx.fillStyle = ok ? 'rgba(120,255,120,.35)' : 'rgba(255,90,90,.4)';
       ctx.fill();
-    }
-  }
-
-  if (marker) {
-    const age = (now - marker.t) / 500;
-    if (age > 1) marker = undefined;
-    else {
-      const [mx, my] = tileToScreen(marker.x, marker.y);
-      ctx.strokeStyle = `rgba(255,255,255,${1 - age})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(mx, my, 6 + age * 14, 3 + age * 7, 0, 0, Math.PI * 2);
-      ctx.stroke();
     }
   }
 
@@ -2091,6 +2130,21 @@ function frame(now: number): void {
   }
 
   drawFog();
+
+  // The marker where units were sent is drawn over the fog, so it shows on unexplored ground too.
+  if (marker) {
+    const age = (now - marker.t) / 500;
+    if (age > 1) marker = undefined;
+    else {
+      const [mx, my] = tileToScreen(marker.x, marker.y);
+      ctx.strokeStyle = `rgba(255,255,255,${1 - age})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(mx, my, 6 + age * 14, 3 + age * 7, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
 
   if (drag && (Math.abs(mouse.x - drag.x) > 4 || Math.abs(mouse.y - drag.y) > 4)) {
     ctx.strokeStyle = '#fff';
