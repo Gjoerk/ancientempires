@@ -694,7 +694,8 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
       team.style.setProperty('--gem', `var(--gem-${team.value})`);
       session?.host?.setTeam(p.slot, Number(team.value));
     });
-    li.append(chip, name, team);
+    li.append(chip, name);
+    // Remove sits before the team dropdown, so that every row's dropdown lines up on the right.
     if ((p.test || p.ai) && hosting) {
       const remove = document.createElement('button');
       remove.type = 'button';
@@ -702,11 +703,12 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
       remove.addEventListener('click', () => session?.host?.removeExtra(p.slot));
       li.append(remove);
     }
+    li.append(team);
     list.append(li);
   }
   $('room-host').hidden = !hosting;
   $('room-wait').hidden = hosting;
-  $<HTMLButtonElement>('add-test-btn').disabled = $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= 4;
+  $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= 4;
   const quickBox = $<HTMLInputElement>('quick-box');
   quickBox.checked = settings.quick;
   quickBox.disabled = !hosting;
@@ -748,7 +750,6 @@ function switchTeam(to?: number, keepSelection = false): void {
 }
 
 $('start-btn').addEventListener('click', () => session?.host?.start());
-$('add-test-btn').addEventListener('click', () => session?.host?.addTestPlayer());
 $('add-ai-btn').addEventListener('click', () => session?.host?.addComputer());
 $('size-select').addEventListener('change', (ev) => session?.host?.setMapSize((ev.target as HTMLSelectElement).value));
 $('quick-box').addEventListener('change', (ev) => session?.host?.setQuickStart((ev.target as HTMLInputElement).checked));
@@ -758,6 +759,19 @@ $('end-btn').addEventListener('click', () => {
   if (confirm('End this game for everyone and go back to the lobby?')) session?.host?.backToLobby();
 });
 $('room-link').addEventListener('click', (ev) => (ev.target as HTMLInputElement).select());
+$('copy-link-btn').addEventListener('click', async () => {
+  const box = $<HTMLInputElement>('room-link');
+  const button = $('copy-link-btn');
+  try {
+    await navigator.clipboard.writeText(box.value);
+  } catch {
+    // Older browsers, or a page without clipboard permission: copy the selected text instead.
+    box.select();
+    document.execCommand('copy');
+  }
+  button.textContent = 'Copied!';
+  setTimeout(() => (button.textContent = 'Copy'), 1500);
+});
 
 $<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
   ev.preventDefault();

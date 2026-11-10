@@ -412,8 +412,12 @@
       <img class="emblem" alt="">
       <h1 id="room-title"></h1>
       <div class="rule"></div>
-      <label class="dim" for="room-link">Invite link</label>
-      <input id="room-link" readonly>
+      <div class="row">
+        <label class="field">Invite link
+          <input id="room-link" readonly>
+        </label>
+        <button id="copy-link-btn" type="button" class="plain">Copy</button>
+      </div>
       <ul id="room-players"></ul>
       <label class="check">Map size
         <select id="size-select">
@@ -427,7 +431,6 @@
       <div id="room-host" hidden>
         <button id="start-btn" type="button" class="primary">Start game</button>
         <button id="add-ai-btn" type="button" class="plain">Add computer opponent</button>
-        <button id="add-test-btn" type="button" class="plain">Add test opponent (you play both sides)</button>
       </div>
       <p id="room-wait" class="dim" hidden>Waiting for the host to start the game…</p>
       <button id="leave-btn" type="button" class="plain">Leave</button>
