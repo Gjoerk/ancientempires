@@ -66,37 +66,130 @@
     #menu[hidden], #host-tools[hidden] { display: none; }
     #host-tools { display: grid; gap: 6px; }
 
-    /* Bottom bar: what is selected, what it can do, and the map. */
-    /* The wood shows only as a frame; the middle is plain and dark so that buttons and text stand out. */
-    /* At least two rows of buttons; on narrower windows it grows to show up to three. */
-    #bottom { bottom: 0; min-height: 226px; max-height: 300px; display: flex; gap: 10px; padding: 8px 10px; box-sizing: border-box;
+    /* ---------- Bottom bar ----------------------------------------------------------------------
+       The same pieces in every layout: a selection card (#sel), the command buttons (#actions),
+       a details box (#details) and the minimap. body[data-bar] arranges them. */
+    #bottom { bottom: 0; height: var(--bar-h, 236px); display: grid; gap: 10px; padding: 8px 10px; box-sizing: border-box;
       border: 9px solid transparent; border-bottom-width: 7px;
       background: linear-gradient(var(--plain), var(--plain)) padding-box, var(--bar) border-box;
       box-shadow: inset 0 0 0 1px var(--trim), 0 -3px 10px rgba(0, 0, 0, .45); }
-    #portrait { flex: none; width: 96px; height: 96px; align-self: center; background: var(--slot); border: 2px solid var(--edge);
+    /* A recessed area inside the bar. */
+    .well { background: rgba(0, 0, 0, .28); border: 1px solid #0c0804; border-radius: 4px;
+      box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55), 0 0 0 1px rgba(199, 154, 58, .22); box-sizing: border-box; min-width: 0; min-height: 0; }
+    #sel { grid-area: sel; display: flex; gap: 10px; padding: 8px; overflow: hidden; }
+    #portrait { flex: none; width: 84px; height: 84px; background: rgba(0, 0, 0, .3); border: 2px solid var(--edge);
       box-shadow: inset 0 0 0 1px var(--trim); border-radius: 4px; }
-    #panel { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-    #info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; min-height: 1.35em; }
-    #actions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow-y: auto; flex: 1; scrollbar-width: thin;
-      max-height: 238px; }
-    /* Button: 76px tall = 2 border + 2 top padding + icon 30 + gap 2 + name 14 + gap 1 + cost 16 + 3 bottom padding + 2 border
-       leaves 4px to spare, so nothing is ever pushed past the bottom edge. */
-    #actions button { box-sizing: border-box; width: 88px; height: 76px; padding: 2px 3px 3px; display: flex; flex-direction: column;
-      align-items: center; justify-content: flex-start; gap: 0; overflow: hidden; font-size: 11.5px; line-height: 14px; }
-    #actions button img.pic { flex: none; width: 30px; height: 30px; margin-bottom: 2px; }
-    #actions button .lbl { flex: none; display: block; width: 100%; height: 14px; line-height: 14px; text-align: center;
-      overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-bottom: 1px; }
-    #actions button .cost { flex: none; display: flex; justify-content: center; gap: 4px; align-items: center; height: 16px; line-height: 16px;
-      width: 100%; white-space: nowrap; overflow: hidden; font-size: 11px; opacity: .95; }
-    #actions button .cost > span { display: inline-flex; align-items: center; }
-    #actions button .cost img { box-sizing: border-box; width: 13px; height: 13px; margin-right: 2px; background: #eadfbd; border-radius: 3px; padding: 1px; }
-    #actions button.poor .cost { color: #ff7b6b; }
-    #actions button.poor img.pic { filter: saturate(.4) brightness(.8); }
-    #actions button.locked { opacity: .38; cursor: default; }
-    #map-frame { flex: none; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
-    #minimap { width: 360px; height: 180px; cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
+    #sel-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    #sel-name { font-size: 18px; line-height: 21px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #sel-sub { font-size: 12.5px; line-height: 15px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 15px; }
+    #hpbar { position: relative; height: 15px; background: #2a0c0c; border: 1px solid #000; border-radius: 3px; overflow: hidden; flex: none; }
+    #hpbar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(#7fe07a, #2f9a3a); }
+    #hpbar.build i { background: linear-gradient(#f5d56a, #c99a2a); }
+    #hpbar span { position: relative; display: block; font-size: 11px; line-height: 15px; text-align: center; color: #fff; text-shadow: 0 1px 1px #000; }
+    #sel-stats { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 13.5px; }
+    .st { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+    .st img { width: 16px; height: 16px; }
+    #queue { display: flex; gap: 4px; flex-wrap: wrap; }
+    #queue .slot { position: relative; width: 32px; height: 32px; background: rgba(0, 0, 0, .35); border: 1px solid var(--trim); border-radius: 3px; }
+    #queue .slot img { width: 30px; height: 30px; }
+    #queue .slot i { position: absolute; left: 0; bottom: 0; height: 4px; background: #6ab0ff; }
+    #group { display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; overflow: hidden; }
+    #group button { position: relative; width: 34px; height: 36px; padding: 0; border-radius: 3px; }
+    #group button img { width: 30px; height: 30px; }
+    #group button i { position: absolute; left: 2px; bottom: 2px; height: 3px; max-width: calc(100% - 4px); }
 
-    #touch-tools { position: fixed; right: 8px; bottom: calc(var(--bottom-h, 226px) + 8px); display: flex; gap: 6px; }
+    #actions { grid-area: actions; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow-y: auto; scrollbar-width: thin; padding: 6px; }
+    #actions button { box-sizing: border-box; position: relative; overflow: hidden; padding: 2px 3px 3px; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-start; font-size: 11.5px; line-height: 14px; }
+    #actions button img.pic { flex: none; }
+    #actions button .lbl { flex: none; display: block; width: 100%; height: 14px; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    #actions button .cost { flex: none; display: flex; justify-content: center; gap: 4px; align-items: center; height: 16px; line-height: 16px;
+      width: 100%; white-space: nowrap; overflow: hidden; font-size: 11px; }
+    .res { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+    .res img { box-sizing: border-box; width: 14px; height: 14px; background: #eadfbd; border-radius: 3px; padding: 1px; }
+    .res.short { color: #ff8a70; }
+    #actions button.poor img.pic { filter: saturate(.4) brightness(.8); }
+    #actions button.locked { opacity: .4; }
+    #actions button.focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+    #details { grid-area: details; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+    #d-title { display: flex; align-items: center; gap: 8px; font-size: 17px; line-height: 21px; color: var(--accent); }
+    #d-title img { width: 28px; height: 28px; flex: none; }
+    #d-title span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #d-cost { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 14px; }
+    #d-cost .res img { width: 17px; height: 17px; }
+    #d-stats { display: flex; flex-wrap: wrap; gap: 3px 14px; font-size: 13px; color: var(--dim); }
+    #d-body { font-size: 13px; line-height: 1.35; overflow-y: auto; scrollbar-width: thin; }
+    #d-body p { margin: 0 0 3px; }
+    #d-body p.warn { color: #ff8a70; }
+    #map-frame { grid-area: map; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
+    #minimap { width: var(--map-w, 300px); height: calc(var(--map-w, 300px) / 2); cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
+
+    /* A — Command board: square command tiles on the left, the selection in the middle, details, then the map. */
+    body[data-bar="a"] #bottom { --bar-h: 236px; --map-w: 300px;
+      grid-template-columns: auto minmax(230px, 290px) minmax(220px, 1fr) auto; grid-template-areas: "actions sel details map"; }
+    body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(6, 58px); grid-auto-rows: 58px; gap: 4px; }
+    /* Icon-only tiles as in classic strategy games; name, cost and effect are in the details box. */
+    body[data-bar="a"] #actions button { width: 58px; height: 58px; padding: 0; justify-content: center; }
+    body[data-bar="a"] #actions button img.pic { width: 46px; height: 46px; }
+    body[data-bar="a"] #actions button .lbl, body[data-bar="a"] #actions button .cost { display: none; }
+    body[data-bar="a"] #actions button.poor::after { content: ""; position: absolute; inset: 0; background: rgba(200, 40, 20, .28); }
+    body[data-bar="a"] #actions button.locked::before { content: ""; position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px;
+      background: var(--lock-icon) center / contain no-repeat; }
+    body[data-bar="a"] #sel { flex-direction: column; gap: 6px; }
+    body[data-bar="a"] #sel > .head { display: flex; gap: 10px; }
+    body[data-bar="a"] #portrait { width: 64px; height: 64px; }
+
+    /* B — Ledger: the selection as a narrow column, labelled buttons in the middle, a tall details page, the map. */
+    body[data-bar="b"] #bottom { --bar-h: 248px; --map-w: 280px;
+      grid-template-columns: 172px minmax(300px, 1fr) minmax(220px, 270px) auto; grid-template-areas: "sel actions details map"; }
+    body[data-bar="b"] #actions { padding: 4px; }
+    body[data-bar="b"] #sel { flex-direction: column; align-items: stretch; gap: 5px; }
+    body[data-bar="b"] #sel > .head { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+    body[data-bar="b"] #portrait { width: 70px; height: 70px; }
+    body[data-bar="b"] #sel-stats, body[data-bar="b"] #queue { justify-content: center; }
+    /* 64px = 2 + 2 + icon 26 + name 14 + cost 16 + 2 + 2: three full rows fit. */
+    body[data-bar="b"] #actions button { width: 84px; height: 64px; padding: 2px 3px 2px; }
+    body[data-bar="b"] #actions button img.pic { width: 26px; height: 26px; }
+    body[data-bar="b"] #details { background: linear-gradient(180deg, rgba(0, 0, 0, .22), rgba(0, 0, 0, .34)); }
+
+    /* C — Royal desk: a ribbon with the selection across the top, round medallion buttons, a parchment scroll, a gilded map. */
+    body[data-bar="c"] #bottom { --bar-h: 252px; --map-w: 300px; grid-template-columns: minmax(0, 1fr) minmax(240px, 330px) auto;
+      grid-template-rows: 58px minmax(0, 1fr); grid-template-areas: "sel sel map" "actions details map"; }
+    body[data-bar="c"] #sel { flex-direction: row; align-items: center; padding: 4px 10px;
+      background: linear-gradient(180deg, #5a1f1a, #3d1410); border-color: #1c0a07; box-shadow: inset 0 1px 0 rgba(255, 190, 140, .25), 0 0 0 1px var(--trim); }
+    body[data-bar="c"] #sel > .head { display: flex; align-items: center; gap: 10px; flex: none; width: 300px; }
+    body[data-bar="c"] #portrait { width: 46px; height: 46px; }
+    body[data-bar="c"] #sel-text { gap: 2px; }
+    body[data-bar="c"] #sel-name { font-size: 16px; line-height: 19px; }
+    body[data-bar="c"] #sel-sub { display: none; }
+    body[data-bar="c"] #hpbar { width: 100%; }
+    body[data-bar="c"] #sel-stats { align-items: center; margin-left: 14px; font-size: 14px; }
+    body[data-bar="c"] #queue, body[data-bar="c"] #group { margin-left: auto; flex-wrap: nowrap; }
+    body[data-bar="c"] #actions { background: none; box-shadow: none; border: 0; padding: 2px 0; gap: 6px; }
+    /* 70px = 2 + icon disc 36 + 2 + name 14 + cost 16, with no box drawn around it: two full rows fit. */
+    body[data-bar="c"] #actions button { width: 74px; height: 70px; padding: 2px 0 0; background: none; border: 0; box-shadow: none; color: var(--ink); }
+    body[data-bar="c"] #actions button img.pic { width: 36px; height: 36px; padding: 3px; box-sizing: border-box; border-radius: 50%; margin-bottom: 2px;
+      background: radial-gradient(circle at 50% 35%, #7a5634, #3a2614); border: 2px solid var(--trim); box-shadow: 0 2px 3px rgba(0, 0, 0, .6), inset 0 0 0 1px #1c120a; }
+    body[data-bar="c"] #actions button:hover img.pic { border-color: #ffe08a; }
+    body[data-bar="c"] #actions button.focus { outline: none; }
+    body[data-bar="c"] #actions button.focus img.pic { border-color: #fff3c0; box-shadow: 0 0 0 2px var(--accent), 0 2px 3px rgba(0, 0, 0, .6); }
+    body[data-bar="c"] #details { color: #3a2610; border: 0; border-radius: 2px; padding: 10px 18px;
+      background: radial-gradient(ellipse at 50% 40%, #f6ead0, #e6d1a3 70%, #d3b57c);
+      box-shadow: inset 0 0 18px rgba(120, 80, 30, .45), 0 2px 6px rgba(0, 0, 0, .5); position: relative; }
+    body[data-bar="c"] #details::before, body[data-bar="c"] #details::after { content: ""; position: absolute; left: 0; right: 0; height: 9px;
+      background: linear-gradient(180deg, #b98f4e, #f1dfb4 45%, #9a7238); border-radius: 5px; }
+    body[data-bar="c"] #details::before { top: 0; }
+    body[data-bar="c"] #details::after { bottom: 0; }
+    body[data-bar="c"] #d-title { color: #7a1f12; }
+    body[data-bar="c"] #d-stats { color: #6a4e2a; }
+    body[data-bar="c"] #d-body p.warn { color: #a3221a; }
+    body[data-bar="c"] #details .res img { background: none; }
+    body[data-bar="c"] #details .res.short { color: #b0261b; }
+    body[data-bar="c"] #map-frame { padding: 6px; border-radius: 4px;
+      background: linear-gradient(135deg, #f4d77a, #a87b26 40%, #f1cf6a 60%, #8c6119); box-shadow: 0 0 0 2px #2a1a08, 0 3px 6px rgba(0, 0, 0, .6); }
+
+    #touch-tools { position: fixed; right: 8px; bottom: calc(var(--bottom-h, 236px) + 8px); display: flex; gap: 6px; }
     #touch-tools[hidden] { display: none; }
     #touch-tools button.on { outline: 3px solid var(--accent); }
 
@@ -131,8 +224,19 @@
     #lobby-msg { min-height: 1.4em; color: var(--accent); margin: 0; }
 
     /* Narrower PC windows: a smaller minimap leaves room for six buttons per row. */
-    @media (max-width: 1200px) {
-      #minimap { width: 260px; height: 130px; }
+    @media (max-width: 1300px) {
+      body[data-bar] #bottom { --map-w: 240px; }
+      body[data-bar="b"] #bottom { grid-template-columns: 170px minmax(260px, 1fr) minmax(200px, 240px) auto; }
+      body[data-bar="c"] #sel > .head { width: 240px; }
+    }
+    @media (max-width: 1100px) {
+      /* Narrow windows: the selection sits above the details. */
+      body[data-bar="a"] #bottom { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr);
+        grid-template-areas: "actions sel map" "actions details map"; }
+      body[data-bar="a"] #sel { flex-direction: row; }
+      body[data-bar="b"] #bottom { grid-template-columns: 160px minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr) 74px;
+        grid-template-areas: "sel actions map" "sel details map"; }
+      body[data-bar="c"] #bottom { grid-template-columns: minmax(0, 1fr) 230px auto; }
     }
 
     /* Phones and small windows: tighter bars, buttons in one scrolling row. */
@@ -145,19 +249,28 @@
       .stat small { display: none; }
       #players { display: none; }
       #menu-btn { margin-left: auto; padding: 3px 9px; }
-      #bottom { height: 122px; min-height: 0; padding: 4px 6px; gap: 6px; border-width: 5px 5px 4px; }
-      #portrait { width: 56px; height: 56px; }
-      #info { font-size: 12px; }
-      #actions { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; max-height: none; }
-      /* 70px tall = 2 + 2 + icon 26 + 2 + name 14 + 1 + cost 16 + 3 + 2, with 2px to spare. */
-      #actions button { flex: none; width: 80px; height: 70px; font-size: 11px; }
-      #actions button img.pic { width: 26px; height: 26px; }
-      #minimap { width: 150px; height: 75px; }
+      /* Phones: one line about the selection, one scrolling row of labelled buttons, the map.
+         The details box opens above the bar when a button is pressed and held. */
+      body[data-bar] #bottom { --bar-h: 124px; --map-w: 150px; padding: 4px 6px; gap: 4px 6px; border-width: 5px 5px 4px;
+        grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 22px minmax(0, 1fr); grid-template-areas: "sel map" "actions map"; }
+      body[data-bar] #sel { flex-direction: row; padding: 0 6px; align-items: center; background: none; border: 0; box-shadow: none; }
+      body[data-bar] #sel > .head { display: flex; flex-direction: row; align-items: center; gap: 8px; width: auto; flex: 1; min-width: 0; }
+      body[data-bar] #portrait, body[data-bar] #sel-sub, body[data-bar] #sel-stats, body[data-bar] #queue, body[data-bar] #group { display: none; }
+      body[data-bar] #sel-text { flex-direction: row; align-items: center; gap: 8px; }
+      body[data-bar] #sel-name { font-size: 13px; line-height: 18px; flex: none; max-width: 50%; }
+      body[data-bar] #hpbar { flex: 1; max-width: 140px; }
+      body[data-bar] #actions { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 3px; gap: 4px; }
+      /* 70px tall = 2 + 2 + icon 26 + name 14 + cost 16 + 3 + 2, with 5px to spare. */
+      body[data-bar] #actions button { flex: none; width: 80px; height: 70px; font-size: 11px; padding: 2px 3px 3px;
+        background: var(--btn); border: 2px solid var(--btn-edge); box-shadow: inset 0 1px 0 var(--btn-hi), inset 0 -2px 0 var(--btn-lo); }
+      body[data-bar] #actions button img.pic { width: 26px; height: 26px; padding: 0; border: 0; background: none; box-shadow: none; margin: 0; }
+      body[data-bar] #actions button .lbl { display: block; }
+      body[data-bar] #details { display: none; position: fixed; left: 8px; right: 8px; bottom: calc(var(--bar-h) + 6px); max-height: 50vh; z-index: 3; }
+      body[data-bar] #details.open { display: flex; }
       #banner { font-size: 15px; top: 48px; }
     }
     @media (max-width: 480px) {
-      #portrait { display: none; }
-      #minimap { width: 120px; height: 60px; }
+      body[data-bar] #bottom { --map-w: 120px; }
     }
   </style>
 </head>
@@ -181,11 +294,26 @@
     <span class="dim">Room <b id="room-code"></b></span>
   </div>
   <div id="bottom" class="bar" hidden>
-    <img id="portrait" alt="">
-    <div id="panel">
-      <div id="info"></div>
-      <div id="actions"></div>
-    </div>
+    <section id="sel" class="well">
+      <div class="head">
+        <img id="portrait" alt="">
+        <div id="sel-text">
+          <div id="sel-name"></div>
+          <div id="sel-sub"></div>
+          <div id="hpbar" hidden><i></i><span></span></div>
+        </div>
+      </div>
+      <div id="sel-stats"></div>
+      <div id="queue"></div>
+      <div id="group" hidden></div>
+    </section>
+    <section id="actions" class="well"></section>
+    <section id="details" class="well" aria-live="polite">
+      <div id="d-title"></div>
+      <div id="d-cost"></div>
+      <div id="d-stats"></div>
+      <div id="d-body"></div>
+    </section>
     <div id="map-frame"><canvas id="minimap" width="360" height="180"></canvas></div>
   </div>
   <div id="touch-tools" hidden>

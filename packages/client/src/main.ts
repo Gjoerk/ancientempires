@@ -37,6 +37,7 @@ import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
 import { clearIcons, icon } from './icons';
+import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { isMuted, play, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
 
@@ -593,7 +594,7 @@ function resetGame(): void {
   selectedTile = -1;
   $('chat-log').textContent = '';
   $('chat-input').hidden = true;
-  hudSignature = panelSignature = '';
+  hudSignature = panelSignature = detailSignature = '';
   $('top').hidden = true;
   $('bottom').hidden = true;
   $('banner').hidden = true;
@@ -1140,6 +1141,9 @@ $('help-btn').addEventListener('click', () => {
 $('actions').addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest('button');
   if (!button) return;
+  focusButton(button);
+  // A press-and-hold only showed the details; it does not also use the button.
+  if (pressShown) return void (pressShown = false);
   if (button.classList.contains('locked')) return;
   const { build, train, cancel, eject, sell, buy } = button.dataset;
   if (sell) send({ type: 'trade', building: Number(button.dataset.at), res: sell as Res, buy: false });
@@ -1217,122 +1221,256 @@ function costText(cost: Cost): string {
 
 interface PanelButton {
   label: string;
-  sub?: string;
   cost?: Cost;
-  /** Not available yet; `sub` says why. */
+  /** Not available yet; `short` says why in a word or two. */
   locked?: boolean;
+  short?: string;
   /** What pressing it brings in (market sales). */
   gain?: Cost;
   /** Icon id, see icons.ts. */
   icon: string;
+  detail: Detail;
   data: Record<string, string>;
 }
 
-const TILE_NAMES: Record<number, string> = { [Tile.Forest]: 'Tree', [Tile.Berries]: 'Berry bush', [Tile.Gold]: 'Gold ore', [Tile.Stone]: 'Stone' };
+/** What the selection card shows. */
+interface SelCard {
+  name: string;
+  sub: string;
+  portrait: string;
+  owner: number;
+  /** Health (or building progress when `building` is set) as [value, max]. */
+  bar?: [number, number];
+  building?: boolean;
+  stats: [string, string][];
+  /** Training or research queue: icon ids, the first with its progress 0-100. */
+  queue: string[];
+  progress: number;
+  /** Several units: one entry each. */
+  group: View[];
+}
 
+const TILE_NAMES: Record<number, string> = { [Tile.Forest]: 'Tree', [Tile.Berries]: 'Berry bush', [Tile.Gold]: 'Gold mine', [Tile.Stone]: 'Stone mine' };
+const TILE_HINTS: Record<number, string> = {
+  [Tile.Forest]: 'Villagers chop it for wood. A lumber camp at the edge of the forest saves walking.',
+  [Tile.Berries]: 'Villagers pick it for food. A mill next to the bushes saves walking.',
+  [Tile.Gold]: 'Villagers mine it for gold. Build a mining camp right next to it.',
+  [Tile.Stone]: 'Villagers mine it for stone. Build a mining camp right next to it.',
+};
+const TIPS = [
+  'Select a unit or building to see what it can do.',
+  'Keep your town centre busy training villagers: more villagers, more of everything.',
+  'Build houses before your population counter turns red.',
+  'Your king is safest inside the castle. Right-click the castle with him selected.',
+  'Spearmen beat riders, riders beat archers, archers beat spearmen.',
+  'A mill, lumber camp or mining camp next to a resource saves your villagers a long walk.',
+];
+
+/** Button whose details stay in the box until something else is selected. */
+let focusKey = '';
+let focusSelection = '';
 let panelSignature = '';
+let detailSignature = '';
+let currentButtons: PanelButton[] = [];
+let currentDefault: Detail | undefined;
+const buttonKey = (b: PanelButton) => JSON.stringify(b.data);
+
 function renderPanel(): void {
   const chosen = [...selected].map((id) => views.get(id)).filter((v): v is View => !!v);
   const mine = chosen.filter((v) => v.owner === me);
   const my = players.get(me);
   const age = my?.age ?? 1;
   const has = hasOf(me);
-  let info = 'Nothing selected';
-  let portrait = '';
+  const card: SelCard = { name: '', sub: '', portrait: '', owner: me, stats: [], queue: [], progress: 0, group: [] };
+  let detail: Detail = { title: 'Kingsfall', icon: 'crown', stats: [], lines: [TIPS[Math.floor(gameTick / 150) % TIPS.length]] };
   const buttons: PanelButton[] = [];
+  const lockedShort = (kind: Kind) => (ageAllows(kind) ? undefined : AGE_NAMES[DEFS[kind].age ?? 1].replace(' Age', ''));
   if (selected.size > 0 || (selectedTile >= 0 && !props.has(selectedTile))) selectedTile = -1;
 
   if (placing) {
-    info = placing === 'wall'
-      ? 'Placing Wall — drag a line and release, hold Shift for more, Esc to cancel'
-      : `Placing ${DEFS[placing].label} — click to build, hold Shift for several, Esc to cancel`;
+    card.name = `Placing ${DEFS[placing].label}`;
+    card.sub = placing === 'wall' ? 'Drag a line and release · Shift for more · Esc cancels' : 'Click to build · Shift for several · Esc or right-click cancels';
+    card.portrait = icon(placing, me);
+    detail = describeKind(placing, has, age);
   } else if (selectedTile >= 0 && map) {
     // A resource: what it is and how much is left.
-    const res = TILE_RESOURCE[map.tiles[selectedTile] as Tile]!.res;
-    info = `${TILE_NAMES[map.tiles[selectedTile]]} · ${map.amount[selectedTile]} ${res} left`;
-    portrait = icon(res);
+    const tile = map.tiles[selectedTile];
+    const res = TILE_RESOURCE[tile as Tile]!.res;
+    card.name = TILE_NAMES[tile];
+    card.sub = `${map.amount[selectedTile]} ${res} left`;
+    card.portrait = icon(res);
+    card.bar = [map.amount[selectedTile], TILE_RESOURCE[tile as Tile]!.amount];
+    card.building = true;
+    detail = { title: TILE_NAMES[tile], icon: res, stats: [[res, `${map.amount[selectedTile]} left`]], lines: [TILE_HINTS[tile]] };
   } else if (chosen.length === 1) {
     const v = chosen[0];
     const def = DEFS[v.kind];
-    portrait = icon(v.kind, v.owner);
     const theirs = hasOf(v.owner);
-    const ownerName = v.owner === me ? '' : ` · ${roster.find((p) => p.slot === v.owner)?.name ?? 'enemy'}`;
-    info = `${def.label}${ownerName} · HP ${v.hp}/${maxHp(v)}`;
-    if (def.attack) info += ` · attack ${attackOf(v.kind, theirs)}`;
-    if ((def.range ?? 0) > 2) info += ` · range ${rangeOf(v.kind, theirs)}`;
-    if (!isBuilding(v.kind) || def.attack) info += ` · armour ${armorOf(v.kind, theirs)}`;
-    if (isBuilding(v.kind) && v.extra < 100) info += ` · under construction ${v.extra}%`;
-    else if (!isBuilding(v.kind) && v.extra % 100 > 0) info += ` · carrying ${v.extra % 100} ${RESOURCES[Math.floor(v.extra / 100)]}`;
+    card.owner = v.owner;
+    card.name = def.label;
+    card.portrait = icon(v.kind, v.owner);
+    card.sub = v.owner === me ? (roster.find((p) => p.slot === me)?.name ?? '') : `${roster.find((p) => p.slot === v.owner)?.name ?? 'Enemy'}${isEnemy(v.owner) ? ' · enemy' : ' · ally'}`;
+    detail = describeKind(v.kind, theirs, players.get(v.owner)?.age ?? 1);
+    detail.warn = undefined;
+    if (isBuilding(v.kind) && v.extra < 100) {
+      card.bar = [v.extra, 100];
+      card.building = true;
+      card.sub = `Under construction · ${v.extra}%`;
+    } else card.bar = [v.hp, maxHp(v)];
+    if (def.attack) card.stats.push(['sword', String(attackOf(v.kind, theirs))]);
+    if ((def.range ?? 0) > 2) card.stats.push(['bow', String(rangeOf(v.kind, theirs))]);
+    if (!isBuilding(v.kind) || def.attack) card.stats.push(['shield', String(armorOf(v.kind, theirs))]);
+    if (!isBuilding(v.kind) && v.extra % 100 > 0) card.stats.push([RESOURCES[Math.floor(v.extra / 100)], `carrying ${v.extra % 100}`]);
     if (v.kind === 'castle' && v.extra >= 100) {
-      info += v.task === 1 ? ' · the king is inside' : v.owner === me ? ' · right-click it with your king to shelter him' : '';
-      if (v.task === 1 && v.owner === me) buttons.push({ label: 'Send king out', icon: 'eject', data: { eject: String(v.id) } });
+      card.sub = v.task === 1 ? 'The king is inside' : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
+      if (v.task === 1 && v.owner === me) buttons.push({ label: 'Send king out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
     if (queue) {
-      const first = QUEUE_ITEMS[queue[1]];
-      const name = isTech(first) ? TECHS[first].label : DEFS[first as Kind].label;
-      info += ` · ${isTech(first) ? 'researching' : 'training'} ${name} ${queue[0]}%${queue.length > 2 ? ` (+${queue.length - 2} queued)` : ''}`;
+      card.queue = queue.slice(1).map((i) => QUEUE_ITEMS[i]);
+      card.progress = queue[0];
     }
     if (v.owner === me && isBuilding(v.kind) && v.extra >= 100) {
       const at = String(v.id);
       for (const kind of def.trains ?? []) {
-        const locked = !ageAllows(kind);
-        buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked, sub: locked ? AGE_NAMES[DEFS[kind].age ?? 1] : undefined, data: { train: kind, at } });
+        buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked: !ageAllows(kind), short: lockedShort(kind),
+          detail: describeKind(kind, has, age), data: { train: kind, at } });
       }
       for (const id of TECH_IDS) {
         const tech = TECHS[id];
         if (tech.at !== v.kind || has(id) || ((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) continue;
         if (id === 'age3' && age < 2) continue;
-        const missing = tech.age > age ? AGE_NAMES[tech.age] : tech.requires && !has(tech.requires) ? `needs ${TECHS[tech.requires].label}` : '';
-        buttons.push({ label: tech.label, icon: id, cost: tech.cost, locked: !!missing, sub: missing || tech.effect, data: { train: id, at } });
+        const d = describeTech(id, has, age);
+        const short = tech.age > age ? AGE_NAMES[tech.age].replace(' Age', '') : d.warn ? 'locked' : undefined;
+        buttons.push({ label: tech.label, icon: id, cost: tech.cost, locked: !!d.warn, short, detail: d, data: { train: id, at } });
       }
       if (v.kind === 'market') {
-        for (const r of TRADE_GOODS) buttons.push({ label: `Sell 100 ${r}`, icon: `sell.${r}`, sub: `for ${TRADE_SELL} gold`, gain: { gold: TRADE_SELL }, locked: (my?.res[r] ?? 0) < 100, data: { sell: r, at } });
-        for (const r of TRADE_GOODS) buttons.push({ label: `Buy 100 ${r}`, icon: `buy.${r}`, sub: `for ${TRADE_BUY} gold`, cost: { gold: TRADE_BUY }, data: { buy: r, at } });
+        for (const r of TRADE_GOODS) buttons.push({ label: `Sell ${r}`, icon: `sell.${r}`, gain: { gold: TRADE_SELL }, locked: (my?.res[r] ?? 0) < 100, short: `100 ${r}`, detail: describeAction(`sell.${r}`), data: { sell: r, at } });
+        for (const r of TRADE_GOODS) buttons.push({ label: `Buy ${r}`, icon: `buy.${r}`, cost: { gold: TRADE_BUY }, detail: describeAction(`buy.${r}`), data: { buy: r, at } });
       }
-      if (queue) buttons.push({ label: 'Cancel last', icon: 'cancel', data: { cancel: at } });
-      if (def.trains && !queue) info += ' · right-click the map to set a gathering point';
+      if (queue) buttons.push({ label: 'Cancel last', icon: 'cancel', detail: describeAction('cancel'), data: { cancel: at } });
+      if (def.trains) detail.lines.push('Right-click the map to set a gathering point.');
     }
   } else if (chosen.length > 1) {
     const counts = new Map<Kind, number>();
     for (const v of chosen) counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);
-    info = [...counts].map(([k, c]) => `${c} × ${DEFS[k].label}`).join(' · ');
-    portrait = icon([...counts].sort((a, b) => b[1] - a[1])[0][0], chosen[0].owner);
+    const top = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+    card.name = `${chosen.length} selected`;
+    const many = (k: Kind, c: number) => (c === 1 ? DEFS[k].label : DEFS[k].label.endsWith('man') ? DEFS[k].label.replace(/man$/, 'men') : `${DEFS[k].label}s`);
+    card.sub = [...counts].map(([k, c]) => `${c} ${many(k, c)}`).join(' · ');
+    card.portrait = icon(top, chosen[0].owner);
+    card.group = chosen.slice(0, 30);
+    detail = { title: card.name, icon: top, stats: [...counts].map(([k, c]) => [k, `${c} ${many(k, c)}`] as [string, string]),
+      lines: ['Click one to select only it. Shift + 1–9 stores this group, 1–9 brings it back.'] };
   }
   if (!placing && mine.some((v) => v.kind === 'villager')) {
     for (const kind of BUILDABLE) {
-      const locked = !ageAllows(kind);
-      buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked, sub: locked ? AGE_NAMES[DEFS[kind].age ?? 1] : undefined, data: { build: kind } });
+      buttons.push({ label: DEFS[kind].label, icon: kind, cost: DEFS[kind].cost, locked: !ageAllows(kind), short: lockedShort(kind),
+        detail: describeKind(kind, has, age), data: { build: kind } });
     }
   }
 
-  const signature = info + '|' + me + '|' + buttons.map((b) => b.label + (b.locked ? '#' : '') + (b.cost && !canAfford(b.cost) ? '!' : '')).join(',');
+  // A new selection forgets the button that was looked at last.
+  const selKey = [...selected].join() + '|' + selectedTile + '|' + (placing ?? '') + '|' + me;
+  if (selKey !== focusSelection) {
+    focusSelection = selKey;
+    focusKey = '';
+  }
+  currentButtons = buttons;
+  currentDefault = detail;
+  renderDetails();
+
+  const signature = JSON.stringify([card, card.group.map((v) => [v.id, v.hp]), buttons.map((b) => [b.label, b.locked, b.cost && !canAfford(b.cost)])]);
   if (signature === panelSignature) return;
   panelSignature = signature;
-  $('info').textContent = info;
+  renderCard(card);
+  renderButtons(buttons);
+  // The panel may have grown; things floating above it follow.
+  document.documentElement.style.setProperty('--bottom-h', `${$('bottom').offsetHeight}px`);
+}
+
+function costChips(cost: Cost, sign = ''): HTMLElement[] {
+  return RESOURCES.filter((r) => cost[r]).map((r) => {
+    const part = document.createElement('span');
+    part.className = 'res';
+    const img = document.createElement('img');
+    img.src = icon(r);
+    img.alt = r;
+    part.append(img, `${sign}${cost[r]}`);
+    if (!sign && (players.get(me)?.res[r] ?? 0) < (cost[r] ?? 0)) part.classList.add('short');
+    return part;
+  });
+}
+
+function statChip(iconId: string, text: string): HTMLElement {
+  const chip = document.createElement('span');
+  chip.className = 'st';
+  const img = document.createElement('img');
+  img.src = icon(iconId, me);
+  img.alt = '';
+  chip.append(img, text);
+  return chip;
+}
+
+function renderCard(card: SelCard): void {
   const pic = $<HTMLImageElement>('portrait');
-  pic.style.visibility = portrait ? 'visible' : 'hidden';
-  if (portrait) pic.src = portrait;
+  pic.style.visibility = card.portrait ? 'visible' : 'hidden';
+  if (card.portrait) pic.src = card.portrait;
+  $('sel-name').textContent = card.name || 'Nothing selected';
+  $('sel-sub').textContent = card.sub;
+  const bar = $('hpbar');
+  bar.hidden = !card.bar;
+  if (card.bar) {
+    bar.classList.toggle('build', !!card.building);
+    (bar.firstElementChild as HTMLElement).style.width = `${Math.max(0, Math.min(100, (card.bar[0] / card.bar[1]) * 100))}%`;
+    bar.lastElementChild!.textContent = card.building && card.bar[1] === 100 ? `${card.bar[0]}%` : `${card.bar[0]} / ${card.bar[1]}`;
+  }
+  const stats = $('sel-stats');
+  stats.textContent = '';
+  for (const [i, t] of card.stats) stats.append(statChip(i, t));
+  const queue = $('queue');
+  queue.textContent = '';
+  card.queue.forEach((id, n) => {
+    const slot = document.createElement('span');
+    slot.className = 'slot';
+    const img = document.createElement('img');
+    img.src = icon(id, me);
+    img.alt = '';
+    slot.append(img);
+    if (n === 0) {
+      const prog = document.createElement('i');
+      prog.style.width = `${card.progress}%`;
+      slot.append(prog);
+    }
+    queue.append(slot);
+  });
+  const group = $('group');
+  group.textContent = '';
+  group.hidden = card.group.length === 0;
+  for (const v of card.group) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.only = String(v.id);
+    const img = document.createElement('img');
+    img.src = icon(v.kind, v.owner);
+    img.alt = DEFS[v.kind].label;
+    const hp = document.createElement('i');
+    const k = v.hp / maxHp(v);
+    hp.style.width = `${k * 100}%`;
+    hp.style.background = k > 0.6 ? '#4ad04a' : k > 0.3 ? '#e8c440' : '#e0503a';
+    b.append(img, hp);
+    group.append(b);
+  }
+}
+
+function renderButtons(buttons: PanelButton[]): void {
   const actions = $('actions');
   actions.textContent = '';
-  const costRow = (cost: Cost, sign: string): HTMLElement => {
-    const row = document.createElement('span');
-    row.className = 'cost';
-    for (const r of RESOURCES) {
-      if (!cost[r]) continue;
-      const part = document.createElement('span');
-      const img = document.createElement('img');
-      img.src = icon(r);
-      img.alt = r;
-      part.append(img, `${sign}${cost[r]}`);
-      row.append(part);
-    }
-    return row;
-  };
   for (const b of buttons) {
     const el = document.createElement('button');
     el.type = 'button';
     Object.assign(el.dataset, b.data);
+    el.dataset.key = buttonKey(b);
     const img = document.createElement('img');
     img.className = 'pic';
     img.src = icon(b.icon, me);
@@ -1341,20 +1479,89 @@ function renderPanel(): void {
     label.className = 'lbl';
     // "Spearman: Pikes" is shown as "Pikes"; the icon already shows the spearman.
     label.textContent = b.label.split(': ').pop()!;
-    let last: HTMLElement;
-    if (b.locked && b.sub) {
-      last = document.createElement('span');
-      last.className = 'cost';
-      last.textContent = b.sub;
-    } else last = costRow(b.gain ?? b.cost ?? {}, b.gain ? '+' : '');
+    const last = document.createElement('span');
+    last.className = 'cost';
+    if (b.locked && b.short) last.textContent = b.short;
+    else last.append(...costChips(b.gain ?? b.cost ?? {}, b.gain ? '+' : ''));
     el.append(img, label, last);
-    el.title = [b.label, b.locked && b.sub ? `needs ${b.sub.replace(/^needs /, '')}` : b.sub, b.cost ? costText(b.cost) : ''].filter(Boolean).join(' — ');
-    if (b.locked) el.className = 'locked';
-    else if (b.cost && !canAfford(b.cost)) el.className = 'poor';
+    if (b.locked) el.classList.add('locked');
+    else if (b.cost && !canAfford(b.cost)) el.classList.add('poor');
+    if (el.dataset.key === focusKey) el.classList.add('focus');
     actions.append(el);
-  }  // The panel may have grown to fit another row; things floating above it follow.
-  document.documentElement.style.setProperty('--bottom-h', `${$('bottom').offsetHeight}px`);
+  }
 }
+
+/** Fills the details box: the button last pointed at, or else the selection itself. */
+function renderDetails(): void {
+  const b = currentButtons.find((x) => buttonKey(x) === focusKey);
+  const d = b?.detail ?? currentDefault;
+  if (!d) return;
+  const signature = JSON.stringify([d, focusKey, RESOURCES.map((r) => (d.cost?.[r] ?? 0) > (players.get(me)?.res[r] ?? 0))]);
+  if (signature === detailSignature) return;
+  detailSignature = signature;
+  const title = $('d-title');
+  title.textContent = '';
+  const img = document.createElement('img');
+  img.src = icon(d.icon, me);
+  img.alt = '';
+  const name = document.createElement('span');
+  name.textContent = d.title;
+  title.append(img, name);
+  const cost = $('d-cost');
+  cost.textContent = '';
+  if (d.gain) cost.append(...costChips(d.cost ?? {}), ' → ', ...costChips(d.gain, '+'));
+  else if (d.cost && Object.keys(d.cost).length) cost.append(...costChips(d.cost));
+  cost.hidden = !cost.childElementCount;
+  const stats = $('d-stats');
+  stats.textContent = '';
+  for (const [i, t] of d.stats) stats.append(statChip(i, t));
+  stats.hidden = d.stats.length === 0;
+  const body = $('d-body');
+  body.textContent = '';
+  for (const line of d.lines) {
+    const p = document.createElement('p');
+    p.textContent = line;
+    body.append(p);
+  }
+  if (d.warn) {
+    const p = document.createElement('p');
+    p.className = 'warn';
+    p.textContent = d.warn;
+    body.append(p);
+  }
+  for (const el of $('actions').children) el.classList.toggle('focus', (el as HTMLElement).dataset.key === focusKey);
+}
+
+function focusButton(el: HTMLElement | null): void {
+  const key = el?.dataset.key ?? '';
+  if (!key || key === focusKey) return;
+  focusKey = key;
+  renderDetails();
+}
+
+$('actions').addEventListener('mouseover', (ev) => focusButton((ev.target as HTMLElement).closest('button')));
+// On touch screens, pressing and holding a button shows its details without using it.
+let pressTimer = 0;
+let pressShown = false;
+$('actions').addEventListener('touchstart', (ev) => {
+  const el = (ev.target as HTMLElement).closest('button');
+  pressShown = false;
+  clearTimeout(pressTimer);
+  pressTimer = window.setTimeout(() => {
+    focusButton(el);
+    pressShown = true;
+    $('details').classList.add('open');
+  }, 450);
+}, { passive: true });
+$('actions').addEventListener('touchend', () => clearTimeout(pressTimer));
+$('actions').addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true });
+$('details').addEventListener('click', () => $('details').classList.remove('open'));
+$('group').addEventListener('click', (ev) => {
+  const b = (ev.target as HTMLElement).closest('button');
+  if (!b?.dataset.only) return;
+  selected.clear();
+  selected.add(Number(b.dataset.only));
+});
 
 let hudSignature = '';
 function renderHud(): void {
@@ -1779,10 +1986,14 @@ function frame(now: number): void {
   renderHud();
   renderMinimap();
 }
+// Bottom bar layout, for choosing between the designs: ?bar=a, b or c.
+document.documentElement.style.setProperty('--lock-icon', `url(${icon('lock')})`);
+document.body.dataset.bar = ['a', 'b', 'c'].includes(new URLSearchParams(location.search).get('bar') ?? '') ? new URLSearchParams(location.search).get('bar')! : 'a';
+
 void loadSprites().then(() => {
   // Icons may come from the sprite pack, so draw them again once it is in.
   clearIcons();
-  panelSignature = hudSignature = '';
+  panelSignature = hudSignature = detailSignature = '';
 });
 requestAnimationFrame(frame);
 
