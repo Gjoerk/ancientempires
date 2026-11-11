@@ -40,6 +40,7 @@ import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
 import { clearIcons, icon } from './icons';
 import { installMenuArt } from './menu-art';
+import { paintGround } from './ground';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { isMuted, play, toggleMute, unlockSound } from './sound';
@@ -171,8 +172,16 @@ function tileToWorld(tx: number, ty: number): [number, number] {
 /** While painting the menu background into a picture, drawing goes there and the view has the picture's size. */
 let drawingTarget: CanvasRenderingContext2D | undefined;
 let sceneSize: [number, number] | undefined;
-const viewW = () => sceneSize?.[0] ?? canvas.width;
-const viewH = () => sceneSize?.[1] ?? canvas.height;
+/**
+ * The view in world pixels, and the scale it is drawn at. Zoomed in, the canvas is smaller than the
+ * window and stretched, which keeps the pixel art crisp; zoomed out, it stays the size of the window
+ * and the drawing is scaled down instead, so no more pixels are filled than the screen shows.
+ */
+let worldW = window.innerWidth;
+let worldH = window.innerHeight;
+let drawScale = 1;
+const viewW = () => sceneSize?.[0] ?? worldW;
+const viewH = () => sceneSize?.[1] ?? worldH;
 
 function worldToScreen(wx: number, wy: number): [number, number] {
   return [wx - cam.x + viewW() / 2, wy - cam.y + viewH() / 2];
@@ -319,7 +328,7 @@ function updateFog(now: number): void {
   for (let c = 0; c < count.length; c++) {
     if (count[c] !== chunkSeen[c]) {
       chunkSeen[c] = count[c];
-      chunks.delete(c);
+      staleChunk(c);
     }
   }
 }
@@ -331,7 +340,8 @@ function updateFog(now: number): void {
 function drawFog(): void {
   if (!map || revealAll || !fogMini) return;
   ctx.save();
-  ctx.setTransform(HW, HH, -HW, HH, canvas.width / 2 - cam.x, canvas.height / 2 - cam.y);
+  const k = drawScale;
+  ctx.setTransform(HW * k, HH * k, -HW * k, HH * k, (viewW() / 2 - cam.x) * k, (viewH() / 2 - cam.y) * k);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(fogMini, 0, 0);
   ctx.restore();
@@ -370,6 +380,7 @@ function paintTile(m: GameMap, index: number): void {
 
 function buildTerrain(m: GameMap): void {
   chunks.clear();
+  farSquares.clear();
   chunkSeen = new Int32Array(0);
   ground = new Uint8Array(m.size * m.size);
   miniTerrain = document.createElement('canvas');
@@ -391,11 +402,53 @@ function visibleTiles(): [number, number, number, number] {
 /** Tiles per side of a pre-drawn block of ground. */
 const CHUNK = 8;
 /** Pre-drawn blocks of ground, by block index; a block is dropped when something in it changes. */
-const chunks = new Map<number, { img: HTMLCanvasElement; used: number }>();
+interface Block {
+  img: HTMLCanvasElement;
+  used: number;
+  /** Painted with full detail, or only flat colours while there was no time for more. */
+  detailed: boolean;
+  /** Something in it changed: it is painted again when there is time, and shown as it was until then. */
+  stale: boolean;
+}
+const chunks = new Map<number, Block>();
+/**
+ * Zoomed out, the view is put together from square pictures of the world, ground and trees and
+ * rocks in one, at a reduced scale: a few dozen opaque copies per frame instead of thousands of
+ * small ones. Keyed by square; each covers FAR_SIZE × FAR_SIZE world pixels.
+ */
+const farSquares = new Map<number, Block & { scale: number }>();
+const FAR_SIZE = 512;
+/** World y where the squares start: trees on the top tiles stand above the map's top corner. */
+const FAR_Y0 = -128;
+/** Below this zoom the far squares are used. */
+const FAR_ZOOM = 0.95;
+/** Time each frame may spend painting blocks, in milliseconds; whatever is left waits for the next frame. */
+const PAINT_BUDGET = 7;
+let paintDeadline = 0;
+
+function staleChunk(key: number): void {
+  const a = chunks.get(key);
+  if (a) a.stale = true;
+  if (!map || farSquares.size === 0) return;
+  // Every square the block's ground or the trees standing on it reach into.
+  const blocks = Math.ceil(map.size / CHUNK);
+  const [wx, wy] = tileToWorld((key % blocks) * CHUNK, Math.floor(key / blocks) * CHUNK);
+  const [r0, c0] = farSquareAt(wx - CHUNK * HW - 48, wy - 110);
+  const [r1, c1] = farSquareAt(wx + CHUNK * HW + 48, wy + CHUNK * HH * 2 + 24);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const b = farSquares.get(r * 1000 + c);
+    if (b) b.stale = true;
+  }
+}
+
+/** [row, column] of the far square holding a world point. */
+function farSquareAt(wx: number, wy: number): [number, number] {
+  return [Math.floor((wy - FAR_Y0) / FAR_SIZE), Math.floor((wx + map!.size * HW) / FAR_SIZE)];
+}
 let chunkSeen = new Int32Array(0);
 let frameNo = 0;
 
-function paintChunk(bx: number, by: number): HTMLCanvasElement {
+function paintChunk(bx: number, by: number, detailed: boolean): HTMLCanvasElement {
   const n = map!.size;
   const img = document.createElement('canvas');
   img.width = CHUNK * HW * 2 + 2;
@@ -403,6 +456,11 @@ function paintChunk(bx: number, by: number): HTMLCanvasElement {
   const c = img.getContext('2d')!;
   const x0 = bx * CHUNK;
   const y0 = by * CHUNK;
+  if (detailed) {
+    const m = map!;
+    paintGround(c, { size: n, tiles: m.tiles, seen: (i) => revealAll || explored[i] === 1 }, x0, y0, CHUNK, HW, HH);
+    return img;
+  }
   const paths = GROUND_COLORS.map(() => new Path2D());
   const specks = new Path2D();
   for (let ty = y0; ty < Math.min(n, y0 + CHUNK); ty++) {
@@ -432,33 +490,122 @@ function paintChunk(bx: number, by: number): HTMLCanvasElement {
   return img;
 }
 
+/** The ground block, painted now if missing; with time to spare, a flat or outdated block is painted again in detail. */
+function groundBlock(bx: number, by: number, key: number): Block {
+  let chunk = chunks.get(key);
+  const time = performance.now() < paintDeadline;
+  // A missing block is needed now: without time for detail it gets flat colours first.
+  if (!chunk || ((!chunk.detailed || chunk.stale) && time)) {
+    chunk = { img: paintChunk(bx, by, time), used: 0, detailed: time, stale: false };
+    chunks.set(key, chunk);
+  }
+  chunk.used = frameNo;
+  return chunk;
+}
+
+/** A far square: the ground blocks and the trees and rocks reaching into it, back to front. Returns whether all ground had detail. */
+function paintFarSquare(row: number, col: number, scale: number, img: HTMLCanvasElement): boolean {
+  const n = map!.size;
+  const blocks = Math.ceil(n / CHUNK);
+  const left = col * FAR_SIZE - n * HW;
+  const top = row * FAR_SIZE + FAR_Y0;
+  img.width = img.height = Math.ceil(FAR_SIZE * scale);
+  const c = img.getContext('2d')!;
+  c.setTransform(scale, 0, 0, scale, -left * scale, -top * scale);
+  c.imageSmoothingEnabled = true;
+  c.fillStyle = '#0b0e0a';
+  c.fillRect(left, top, FAR_SIZE, FAR_SIZE);
+  let detailed = true;
+  for (let by = 0; by < blocks; by++) {
+    for (let bx = 0; bx < blocks; bx++) {
+      const [wx, wy] = tileToWorld(bx * CHUNK, by * CHUNK);
+      const bl = wx - CHUNK * HW - 1;
+      if (bl > left + FAR_SIZE || bl + CHUNK * HW * 2 + 2 < left || wy - 1 > top + FAR_SIZE || wy + CHUNK * HH * 2 + 1 < top) continue;
+      const block = groundBlock(bx, by, by * blocks + bx);
+      detailed &&= block.detailed;
+      c.drawImage(block.img, bl, wy - 1);
+    }
+  }
+  const standing: [number, number, number][] = [];
+  for (const [index, tile] of props) {
+    if (!revealAll && !explored[index]) continue;
+    const tx = index % n;
+    const ty = Math.floor(index / n);
+    const [wx, wy] = tileToWorld(tx + 0.5, ty + 0.5);
+    if (wx + 48 < left || wx - 48 > left + FAR_SIZE || wy + 24 < top || wy - 110 > top + FAR_SIZE) continue;
+    standing.push([tx + ty, index, tile]);
+  }
+  standing.sort((a, b) => a[0] - b[0]);
+  for (const [, index, tile] of standing) {
+    const tx = index % n;
+    const ty = Math.floor(index / n);
+    const [wx, wy] = tileToWorld(tx + 0.5, ty + 0.5);
+    drawProp(c, tile, wx, wy, Math.floor(hash(tx, ty) * 6));
+  }
+  return detailed;
+}
+
+/** Zoomed out far enough that trees and rocks are part of the ground blocks. */
+const farView = () => !drawingTarget && zoom < FAR_ZOOM;
+
+/** The zoomed-out view from far squares; squares not painted yet are filled in over the next frames. */
+function drawFar(scale: number, target: CanvasRenderingContext2D): void {
+  const [r0, c0] = farSquareAt(cam.x - viewW() / 2, cam.y - viewH() / 2);
+  const [r1, c1] = farSquareAt(cam.x + viewW() / 2, cam.y + viewH() / 2);
+  const toScreen = (wx: number, wy: number) => worldToScreen(wx, wy);
+  const n = map!.size;
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const key = r * 1000 + c;
+      let square = farSquares.get(key);
+      const time = performance.now() < paintDeadline;
+      if (!square || square.scale !== scale || ((square.stale || !square.detailed) && time)) {
+        if (time || !square) {
+          const img = square?.img ?? document.createElement('canvas');
+          const detailed = paintFarSquare(r, c, scale, img);
+          square = { img, used: 0, detailed, stale: false, scale };
+          farSquares.set(key, square);
+        }
+      }
+      square.used = frameNo;
+      const [sx, sy] = toScreen(c * FAR_SIZE - n * HW, r * FAR_SIZE + FAR_Y0);
+      // A hair larger, so that no seams show between squares.
+      target.drawImage(square.img, Math.floor(sx), Math.floor(sy), FAR_SIZE + 1, FAR_SIZE + 1);
+    }
+  }
+}
+
 /** Draws the ground from pre-drawn blocks, only those that can be on screen. */
 function drawGround(): void {
   const n = map!.size;
   const blocks = Math.ceil(n / CHUNK);
   const [x0, y0, x1, y1] = visibleTiles();
   frameNo++;
-  for (let by = Math.floor(y0 / CHUNK); by <= Math.floor(y1 / CHUNK); by++) {
-    for (let bx = Math.floor(x0 / CHUNK); bx <= Math.floor(x1 / CHUNK); bx++) {
-      if (bx < 0 || by < 0 || bx >= blocks || by >= blocks) continue;
-      const [sx, sy] = tileToScreen(bx * CHUNK, by * CHUNK);
-      const left = Math.round(sx) - CHUNK * HW - 1;
-      const top = Math.round(sy) - 1;
-      if (left > viewW() || top > viewH() || left + CHUNK * HW * 2 < 0 || top + CHUNK * HH * 2 < 0) continue;
-      const key = by * blocks + bx;
-      let chunk = chunks.get(key);
-      if (!chunk) {
-        chunk = { img: paintChunk(bx, by), used: 0 };
-        chunks.set(key, chunk);
+  // The menu background is painted once, so it gets all the time it needs.
+  paintDeadline = drawingTarget ? Infinity : performance.now() + PAINT_BUDGET;
+  const far = farView();
+  // Squares are kept at a few scales; each is drawn at most a little larger or smaller than it was painted.
+  const scale = zoom <= 0.68 ? 0.6 : zoom <= 0.8 ? 0.72 : 0.88;
+  const target = drawingTarget ?? ctx;
+  if (far) {
+    drawFar(scale, target);
+  } else {
+    for (let by = Math.floor(y0 / CHUNK); by <= Math.floor(y1 / CHUNK); by++) {
+      for (let bx = Math.floor(x0 / CHUNK); bx <= Math.floor(x1 / CHUNK); bx++) {
+        if (bx < 0 || by < 0 || bx >= blocks || by >= blocks) continue;
+        const [sx, sy] = tileToScreen(bx * CHUNK, by * CHUNK);
+        const left = Math.round(sx) - CHUNK * HW - 1;
+        const top = Math.round(sy) - 1;
+        if (left > viewW() || top > viewH() || left + CHUNK * HW * 2 < 0 || top + CHUNK * HH * 2 < 0) continue;
+        target.drawImage(groundBlock(bx, by, by * blocks + bx).img, left, top);
       }
-      chunk.used = frameNo;
-      (drawingTarget ?? ctx).drawImage(chunk.img, left, top);
     }
   }
   // Keep memory in check: forget the blocks that have not been on screen for the longest.
-  if (chunks.size > 160) {
-    const old = [...chunks].sort((a, b) => a[1].used - b[1].used).slice(0, chunks.size - 120);
-    for (const [key] of old) chunks.delete(key);
+  for (const [store, most] of [[chunks, 320], [farSquares, 160]] as const) {
+    if (store.size <= most) continue;
+    const old = [...store].sort((a, b) => a[1].used - b[1].used).slice(0, store.size - most * 0.75);
+    for (const [key] of old) store.delete(key);
   }
 }
 
@@ -467,7 +614,7 @@ function setTile(index: number, tile: number): void {
   map.tiles[index] = tile;
   paintTile(map, index);
   const blocks = Math.ceil(map.size / CHUNK);
-  chunks.delete(Math.floor(Math.floor(index / map.size) / CHUNK) * blocks + Math.floor((index % map.size) / CHUNK));
+  staleChunk(Math.floor(Math.floor(index / map.size) / CHUNK) * blocks + Math.floor((index % map.size) / CHUNK));
 }
 
 function setBlocked(v: View, value: number): void {
@@ -657,7 +804,7 @@ function underAttack(v: View, now: number): void {
   if (alert && now - alert.t < 7000) return;
   const [cx, cy] = centreOf(v);
   const [sx, sy] = tileToScreen(cx, cy);
-  if (sx > 0 && sy > 40 && sx < canvas.width && sy < canvas.height - 230 / zoom) return;
+  if (sx > 0 && sy > 40 && sx < viewW() && sy < viewH() - 230 / zoom) return;
   alert = { x: cx, y: cy, t: now };
   play('alarm');
   const toast = $('toast');
@@ -1181,7 +1328,7 @@ canvas.addEventListener('dblclick', (ev) => {
   for (const v of views.values()) {
     if (v.owner !== me || v.kind !== hit.kind) continue;
     const [x, y] = tileToScreen(v.x, v.y);
-    if (x >= 0 && y >= 0 && x <= canvas.width && y <= canvas.height) selected.add(v.id);
+    if (x >= 0 && y >= 0 && x <= viewW() && y <= viewH()) selected.add(v.id);
   }
 });
 
@@ -1399,8 +1546,11 @@ minimap.addEventListener('contextmenu', (ev) => ev.preventDefault());
 let minimapPing: { x: number; y: number; t: number } | undefined;
 
 function resize(): void {
-  canvas.width = Math.ceil(window.innerWidth / zoom);
-  canvas.height = Math.ceil(window.innerHeight / zoom);
+  worldW = Math.ceil(window.innerWidth / zoom);
+  worldH = Math.ceil(window.innerHeight / zoom);
+  drawScale = Math.min(1, zoom);
+  canvas.width = Math.ceil(worldW * drawScale);
+  canvas.height = Math.ceil(worldH * drawScale);
 }
 function setZoom(value: number): void {
   zoom = Math.max(0.6, Math.min(3, value));
@@ -1932,11 +2082,11 @@ function renderMinimap(): void {
   }
   // The visible part of the world is an upright rectangle in minimap space.
   mctx.setTransform(1, 0, 0, 1, 0, 0);
-  const sx = (a / HW) * (cam.x - canvas.width / 2) + minimap.width / 2;
-  const sy = (b / HH) * (cam.y - canvas.height / 2);
+  const sx = (a / HW) * (cam.x - viewW() / 2) + minimap.width / 2;
+  const sy = (b / HH) * (cam.y - viewH() / 2);
   mctx.strokeStyle = '#fff';
   mctx.lineWidth = 1;
-  mctx.strokeRect(sx + 0.5, sy + 0.5, (a / HW) * canvas.width, (b / HH) * canvas.height);
+  mctx.strokeRect(sx + 0.5, sy + 0.5, (a / HW) * viewW(), (b / HH) * viewH());
 }
 
 // --- render ----------------------------------------------------------------
@@ -1945,8 +2095,8 @@ function updateCamera(dt: number): void {
   // The view scrolls while the cursor rests near an edge of the window, faster the closer it is.
   const zone = 44;
   const push = (distance: number) => (mouse.inside && !mouse.onButton && distance < zone ? 0.35 + 0.65 * (1 - Math.max(0, distance) / zone) : 0);
-  let dx = push(canvas.width - mouse.x) - push(mouse.x);
-  let dy = push(canvas.height - mouse.y) - push(mouse.y);
+  let dx = push(viewW() - mouse.x) - push(mouse.x);
+  let dy = push(viewH() - mouse.y) - push(mouse.y);
   if (keys.has('a') || keys.has('arrowleft')) dx = -1;
   if (keys.has('d') || keys.has('arrowright')) dx = 1;
   if (keys.has('w') || keys.has('arrowup')) dy = -1;
@@ -2154,8 +2304,8 @@ function drawLobbyScene(now: number): void {
     lobbyPicture = undefined;
   }
   revealAll = true;
-  const w = canvas.width + DRIFT_X * 2;
-  const h = canvas.height + DRIFT_Y * 2;
+  const w = viewW() + DRIFT_X * 2;
+  const h = viewH() + DRIFT_Y * 2;
   if (!lobbyPicture || lobbyPicture.width !== w || lobbyPicture.height !== h) lobbyPicture = paintLobbyPicture(w, h, now);
   // Fractional offsets are fine here: the whole picture moves together, so nothing shimmers.
   const t = (now - lobbyStart) / 1000;
@@ -2202,8 +2352,9 @@ function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   requestAnimationFrame(frame);
+  ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
   ctx.fillStyle = '#0b0e0a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, viewW(), viewH());
   if (me < 0) return drawLobbyScene(now);
   if (!map) return;
   updateCamera(dt);
@@ -2265,22 +2416,24 @@ function frame(now: number): void {
   for (const v of shown) {
     if (v.kind !== 'farm') continue;
     const [x, y] = tileToScreen(v.x + 1, v.y + 1);
-    if (x > -100 && x < canvas.width + 100 && y > -100 && y < canvas.height + 100) drawBuildingView(v);
+    if (x > -100 && x < viewW() + 100 && y > -100 && y < viewH() + 100) drawBuildingView(v);
   }
 
   // Everything standing on the ground shares one depth-sorted pass.
   const alpha = Math.min(1, (now - snapTime) / TICK_MS);
   const drawables: { depth: number; draw: () => void }[] = [];
+  // Zoomed out, trees and rocks are already part of the ground blocks.
+  const far = farView();
   for (const [index, tile] of props) {
     const tx = index % map.size;
     const ty = Math.floor(index / map.size);
     const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
-    if (sx < -40 || sy < -10 || sx > canvas.width + 40 || sy > canvas.height + 60 || !explored[index]) continue;
+    if (far || sx < -40 || sy < -10 || sx > viewW() + 40 || sy > viewH() + 60 || !explored[index]) continue;
     drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now) });
   }
   const onScreen = (tx: number, ty: number, margin: number) => {
     const [x, y] = tileToScreen(tx, ty);
-    return x > -margin && x < canvas.width + margin && y > -margin && y < canvas.height + margin * 2;
+    return x > -margin && x < viewW() + margin && y > -margin && y < viewH() + margin * 2;
   };
   for (const v of shown) {
     if (v.kind === 'farm') continue;
