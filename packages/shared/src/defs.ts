@@ -121,7 +121,7 @@ export const DEFS: Record<Kind, KindDef> = {
     attack: 7, range: 7, cooldown: 2, sight: 9, garrison: 15,
   },
   monastery: {
-    label: 'Monastery', building: true, hp: 450, cost: { wood: 175 }, time: 30, age: 2, size: 3, armor: 3, trains: ['monk'],
+    label: 'Monastery', building: true, hp: 450, cost: { wood: 175 }, time: 30, age: 3, size: 3, armor: 3, trains: ['monk'],
   },
 };
 

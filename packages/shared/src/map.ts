@@ -8,7 +8,7 @@ export const MAX_PLAYERS = 4;
 /** Teams to choose from in the lobby; each has its own colour. */
 export const MAX_TEAMS = 8;
 /** Radius around each start tile kept free for the town centre and castle. */
-const BASE_RADIUS = 6.5;
+const BASE_RADIUS = 9;
 
 export const Tile = { Grass: 0, Water: 1, Forest: 2, Berries: 3, Gold: 4, Stone: 5 } as const;
 export type Tile = (typeof Tile)[keyof typeof Tile];
@@ -77,19 +77,20 @@ export function isWalkable(map: GameMap, tx: number, ty: number, team = -1): boo
 export function generateMap(seed: number, size = MAP_SIZE): GameMap {
   const rand = mulberry32(seed);
   const tiles = new Uint8Array(size * size);
-  // Each town sits somewhere in its own corner, a little different every game, and who gets which
-  // corner is left to chance; the first two players always face each other across the map.
-  const inset = 12;
-  const spread = Math.round(size * 0.14);
-  const corner = (cx: number, cy: number): [number, number] => {
-    const dx = Math.floor(rand() * (spread + 1));
-    const dy = Math.floor(rand() * (spread + 1));
-    return [cx === 0 ? inset + dx : size - 1 - inset - dx, cy === 0 ? inset + dy : size - 1 - inset - dy];
-  };
-  let pairs: [number, number][][] = [[corner(0, 0), corner(1, 1)], [corner(1, 0), corner(0, 1)]];
-  if (rand() < 0.5) pairs = [pairs[1], pairs[0]];
-  for (const pair of pairs) if (rand() < 0.5) pair.reverse();
-  const starts: [number, number][] = [pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]];
+  // Towns go anywhere on the map, at random, as long as they keep a fair distance from each other;
+  // if the dice can't manage that the distance is relaxed a little at a time.
+  const inset = 14;
+  const room = size - 1 - inset * 2;
+  const starts: [number, number][] = [];
+  let apart = size * 0.5;
+  for (let tries = 0; starts.length < 4; tries++) {
+    if (tries > 0 && tries % 300 === 0) {
+      apart *= 0.95;
+      starts.length = 0;
+    }
+    const p: [number, number] = [inset + Math.floor(rand() * (room + 1)), inset + Math.floor(rand() * (room + 1))];
+    if (starts.every(([x, y]) => Math.hypot(x - p[0], y - p[1]) >= apart)) starts.push(p);
+  }
   const nearStart = (x: number, y: number, r: number) => starts.some(([sx, sy]) => Math.hypot(x - sx, y - sy) <= r);
 
   const blob = (tile: Tile, cx: number, cy: number, r: number, density: number, keepOut: number) => {
@@ -132,11 +133,11 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
       const a = base + turn * Math.PI * 2;
       return [sx + Math.cos(a) * dist, sy + Math.sin(a) * dist];
     };
-    blob(Tile.Forest, ...spot(0.22, 10.5), 2.8, 1, BASE_RADIUS);
-    blob(Tile.Forest, ...spot(0.85, 10.5), 2.6, 1, BASE_RADIUS);
-    patch(Tile.Berries, ...spot(0, 8), 6);
-    patch(Tile.Gold, ...spot(0.45, 9), 5);
-    patch(Tile.Stone, ...spot(0.65, 9), 4);
+    blob(Tile.Forest, ...spot(0.22, 13.5), 2.8, 1, BASE_RADIUS);
+    blob(Tile.Forest, ...spot(0.85, 13.5), 2.6, 1, BASE_RADIUS);
+    patch(Tile.Berries, ...spot(0, 10), 6);
+    patch(Tile.Gold, ...spot(0.45, 11.5), 5);
+    patch(Tile.Stone, ...spot(0.65, 11.5), 4);
   }
 
   const amount = new Uint16Array(size * size);

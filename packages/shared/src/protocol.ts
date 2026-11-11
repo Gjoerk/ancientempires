@@ -42,7 +42,9 @@ export type QueueSnapshot = number[];
 export type ClientMessage =
   | { t: 'join'; name: string }
   | { t: 'cmd'; cmd: Command }
-  | { t: 'chat'; text: string };
+  | { t: 'chat'; text: string }
+  /** Ask for a pause, answer someone's request, or say you are ready to continue ('yes'). */
+  | { t: 'pause'; answer: 'request' | 'yes' | 'no' };
 
 /** Sent by the host to players. */
 export type ServerMessage =
@@ -52,6 +54,11 @@ export type ServerMessage =
   | { t: 'start'; you: number; room: string; seed: number; size: number; popLimit: number; players: PlayerInfo[] }
   | { t: 'players'; players: PlayerInfo[] }
   | { t: 'chat'; from: number; text: string }
+  /**
+   * Where a pause stands: 'asking' while players decide, 'paused' until everyone has pressed
+   * continue, 'off' when the game runs. `waiting` lists who still has to answer.
+   */
+  | { t: 'pause'; phase: 'asking' | 'paused' | 'off'; by: number; waiting: number[]; declinedBy: number }
   /** Sent while nothing else is, so guests can tell the host is still there. */
   | { t: 'ping' }
   | {

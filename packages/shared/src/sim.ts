@@ -525,14 +525,14 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number): voi
 }
 
 /** Units standing where a new building goes step off it, so that nobody is walled in. */
+/** Units standing where a building goes walk off it to the nearest free tile, then carry on. */
 function clearFootprint(state: GameState, r: Rect): void {
   for (const e of state.entities.values()) {
     if (isBuilding(e) || e.inside >= 0 || !isInside(e, r)) continue;
     const [spot] = freeTilesNear(state.map, Math.floor(e.x), Math.floor(e.y), 1);
     if (!spot) continue;
-    e.x = spot[0] + 0.5;
-    e.y = spot[1] + 0.5;
-    if (e.path.length > 0) e.path = findPath(state.map, spot[0], spot[1], e.path[e.path.length - 2], e.path[e.path.length - 1], teamOf(state, e.owner));
+    const rest = e.path.length > 0 ? findPath(state.map, spot[0], spot[1], e.path[e.path.length - 2], e.path[e.path.length - 1], teamOf(state, e.owner)) : [];
+    e.path = [spot[0], spot[1], ...rest];
   }
 }
 
@@ -665,7 +665,8 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
         (e.tasks ??= []).push(site.id);
       } else {
         e.order = { t: 'build', id: site.id };
-        e.path = [];
+        // A builder standing on the site first walks off it; anyone else goes from where they are.
+        e.path = isInside(e, rectOf(site)) && e.path.length > 0 ? e.path.slice(0, 2) : [];
       }
     }
   } else if (cmd.type === 'train') {
@@ -1374,6 +1375,7 @@ export function activityOf(e: Entity): number {
  *  0 nothing · 1 wood, 2 berries, 3 gold, 4 stone (target: tile) · 5 farming (target: field)
  *  6 building or repairing (target: building) · 7 attacking (target: unit) · 8 taking resources home (target: resource index)
  *  9 going into a building (target: building) · 10 walking · 11 healing, 12 converting (target: unit)
+ *  13 going for a relic (target: relic) · 14 taking the relic to a monastery (target: monastery)
  * Gathering and building are reported while walking there too; clients animate work only while the unit stands still.
  */
 export function taskOf(e: Entity): [number, number] {
@@ -1381,6 +1383,8 @@ export function taskOf(e: Entity): [number, number] {
   if (o.t === 'attack') return [7, o.id];
   if (o.t === 'heal') return [11, o.id];
   if (o.t === 'convert') return [12, o.id];
+  if (o.t === 'fetch') return [13, o.relic];
+  if (o.t === 'deliver') return [14, o.id];
   if (o.t === 'build') return [6, o.id];
   if (o.t === 'garrison') return [9, o.id];
   if (o.t === 'gather') {

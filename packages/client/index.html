@@ -359,6 +359,13 @@
     #music .grp.off input { opacity: .45; }
     @media (max-width: 700px) { #music input[type=range] { width: 52px; } }
     /* The end of a game: who won, and what next. */
+    #pause { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 41; width: min(380px, calc(100vw - 32px)); padding: 20px 22px; text-align: center; }
+    #pause h2 { margin: 0 0 6px; font-family: var(--title-font, var(--font)); font-size: 26px; color: var(--accent); }
+    #pause p { margin: 0 0 14px; }
+    #pause .end-buttons { display: flex; gap: 8px; justify-content: center; }
+    #pause .end-buttons button { min-width: 108px; padding: 8px 14px; font-size: 15px; }
+    #pause .end-buttons button[hidden] { display: none; }
+    body.paused #game { filter: saturate(.45) brightness(.8); }
     #end { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 40; width: min(420px, calc(100vw - 32px));
       padding: 22px 24px 16px; text-align: center; }
     #end h2 { margin: 0 0 6px; font-family: var(--title-font, var(--font)); font-size: 30px; color: var(--accent); }
@@ -396,6 +403,7 @@
     <button id="mute-btn" type="button">Sound on (M)</button>
     <button id="full-btn" type="button">Fullscreen (F)</button>
     <button id="help-btn" type="button">Help (H)</button>
+    <button id="pause-btn" type="button" title="Ask the other players to pause the game">Request pause</button>
     <button id="resign-btn" type="button">Resign</button>
     <span class="dim">Room <b id="room-code"></b></span>
   </div>
@@ -441,6 +449,14 @@
     </div>
     <p id="end-wait" class="dim" hidden>The host chooses a rematch or a new game.</p>
     <button id="end-look" type="button" class="link">Look at the map</button>
+  </div>
+  <div id="pause" class="frame" hidden role="dialog" aria-labelledby="pause-title">
+    <h2 id="pause-title"></h2>
+    <p id="pause-text"></p>
+    <div class="end-buttons">
+      <button id="pause-yes" type="button"></button>
+      <button id="pause-no" type="button">Decline</button>
+    </div>
   </div>
   <div id="toast" class="frame" hidden></div>
   <div id="chat-log"></div>

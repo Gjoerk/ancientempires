@@ -48,7 +48,7 @@ import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { effectsState, musicState, nextTrack, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
-import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setPlayerColors, unitHeight } from './sprites';
+import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setPlayerColors, TEAM_COLORS, TEAM_NAMES, unitHeight } from './sprites';
 
 interface View {
   id: number;
@@ -833,7 +833,9 @@ function send(cmd: Command): void {
 function copyLastJob(): void {
   const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
   if (ids.length === 0) return;
-  const from = [...orderedVillagers].reverse().find((id) => !ids.includes(id) && views.get(id)?.owner === me);
+  // T on the villager that just placed a building: place the next one of the same.
+  const own = ids.find((id) => placedBy.has(id));
+  const from = own ?? [...orderedVillagers].reverse().find((id) => !ids.includes(id) && views.get(id)?.owner === me);
   if (from === undefined) return;
   // The last villager was sent to put up a new building: the next one gets to place one of those too.
   const kind = placedBy.get(from);
@@ -994,7 +996,7 @@ function onMessage(msg: ServerMessage): void {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
       // Everyone hears when another player reaches a new age.
-      if (old && age > old.age && slot !== me) showNotice(slot, `has reached the ${AGE_NAMES[age] ?? 'next age'}.`);
+      if (old && age > old.age) showNotice(slot, `has reached the ${AGE_NAMES[age] ?? 'next age'}.`);
       if (old && age > old.age) {
         // A new age: the player's buildings change to its style, each in a puff of dust.
         for (const b of views.values()) {
@@ -1033,6 +1035,8 @@ function onMessage(msg: ServerMessage): void {
     }
   } else if (msg.t === 'chat') {
     showChat(msg.from, msg.text);
+  } else if (msg.t === 'pause') {
+    showPause(msg);
   } else if (msg.t === 'error') {
     $('lobby-msg').textContent = msg.message;
   }
@@ -1049,6 +1053,41 @@ function showChat(from: number, text: string): void {
   play('chat', 0);
 }
 
+/** The pause dialog: a request to answer, or a paused game waiting for everyone to continue. */
+let pauseState: Extract<ServerMessage, { t: 'pause' }> | undefined;
+function showPause(msg: Extract<ServerMessage, { t: 'pause' }>): void {
+  const was = pauseState?.phase ?? 'off';
+  pauseState = msg;
+  const name = (slot: number) => roster.find((p) => p.slot === slot)?.name ?? 'Someone';
+  const names = (slots: number[]) => slots.map(name).join(', ');
+  const mine = msg.waiting.includes(myOwnSlot);
+  document.body.classList.toggle('paused', msg.phase === 'paused');
+  $('pause-btn').toggleAttribute('disabled', msg.phase !== 'off');
+  if (msg.phase === 'off') {
+    $('pause').hidden = true;
+    if (msg.declinedBy >= 0) showNotice(msg.declinedBy, 'declined the pause.');
+    else if (was === 'paused') showNotice(-1, 'The game continues.');
+    return;
+  }
+  if (was !== msg.phase) play('chat', 0);
+  if (msg.phase === 'paused' && was !== 'paused') showNotice(msg.by, 'paused the game.');
+  $('pause').hidden = false;
+  const asking = msg.phase === 'asking';
+  $('pause-title').textContent = asking ? 'Pause?' : 'Game paused';
+  $('pause-text').textContent = asking
+    ? msg.by === myOwnSlot
+      ? `Waiting for ${names(msg.waiting)} to accept the pause…`
+      : mine
+        ? `${name(msg.by)} would like to pause the game.`
+        : `Waiting for ${names(msg.waiting)}…`
+    : mine
+      ? 'Press continue when you are ready to play on.'
+      : `Waiting for ${names(msg.waiting)} to continue…`;
+  $('pause-yes').textContent = asking ? 'Accept' : 'Continue';
+  $('pause-yes').hidden = !mine;
+  $('pause-no').hidden = !(mine && asking);
+}
+
 /** A line in the chat from the game itself, such as another player reaching a new age. */
 function showNotice(from: number, text: string): void {
   const line = document.createElement('div');
@@ -1056,7 +1095,8 @@ function showNotice(from: number, text: string): void {
   const who = document.createElement('b');
   who.textContent = roster.find((p) => p.slot === from)?.name ?? 'Someone';
   who.style.color = PLAYER_COLORS[from] ?? '';
-  line.append(who, ` ${text}`);
+  if (from < 0) line.append(text);
+  else line.append(who, ` ${text}`);
   $('chat-log').append(line);
   setTimeout(() => line.remove(), 12000);
 }
@@ -1078,6 +1118,10 @@ function underAttack(v: View, now: number): void {
 /** Clears everything that belongs to a running game. */
 function resetGame(): void {
   setIconAge(1);
+  pauseState = undefined;
+  $('pause').hidden = true;
+  document.body.classList.remove('paused');
+  $('pause-btn').removeAttribute('disabled');
   me = -1;
   revealAll = false;
   centred = false;
@@ -1143,13 +1187,20 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
     // The host puts players into teams; same team means allies.
     const team = document.createElement('select');
     team.title = 'Team';
-    for (let t = 0; t < MAX_TEAMS; t++) team.add(new Option(`Team ${t + 1}`, String(t)));
+    for (let t = 0; t < MAX_TEAMS; t++) {
+      const option = new Option(`● Team ${t + 1} · ${TEAM_NAMES[t]}`, String(t));
+      option.style.color = TEAM_COLORS[t];
+      option.style.fontWeight = '700';
+      team.add(option);
+    }
     team.value = String(p.team);
     team.className = 'team';
     team.style.setProperty('--gem', `var(--gem-${p.team})`);
     team.disabled = !hosting;
+    team.style.color = TEAM_COLORS[p.team];
     team.addEventListener('change', () => {
       team.style.setProperty('--gem', `var(--gem-${team.value})`);
+      team.style.color = TEAM_COLORS[Number(team.value)];
       chip.style.setProperty('--gem', `var(--gem-${team.value})`);
       session?.host?.setTeam(p.slot, Number(team.value));
     });
@@ -1806,6 +1857,12 @@ $('sfx-vol').addEventListener('change', () => play('order', 0));
 showAudio();
 // In fullscreen the pointer is kept on this screen while playing, so edge scrolling cannot lose it to another monitor.
 installCursorLock(canvas, () => !$('bottom').hidden);
+$('pause-btn').addEventListener('click', () => {
+  $('menu').hidden = true;
+  session?.send({ t: 'pause', answer: 'request' });
+});
+$('pause-yes').addEventListener('click', () => session?.send({ t: 'pause', answer: 'yes' }));
+$('pause-no').addEventListener('click', () => session?.send({ t: 'pause', answer: 'no' }));
 $('resign-btn').addEventListener('click', () => {
   $('menu').hidden = true;
   if (confirm('Give up? Your king dies and you are out of the game.')) send({ type: 'resign' });
@@ -1863,8 +1920,8 @@ $('actions').addEventListener('click', (ev) => {
   if (build) placing = build as Kind;
   if (train) {
     send({ type: 'train', building: Number(button.dataset.at), kind: train });
-    // Queuing a unit sounds like giving an order; research does not.
-    if (train in DEFS) play(`order.train.${train}`, 120);
+    // Queuing a unit or an upgrade sounds like giving an order.
+    play(`order.train.${train}`, 120);
   }
   if (cancel) send({ type: 'cancel', building: Number(cancel) });
 });
@@ -2004,7 +2061,9 @@ function statusOf(v: View): string {
     case 10: return 'Walking';
     case 11: return other ? `Healing ${name}` : 'Healing';
     case 12: return other ? `Converting ${name}` : 'Converting';
-    default: return 'Idle';
+    case 13: return 'Going for the relic';
+    case 14: return 'Carrying the relic to the monastery';
+    default: return relics.some((r) => r[2] === v.id) ? 'Carrying the relic' : 'Idle';
   }
 }
 
@@ -2097,6 +2156,7 @@ function renderPanel(): void {
     }
     if (v.kind === 'monastery' && v.extra >= 100) {
       const kept = relics.filter((r) => r[3] === v.id).length;
+      if (kept) card.stats.push(['relic', `Relic: +${RELIC_ATTACK} attack`]);
       card.sub = kept ? `Keeps the relic: +${relicsKept(v.owner) * RELIC_ATTACK} attack for the whole army` : v.owner === me ? 'Bring the relic here with a monk for +2 attack' : card.sub;
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
@@ -2864,9 +2924,15 @@ function frame(now: number): void {
     const lean = tile === Tile.Forest ? breeze.lean(sx + cam.x - viewW() / 2, sy + cam.y - viewH() / 2, now) : 0;
     drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now, lean) });
   }
-  // Relics: on the ground where seen, or held up by the monk carrying them.
+  // Relics: on the ground where seen, held up by the monk carrying them, or floating over their monastery.
   for (const [x, y, carrier, monastery] of relics) {
-    if (monastery >= 0) continue;
+    if (monastery >= 0) {
+      const home = views.get(monastery);
+      if (!home || !canSee(home)) continue;
+      const [hx, hy] = tileToScreen(home.x + 1.5, home.y + 1.5);
+      drawables.push({ depth: home.x + home.y + 3.2, draw: () => drawRelic(ctx, hx, hy - 58, now, true) });
+      continue;
+    }
     if (carrier >= 0) {
       const monk = views.get(carrier);
       if (!monk || !canSee(monk)) continue;

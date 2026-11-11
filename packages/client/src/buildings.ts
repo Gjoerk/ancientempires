@@ -648,6 +648,14 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
   // A stone hall with a slate roof and a bell tower, arched windows and a banner in the owner's colour.
   monastery(pen, team) {
     pen.box(0.15, 0.15, 2.85, 2.85, 0, 3, '#8d8674');
+    // Back to front: the bell tower at the back corner first, then the side wing, then the hall.
+    pen.box(0.3, 0.3, 1.05, 1.05, 3, 52, '#c2b699');
+    pen.onU(1.05, 0.55, 0.8, 38, 48, '#2c3440');
+    pen.onV(1.05, 0.55, 0.8, 38, 48, '#2c3440');
+    pen.disc(pen.p(1.05, 0.68, 41), 3, '#e3b84e');
+    pen.pyramid(0.22, 0.22, 1.13, 1.13, 52, 20, '#45505c');
+    pen.box(0.3, 1.1, 1.15, 2.6, 3, 16, '#b9ad92');
+    pen.gable(0.25, 1.05, 1.2, 2.65, 16, 8, '#45505c', '#b9ad92', false);
     pen.box(1.15, 0.45, 2.7, 2.6, 3, 22, '#cbbfa4');
     for (const u of [1.4, 1.9, 2.4]) {
       pen.onV(2.6, u - 0.12, u + 0.12, 9, 17, '#2c3440');
@@ -656,13 +664,6 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.onU(2.7, 1.25, 1.85, 3, 16, '#3a2a1a');
     pen.onU(2.7, 0.55, 0.85, 12, 20, team);
     pen.gable(1.05, 0.35, 2.8, 2.7, 22, 14, '#45505c', '#cbbfa4', false);
-    pen.box(0.3, 1.1, 1.15, 2.6, 3, 16, '#b9ad92');
-    pen.gable(0.25, 1.05, 1.2, 2.65, 16, 8, '#45505c', '#b9ad92', false);
-    pen.box(0.3, 0.3, 1.05, 1.05, 3, 52, '#c2b699');
-    pen.onU(1.05, 0.55, 0.8, 38, 48, '#2c3440');
-    pen.onV(1.05, 0.55, 0.8, 38, 48, '#2c3440');
-    pen.disc(pen.p(1.05, 0.68, 41), 3, '#e3b84e');
-    pen.pyramid(0.22, 0.22, 1.13, 1.13, 52, 20, '#45505c');
   },
 
   // Walled keep with four corner towers. A flag flies only while a king is inside.
@@ -1038,6 +1039,15 @@ const AGE_DESIGNS: Record<1 | 3, Partial<Record<Kind, Design>>> = {
     // A brick church with stone trim, a slate roof and a tall bell tower with a spire.
     monastery(pen, team) {
       pen.box(0.15, 0.15, 2.85, 2.85, 0, 3, DRESSED);
+      // Back to front: the bell tower at the back corner first, then the side wing, then the hall.
+      pen.box(0.3, 0.3, 1.05, 1.05, 3, 56, BRICK);
+      quoins(pen, 0.3, 0.3, 1.05, 1.05, 3, 56);
+      framedWindow(pen, 'u', 1.05, 0.56, 40, 9);
+      framedWindow(pen, 'v', 1.05, 0.56, 40, 9);
+      pen.box(0.24, 0.24, 1.11, 1.11, 56, 59, DRESSED);
+      pen.pyramid(0.28, 0.28, 1.07, 1.07, 59, 26, SLATE);
+      pen.box(0.3, 1.1, 1.15, 2.6, 3, 17, BRICK);
+      pen.gable(0.25, 1.05, 1.2, 2.65, 17, 8, SLATE, BRICK, false);
       pen.box(1.15, 0.45, 2.7, 2.6, 3, 24, BRICK);
       quoins(pen, 1.15, 0.45, 2.7, 2.6, 3, 24);
       for (const u of [1.4, 1.9, 2.4]) {
@@ -1049,14 +1059,6 @@ const AGE_DESIGNS: Record<1 | 3, Partial<Record<Kind, Design>>> = {
       pen.disc(pen.p(2.7, 1.55, 21), 2.5, '#e3b84e');
       pen.onU(2.7, 0.55, 0.85, 12, 21, team);
       pen.gable(1.05, 0.35, 2.8, 2.7, 24, 15, SLATE, BRICK, false);
-      pen.box(0.3, 1.1, 1.15, 2.6, 3, 17, BRICK);
-      pen.gable(0.25, 1.05, 1.2, 2.65, 17, 8, SLATE, BRICK, false);
-      pen.box(0.3, 0.3, 1.05, 1.05, 3, 56, BRICK);
-      quoins(pen, 0.3, 0.3, 1.05, 1.05, 3, 56);
-      framedWindow(pen, 'u', 1.05, 0.56, 40, 9);
-      framedWindow(pen, 'v', 1.05, 0.56, 40, 9);
-      pen.box(0.24, 0.24, 1.11, 1.11, 56, 59, DRESSED);
-      pen.pyramid(0.28, 0.28, 1.07, 1.07, 59, 26, SLATE);
     },
     // A brick wall on a stone footing, with stone battlements.
     wall(pen) {

@@ -15,7 +15,54 @@ export class GameHost {
   readonly players = new Map<number, PlayerInfo>();
   readonly settings: GameSettings = { quick: false, mapSize: 'medium', popLimit: POP_MAX };
 
+  /**
+   * A pause everyone has to agree to: 'asking' while the others decide, then 'paused' until
+   * everyone has pressed continue. `agreed` holds who has answered yes in the current phase.
+   */
+  pause: { phase: 'asking' | 'paused'; by: number; agreed: Set<number> } | undefined;
+
   constructor(readonly room: string) {}
+
+  /** The people who have to agree: everyone but computer and stand-in opponents. */
+  private voters(): number[] {
+    return [...this.players.values()].filter((p) => !p.ai && !p.test).map((p) => p.slot);
+  }
+
+  pauseMessage(declinedBy = -1): ServerMessage {
+    const p = this.pause;
+    if (!p) return { t: 'pause', phase: 'off', by: -1, waiting: [], declinedBy };
+    return { t: 'pause', phase: p.phase, by: p.by, waiting: this.voters().filter((slot) => !p.agreed.has(slot)), declinedBy };
+  }
+
+  /**
+   * A player asks for a pause, answers someone's request, or says they are ready to go on.
+   * Returns the message telling everyone where things stand, or nothing if it changed nothing.
+   */
+  answerPause(slot: number, answer: unknown): ServerMessage | undefined {
+    if (!this.state || this.state.winner >= 0 || !this.voters().includes(slot)) return undefined;
+    const p = this.pause;
+    if (answer === 'request' && !p) {
+      this.pause = { phase: 'asking', by: slot, agreed: new Set([slot]) };
+    } else if (answer === 'yes' && p) {
+      p.agreed.add(slot);
+    } else if (answer === 'no' && p?.phase === 'asking') {
+      this.pause = undefined;
+      return this.pauseMessage(slot);
+    } else {
+      return undefined;
+    }
+    return this.settlePause();
+  }
+
+  /** Moves the pause on once everyone has agreed (also after someone leaves). */
+  private settlePause(): ServerMessage {
+    const p = this.pause;
+    if (p && this.voters().every((slot) => p.agreed.has(slot))) {
+      if (p.phase === 'asking') this.pause = { phase: 'paused', by: p.by, agreed: new Set() };
+      else this.pause = undefined;
+    }
+    return this.pauseMessage();
+  }
 
   /**
    * Adds a player to the lobby. Returns undefined when the room is full or the game is running.
@@ -36,6 +83,7 @@ export class GameHost {
 
   leave(slot: number): void {
     if (this.players.delete(slot) && this.state) removePlayer(this.state, slot);
+    if (this.pause) this.settlePause();
   }
 
   setTeam(slot: number, team: number): void {
@@ -48,15 +96,17 @@ export class GameHost {
     this.state = createGame(seed, MAP_SIZES[this.settings.mapSize], this.settings.popLimit);
     for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot, this.players.get(slot)!.team, this.settings.quick);
     placeRelics(this.state);
+    this.pause = undefined;
   }
 
   /** Ends the running game and sends everyone back to the lobby. */
   backToLobby(): void {
     this.state = undefined;
+    this.pause = undefined;
   }
 
   command(slot: number, cmd: Command): void {
-    if (this.state && this.players.has(slot) && cmd && typeof cmd === 'object') applyCommand(this.state, slot, cmd);
+    if (this.state && this.pause?.phase !== 'paused' && this.players.has(slot) && cmd && typeof cmd === 'object') applyCommand(this.state, slot, cmd);
   }
 
   lobbyMessage(you: number, host: number): ServerMessage {
@@ -74,7 +124,7 @@ export class GameHost {
   /** Advances the game one tick and returns the snapshot to send to everyone (nothing while in the lobby). */
   tick(): ServerMessage | undefined {
     const s = this.state;
-    if (!s) return undefined;
+    if (!s || this.pause?.phase === 'paused') return undefined;
     // Computer opponents think about once a second, each on its own tick.
     for (const player of this.players.values()) if (player.ai && (s.tick + player.slot * 3) % 10 === 0) runAi(s, player.slot);
     step(s);

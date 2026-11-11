@@ -6,6 +6,7 @@ import { drawSprite, findSprite } from './assets';
 export const TEAM_COLORS = ['#3b6fd4', '#d43b3b', '#3bb85a', '#e0c12f', '#9a4fd6', '#e8832a', '#2fb8b0', '#e05aa8'];
 
 /** Each player's colour, by slot: the colour of their team, set when a game starts. */
+export const TEAM_NAMES = ['Blue', 'Red', 'Green', 'Yellow', 'Purple', 'Orange', 'Teal', 'Pink'];
 export const PLAYER_COLORS = TEAM_COLORS.slice(0, 4);
 
 /** Gives every player their team's colour; `teams` is the team of each slot. */

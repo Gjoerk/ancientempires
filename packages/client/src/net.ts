@@ -127,6 +127,9 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
         game.command(slot, msg.cmd);
       } else if (msg.t === 'chat' && slot !== undefined && cleanChat(msg.text)) {
         broadcast({ t: 'chat', from: slot, text: cleanChat(msg.text) });
+      } else if (msg.t === 'pause' && slot !== undefined) {
+        const news = game.answerPause(slot, msg.answer);
+        if (news) broadcast(news);
       }
     });
     const drop = () => {
@@ -134,7 +137,10 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       if (slot === undefined) return;
       guests.delete(conn);
       game.leave(slot);
-      if (game.state) broadcast(game.playersMessage());
+      if (game.state) {
+        broadcast(game.playersMessage());
+        broadcast(game.pauseMessage());
+      }
       else sendLobby();
     };
     conn.on('close', drop);
@@ -153,6 +159,10 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
     send: (msg) => {
       if (msg.t === 'cmd' && controlSlot >= 0) game.command(controlSlot, msg.cmd);
       if (msg.t === 'chat' && mySlot >= 0) broadcast({ t: 'chat', from: mySlot, text: cleanChat(msg.text) });
+      if (msg.t === 'pause' && mySlot >= 0) {
+        const news = game.answerPause(mySlot, msg.answer);
+        if (news) broadcast(news);
+      }
     },
     close: () => close(''),
     host: {

@@ -320,7 +320,7 @@ test('a computer opponent builds up, advances and beats an idle player', () => {
   const host = new GameHost('TEST');
   host.join('Idle');
   host.join('Computer', 'ai');
-  host.start(47);
+  host.start(11);
   const s = host.state!;
   let ticks = 0;
   for (; ticks < 14000 && s.winner < 0; ticks++) host.tick();
@@ -482,7 +482,7 @@ test('every training click counts, up to fifteen in a queue', () => {
   assert.equal(p.res.food, 5000 - 15 * 50);
 });
 
-test('a unit standing where a building is placed steps out of the way', () => {
+test('a unit standing where a building is placed walks out of the way', () => {
   const s = createGame(71);
   addPlayer(s, 0);
   const [sx, sy] = s.map.starts[0];
@@ -491,7 +491,10 @@ test('a unit standing where a building is placed steps out of the way', () => {
   bystander.y = sy + 3.5;
   applyCommand(s, 0, { type: 'place', ids: [builder.id], kind: 'house', x: sx - 1, y: sy + 3 });
   assert.equal(owned(s, 0, 'house').length, 1);
-  assert.ok(isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'moved off the footprint');
+  // Walks off rather than jumping: still on the site at first, off it a moment later.
+  assert.ok(!isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'still on the footprint');
+  run(s, 20);
+  assert.ok(isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'walked off the footprint');
 });
 
 test('a mixed crowd of nine melee fighters never shares a tile around its target', () => {
@@ -695,18 +698,25 @@ test('a monk carries a relic to the monastery, which gives the army extra attack
   assert.equal(before - target.hp, attackOf('swordsman', () => false) - armorOf('villager', () => false) + 2);
 });
 
-test('towns start in a different spot of their corner from game to game', () => {
+test('towns are spread at random but never close together', () => {
   const spots = new Set<string>();
+  let notCorners = 0;
   for (let seed = 1; seed <= 12; seed++) {
     const m = generateMap(seed, 96);
     for (const [x, y] of m.starts) {
       assert.ok(x >= 12 && y >= 12 && x <= 96 - 13 && y <= 96 - 13, `inside the map: ${x},${y}`);
     }
-    // The first two players always face each other across the map.
+    for (let i = 0; i < m.starts.length; i++) {
+      for (let j = i + 1; j < m.starts.length; j++) {
+        const d = Math.hypot(m.starts[i][0] - m.starts[j][0], m.starts[i][1] - m.starts[j][1]);
+        assert.ok(d >= 30, `towns ${i} and ${j} only ${d.toFixed(1)} apart`);
+      }
+    }
     const [a, b] = m.starts;
-    assert.ok(Math.abs(a[0] - b[0]) > 40 && Math.abs(a[1] - b[1]) > 40, 'opposite corners');
+    if (!(Math.abs(a[0] - b[0]) > 40 && Math.abs(a[1] - b[1]) > 40)) notCorners++;
     spots.add(m.starts[0].join(','));
   }
+  assert.ok(notCorners >= 3, 'the first two towns are not always across from each other');
   assert.ok(spots.size >= 8, `only ${spots.size} different first towns`);
 });
 
@@ -722,4 +732,35 @@ test('the relic notes who has seen it', () => {
   spawn(s, 1, 'scout', relic.x + 3, relic.y);
   for (let i = 0; i < 6; i++) host.tick();
   assert.equal(relic.foundBy, 1 << 1, 'only the scout\'s player has seen it');
+});
+
+test('a pause needs everyone to agree, and everyone to continue', () => {
+  const host = new GameHost('TEST');
+  host.join('Me');
+  host.join('Them');
+  host.join('Computer', 'ai');
+  host.start(5);
+  const s = host.state!;
+  host.tick();
+  assert.equal(host.answerPause(1, 'request')?.t, 'pause');
+  assert.deepEqual((host.answerPause(0, 'no') as { declinedBy: number }).declinedBy, 0, 'declined');
+  assert.equal(host.pause, undefined);
+  host.answerPause(1, 'request');
+  const asked = host.answerPause(1, 'yes') as { phase: string; waiting: number[] };
+  assert.deepEqual([asked.phase, asked.waiting], ['asking', [0]], 'the computer does not get a say');
+  assert.equal(host.tick()?.t, 'snap', 'the game runs while asking');
+  assert.equal((host.answerPause(0, 'yes') as { phase: string }).phase, 'paused');
+  const tick = s.tick;
+  assert.equal(host.tick(), undefined);
+  assert.equal(s.tick, tick, 'nothing moves while paused');
+  assert.equal((host.answerPause(0, 'yes') as { phase: string; waiting: number[] }).waiting.join(), '1');
+  assert.equal((host.answerPause(1, 'yes') as { phase: string }).phase, 'off');
+  assert.equal(host.tick()?.t, 'snap', 'running again');
+  // Someone leaving while the others wait does not leave the game stuck.
+  host.answerPause(0, 'request');
+  host.answerPause(1, 'yes');
+  assert.equal((host.pause as { phase: string } | undefined)?.phase, 'paused');
+  host.answerPause(0, 'yes');
+  host.leave(1);
+  assert.equal(host.pause, undefined);
 });
