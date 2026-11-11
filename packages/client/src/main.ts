@@ -410,14 +410,14 @@ function paintTile(m: GameMap, index: number): void {
 }
 
 /**
- * Mist around the edge of the map: clouds that thicken towards the border and beyond it, so the
- * world fades away instead of ending in a hard cut. Painted once per map in tile units, a few
- * pixels per tile, and stretched over the view like the fog.
+ * Mist beyond the edge of the map: light clouds that begin right at the border, so the world ends
+ * in soft weather instead of black while every tile of the map stays clear. Painted once per map
+ * in tile units, a few pixels per tile, and stretched over the view like the fog.
  */
 let edgeMist: HTMLCanvasElement | undefined;
 const MIST_PAD = 14;
 const MIST_RES = 4;
-const MIST_COLOR = '#1b2621';
+const MIST_COLOR = '#4a5a53';
 
 function paintEdgeMist(n: number, seed: number): HTMLCanvasElement {
   const size = (n + MIST_PAD * 2) * MIST_RES;
@@ -446,15 +446,15 @@ function paintEdgeMist(n: number, seed: number): HTMLCanvasElement {
       // How far inside the map this point is (negative outside it).
       const inside = Math.min(u, v, n - u, n - v);
       const cloud = noise(u / 5, v / 5) * 0.6 + noise(u / 2.2 + 40, v / 2.2) * 0.4;
-      // The mist starts a few tiles in, thickening outwards; its inner edge is ragged with the clouds.
-      const k = Math.max(0, Math.min(1, (8 - inside + (cloud - 0.5) * 5) / 8.5));
+      // The mist begins right at the border, with a short soft edge, and never reaches onto the map.
+      const k = inside >= 0 ? 0 : Math.max(0, Math.min(1, (-inside + (cloud - 0.5) * 0.3) / 0.7));
       const alpha = k * k * (3 - 2 * k);
       // Lighter puffs of cloud, which settle into the plain mist colour at the outer rim.
       const puff = cloud * 30 * Math.max(0, 1 - Math.max(0, -inside) / MIST_PAD);
       const o = (py * size + px) * 4;
-      img.data[o] = 27 + puff * 0.85;
-      img.data[o + 1] = 38 + puff * 1.12;
-      img.data[o + 2] = 33 + puff;
+      img.data[o] = 74 + puff * 1.1;
+      img.data[o + 1] = 90 + puff * 1.15;
+      img.data[o + 2] = 83 + puff * 1.2;
       img.data[o + 3] = Math.round(alpha * 255);
     }
   }
@@ -471,7 +471,7 @@ function drawEdgeMist(): void {
   ctx.imageSmoothingEnabled = true;
   // Only the band along each side has mist in it; the middle of the picture is clear, so it is skipped.
   const n = map.size + MIST_PAD * 2;
-  const band = MIST_PAD + 10;
+  const band = MIST_PAD + 2;
   const r = MIST_RES;
   for (const [u, v, w, h] of [[0, 0, n, band], [0, n - band, n, band], [0, band, band, n - band * 2], [n - band, band, band, n - band * 2]]) {
     ctx.drawImage(edgeMist, u * r, v * r, w * r, h * r, u - MIST_PAD, v - MIST_PAD, w, h);
