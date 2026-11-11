@@ -75,14 +75,19 @@ export function isWalkable(map: GameMap, tx: number, ty: number, team = -1): boo
 export function generateMap(seed: number, size = MAP_SIZE): GameMap {
   const rand = mulberry32(seed);
   const tiles = new Uint8Array(size * size);
+  // Each town sits somewhere in its own corner, a little different every game, and who gets which
+  // corner is left to chance; the first two players always face each other across the map.
   const inset = 12;
-  const far = size - 1 - inset;
-  const starts: [number, number][] = [
-    [inset, inset],
-    [far, far],
-    [far, inset],
-    [inset, far],
-  ];
+  const spread = Math.round(size * 0.14);
+  const corner = (cx: number, cy: number): [number, number] => {
+    const dx = Math.floor(rand() * (spread + 1));
+    const dy = Math.floor(rand() * (spread + 1));
+    return [cx === 0 ? inset + dx : size - 1 - inset - dx, cy === 0 ? inset + dy : size - 1 - inset - dy];
+  };
+  let pairs: [number, number][][] = [[corner(0, 0), corner(1, 1)], [corner(1, 0), corner(0, 1)]];
+  if (rand() < 0.5) pairs = [pairs[1], pairs[0]];
+  for (const pair of pairs) if (rand() < 0.5) pair.reverse();
+  const starts: [number, number][] = [pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]];
   const nearStart = (x: number, y: number, r: number) => starts.some(([sx, sy]) => Math.hypot(x - sx, y - sy) <= r);
 
   const blob = (tile: Tile, cx: number, cy: number, r: number, density: number, keepOut: number) => {

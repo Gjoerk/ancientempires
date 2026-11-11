@@ -1,4 +1,4 @@
-import { PROP_COLORS, PROP_VARIANTS, PropName, propArt, UNIT_COLORS, unitArt } from './pixelart';
+import { PROP_COLORS, PROP_VARIANTS, PropName, propArt, relicArt, UNIT_COLORS, unitArt } from './pixelart';
 import { Kind, Tile } from '@kingsfall/shared';
 import { drawSprite, findSprite } from './assets';
 
@@ -259,30 +259,34 @@ export function shade(color: string, f: number): string {
   return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
 }
 
-// A relic: a small golden shrine with a cross and a red gem, glinting now and then.
-const RELIC = [
-  '.....w.....',
-  '....www....',
-  '.....w.....',
-  '..ooooooo..',
-  '.oyyyyyyyo.',
-  'oyyyyryyyyo',
-  'oyYyyyyyYyo',
-  'oyYyyyyyYyo',
-  'oYYYYYYYYYo',
-  '.ooooooooo.',
-];
-const RELIC_PALETTE: Record<string, string> = { o: '#6b4a1a', y: '#f2c93a', Y: '#c99a20', r: '#c8302f', w: '#fff4c2' };
-
-/** Draws a relic with its foot at (x, y); `carried` draws it smaller, held up by a monk. */
+/**
+ * The relic: a glowing orb with a gold band and cross, hovering and bobbing over a small stone
+ * ring, pulsing softly and circled by sparks. Its foot is at (x, y); `carried` draws it smaller,
+ * held up by a monk.
+ */
 export function drawRelic(ctx: Ctx, x: number, y: number, now: number, carried: boolean): void {
-  if (!carried) shadow(ctx, x, y, 7, 3);
-  blit(ctx, RELIC, RELIC_PALETTE, x, y + (carried ? 0 : Math.sin(now / 600) * 1.2 - 1), carried ? 1 : 2);
-  // A glint that sweeps across now and then.
-  const k = (now % 2600) / 2600;
-  if (k < 0.25) {
-    ctx.fillStyle = `rgba(255,255,230,${(Math.sin((k / 0.25) * Math.PI) * 0.9).toFixed(3)})`;
-    const s = carried ? 1 : 2;
-    ctx.fillRect(Math.round(x - 4 * s + k * 32 * s), Math.round(y - 8 * s), s, 3 * s);
+  const rows = relicArt();
+  const k = carried ? 0.6 : 1;
+  const bob = Math.sin(now / 500) * 1.5;
+  const glowY = y - rows.length * k * 0.62;
+  if (!carried) shadow(ctx, x, y, 9, 3.5);
+  const pulse = 0.5 + 0.5 * Math.sin(now / 420);
+  const r = 13 * k;
+  const halo = ctx.createRadialGradient(x, glowY + bob, 1, x, glowY + bob, r * (1 + 0.15 * pulse));
+  halo.addColorStop(0, `rgba(190,230,255,${0.55 + 0.25 * pulse})`);
+  halo.addColorStop(1, 'rgba(190,230,255,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(x, glowY + bob, r * 1.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y + bob));
+  ctx.scale(k, k);
+  blit(ctx, rows, unitPalette(0), 0, 0, 1);
+  ctx.restore();
+  for (let i = 0; i < 3; i++) {
+    const a = now / 700 + (i * Math.PI * 2) / 3;
+    ctx.fillStyle = 'rgba(235,250,255,.9)';
+    ctx.fillRect(Math.round(x + Math.cos(a) * 9 * k), Math.round(glowY + bob + Math.sin(a) * 3.5 * k), 1, 1);
   }
 }

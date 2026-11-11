@@ -997,9 +997,9 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
   }
 }
 
-/** Each relic kept in a player's monasteries adds this to the attack of their army, up to RELIC_MAX relics. */
-export const RELIC_ATTACK = 1;
-export const RELIC_MAX = 2;
+/** The relic, kept in a player's monastery, adds this to the attack of their whole army. */
+export const RELIC_ATTACK = 2;
+export const RELIC_MAX = 1;
 
 /** How many relics a player keeps, counted up to RELIC_MAX. */
 export function relicsKept(state: GameState, owner: number): number {
@@ -1115,14 +1115,11 @@ function ejectOne(state: GameState, b: Entity, e: Entity): void {
   e.y = spot[1] + 0.5;
 }
 
-/**
- * Puts relics on the map for a new game: on open ground, far from every starting town and from
- * each other. Two on small maps, three on bigger ones.
- */
+/** Puts the relic on the map for a new game: on open ground, far from every starting town. */
 export function placeRelics(state: GameState): void {
   const map = state.map;
   const n = map.size;
-  const count = n <= 96 ? 2 : 3;
+  const count = 1;
   let seed = (state.seed ^ 0x9e3779b9) >>> 0;
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;

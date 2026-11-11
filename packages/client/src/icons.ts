@@ -12,7 +12,7 @@ const SIZE = 48;
 // e green, s stone, l light stone, o brown, c cream.
 const PALETTE: Record<string, string> = {
   w: '#e3e7ec', k: '#7a5230', b: '#2a2018', r: '#c8402f', g: '#e0b030', y: '#f7df7a',
-  e: '#5f9a3a', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8',
+  e: '#5f9a3a', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8', i: '#8fd0ff', j: '#eaf8ff',
 };
 
 const GLYPHS: Record<string, string[]> = {
@@ -125,16 +125,16 @@ const GLYPHS: Record<string, string[]> = {
     '....bb....',
   ],
   relic: [
-    '....ww....',
-    '...wwww...',
-    '....ww....',
-    '.oooooooo.',
-    'oyyyyyyyyo',
-    'oyyyrryyyo',
-    'oyggyyggyo',
-    'oyggyyggyo',
-    'oggggggggo',
-    '.oooooooo.',
+    '....y.....',
+    '...yyy....',
+    '....y.....',
+    '..iiii....',
+    '.iijjii...',
+    '.ijiiiii..',
+    'yyyyyyyyy.',
+    '.iiiiiii..',
+    '..iiiii...',
+    '...lll....',
   ],
   crown: [
     '....gg....',

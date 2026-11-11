@@ -1964,7 +1964,7 @@ function renderPanel(): void {
     } else card.bar = [v.hp, maxHp(v)];
     if (def.attack) {
       const extra = v.kind === 'villager' ? 0 : relicsKept(v.owner) * RELIC_ATTACK;
-      card.stats.push(['sword', extra ? `${attackOf(v.kind, theirs) + extra} (+${extra} relics)` : String(attackOf(v.kind, theirs))]);
+      card.stats.push(['sword', extra ? `${attackOf(v.kind, theirs) + extra} (+${extra} relic)` : String(attackOf(v.kind, theirs))]);
     }
     if ((def.range ?? 0) > 2) card.stats.push(['bow', String(rangeOf(v.kind, theirs))]);
     if (!isBuilding(v.kind) || def.attack) card.stats.push(['shield', String(armorOf(v.kind, theirs))]);
@@ -1982,7 +1982,7 @@ function renderPanel(): void {
     }
     if (v.kind === 'monastery' && v.extra >= 100) {
       const kept = relics.filter((r) => r[3] === v.id).length;
-      card.sub = kept ? `Keeps ${kept} relic${kept > 1 ? 's' : ''}: +${relicsKept(v.owner) * RELIC_ATTACK} attack for the whole army` : v.owner === me ? 'Bring relics here with monks for extra attack' : card.sub;
+      card.sub = kept ? `Keeps the relic: +${relicsKept(v.owner) * RELIC_ATTACK} attack for the whole army` : v.owner === me ? 'Bring the relic here with a monk for +2 attack' : card.sub;
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
     if (queue) {
@@ -2296,7 +2296,7 @@ function renderHud(): void {
   const pop = stat('house', `${p.pop}/${p.cap}`, `Population / housing — at most ${popLimit} in this game`, `max ${popLimit}`);
   if (p.pop >= p.cap && p.cap < popLimit) pop.classList.add('warn');
   const kept = relicsKept(me);
-  if (kept) stat('relic', `+${kept * RELIC_ATTACK}`, `${kept} relic${kept > 1 ? 's' : ''} in your monasteries: +${kept * RELIC_ATTACK} attack for your army`);
+  if (kept) stat('relic', `+${kept * RELIC_ATTACK}`, `The relic is in your monastery: +${kept * RELIC_ATTACK} attack for your troops and towers`);
   stat('', AGE_NAMES[p.age] ?? '', 'Your age').classList.add('age');
   stat('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Game time');
 
@@ -2757,7 +2757,7 @@ function frame(now: number): void {
       const [mx, my] = viewPos(monk, alpha);
       drawables.push({ depth: mx + monk.ox + my + monk.oy + 0.01, draw: () => {
         const [sx, sy] = tileToScreen(mx + monk.ox, my + monk.oy);
-        drawRelic(ctx, sx + 6, sy - 24, now, true);
+        drawRelic(ctx, sx + 7, sy - 27, now, true);
       } });
       continue;
     }

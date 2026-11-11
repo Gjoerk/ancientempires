@@ -14,7 +14,7 @@ import type { Kind } from '@kingsfall/shared';
 export const UNIT_COLORS: Record<string, string> = {
   s: '#e8b98f', e: '#2a1f18', l: '#6b4a2b', d: '#33241a', h: '#5a3b1e', m: '#a3aab3', a: '#646b74', w: '#eef0f3',
   k: '#8a5a30', n: '#4a2e18', o: '#8f5f36', u: '#c99a62', g: '#4d7a3f', c: '#7a2d8a', y: '#f0c93a', r: '#c8302f',
-  b: '#f4efe2', f: '#dcb75e',
+  b: '#f4efe2', f: '#dcb75e', i: '#a8dcff', j: '#eaf8ff', q: '#8e8a80',
 };
 
 /** Base colours of trees, bushes and rocks. */
@@ -458,6 +458,35 @@ export function unitArt(kind: Kind, frame: number): string[] {
     unitCache.set(key, rows);
   }
   return rows;
+}
+
+// --- the relic --------------------------------------------------------------------------------
+
+/** The relic, drawn like the units. */
+function relicOrb(p: Pen): void {
+  // A glowing orb with a gold band and a gold cross, hovering over a small stone ring.
+  const cx = CX;
+  p.ellipse(cx - 0.5, GY - 1, 6, 1.6, 'q');
+  p.ellipse(cx - 0.5, GY - 1, 3.6, 0.8, 'a');
+  const oy = GY - 12;
+  p.ellipse(cx - 0.5, oy, 5.5, 5.5, 'i');
+  p.ellipse(cx - 2, oy - 2, 2, 1.6, 'j');
+  p.rect(cx - 6, oy, 12, 1, 'y');
+  p.rect(cx - 1, oy - 5, 1, 11, 'y');
+  p.rect(cx - 1, oy - 11, 1, 6, 'y');
+  p.rect(cx - 3, oy - 9, 5, 1, 'y');
+}
+
+let relicRows: string[] | undefined;
+
+/** The rows of the relic; its foot is the bottom row, centred. */
+export function relicArt(): string[] {
+  if (!relicRows) {
+    const p = new Pen(UW, UH);
+    relicOrb(p);
+    relicRows = finish(p, CX, GY);
+  }
+  return relicRows;
 }
 
 // --- resources -------------------------------------------------------------------------------

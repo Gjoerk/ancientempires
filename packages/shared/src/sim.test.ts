@@ -671,7 +671,7 @@ test('a monk carries a relic to the monastery, which gives the army extra attack
   host.join('Me');
   host.start(9);
   const s = host.state!;
-  assert.ok(s.relics.length >= 2, 'relics on the map');
+  assert.equal(s.relics.length, 1, 'one relic on the map');
   for (const r of s.relics) for (const [sx, sy] of s.map.starts) assert.ok(Math.hypot(r.x - sx, r.y - sy) > s.map.size * 0.2, 'away from towns');
   const relic = s.relics[0];
   const tc = owned(s, 0, 'towncenter')[0];
@@ -687,10 +687,25 @@ test('a monk carries a relic to the monastery, which gives the army extra attack
   monk.path = [];
   for (let i = 0; i < 40 && relic.monastery < 0; i++) host.tick();
   assert.equal(relic.monastery, monastery.id);
-  // A blow now does one more damage than before.
+  // A blow now does two more damage than before.
   const before = target.hp;
   swordsman.order = { t: 'attack', id: target.id, auto: false };
   swordsman.cooldown = 0;
   for (let i = 0; i < 5 && target.hp === before; i++) host.tick();
-  assert.equal(before - target.hp, attackOf('swordsman', () => false) - armorOf('villager', () => false) + 1);
+  assert.equal(before - target.hp, attackOf('swordsman', () => false) - armorOf('villager', () => false) + 2);
+});
+
+test('towns start in a different spot of their corner from game to game', () => {
+  const spots = new Set<string>();
+  for (let seed = 1; seed <= 12; seed++) {
+    const m = generateMap(seed, 96);
+    for (const [x, y] of m.starts) {
+      assert.ok(x >= 12 && y >= 12 && x <= 96 - 13 && y <= 96 - 13, `inside the map: ${x},${y}`);
+    }
+    // The first two players always face each other across the map.
+    const [a, b] = m.starts;
+    assert.ok(Math.abs(a[0] - b[0]) > 40 && Math.abs(a[1] - b[1]) > 40, 'opposite corners');
+    spots.add(m.starts[0].join(','));
+  }
+  assert.ok(spots.size >= 8, `only ${spots.size} different first towns`);
 });
