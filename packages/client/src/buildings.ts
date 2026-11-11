@@ -35,6 +35,122 @@ function hull(points: Pt[]): Pt[] {
   return [...half(pts), ...half(pts.reverse())];
 }
 
+// --- surface textures -------------------------------------------------------------------------
+
+type Material = 'stone' | 'ashlar' | 'flags' | 'plaster' | 'wood' | 'boards' | 'thatch' | 'tiles' | 'slate' | 'dirt';
+
+/** Which texture a colour of the designs gets. Colours not listed (windows, cloth, team colours) stay plain. */
+const MATERIALS: Record<string, Material> = {
+  [STONE]: 'stone', [STONE_DARK]: 'stone', '#a8a8b0': 'stone', '#857a6a': 'stone', '#7d7468': 'stone', '#85898f': 'stone',
+  '#8d8674': 'ashlar', '#cbbfa4': 'ashlar', '#b9ad92': 'ashlar', '#c2b699': 'ashlar',
+  '#6f6f78': 'flags', '#74747e': 'flags',
+  [PLASTER]: 'plaster', '#d9c8a0': 'plaster', '#cbb98f': 'plaster', '#d8cfae': 'plaster',
+  [WOOD]: 'wood', [TIMBER]: 'wood', '#a8824a': 'wood', '#b89358': 'wood', '#7a5230': 'wood',
+  '#3a2a1a': 'boards', '#22160c': 'boards',
+  '#7d5a34': 'boards', '#5f4326': 'boards',
+  [THATCH]: 'thatch', [HAY]: 'thatch',
+  [ROOF_TILE]: 'tiles', '#7a3b2a': 'tiles',
+  '#3d4450': 'slate', '#45505c': 'slate',
+  '#9a8f7c': 'dirt', '#b59a6a': 'dirt', '#c9b98f': 'dirt', '#a58d62': 'dirt', '#8a7350': 'dirt',
+};
+
+function grain(x: number, y: number, salt: number): number {
+  let h = (Math.floor(x) * 374761393 + Math.floor(y) * 668265263 + salt * 2246822519) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+const DARKEN = (a: number) => `rgba(20,12,6,${a})`;
+const LIGHTEN = (a: number) => `rgba(255,248,230,${a})`;
+
+/**
+ * Paints a material's pattern in texture space: s runs along the face, t up it (or up the slope
+ * of a roof), both in pixels. The caller has clipped to the face and set the transform.
+ */
+function paintMaterial(c: Ctx, mat: Material, s0: number, s1: number, t0: number, t1: number, salt: number): void {
+  const rect = (x: number, y: number, w: number, h: number, color: string) => {
+    c.fillStyle = color;
+    c.fillRect(x, y, w, h);
+  };
+  const w = s1 - s0;
+  if (mat === 'stone' || mat === 'ashlar' || mat === 'flags') {
+    // Courses of blocks with mortar between them, each block a slightly different shade.
+    const course = mat === 'ashlar' ? 6 : mat === 'flags' ? 7 : 5;
+    const long = mat === 'ashlar' ? 13 : mat === 'flags' ? 8 : 9;
+    for (let r = Math.floor(t0 / course); r * course < t1; r++) {
+      const y = r * course;
+      rect(s0, y, w, 0.9, DARKEN(0.26));
+      let x = Math.floor(s0 / long) * long - (r % 2) * Math.floor(long / 2);
+      while (x < s1) {
+        const g = grain(x, r, salt);
+        const len = long - 2 + Math.floor(g * 5);
+        rect(x, y, 0.9, course, DARKEN(0.22));
+        if (g < 0.35) rect(x + 1, y + 1, len - 1, course - 1, DARKEN(0.08));
+        else if (g > 0.75) rect(x + 1, y + 1, len - 1, course - 1, LIGHTEN(0.09));
+        // A lit upper edge on each block.
+        rect(x + 1, y + course - 1.6, len - 1.5, 0.7, LIGHTEN(0.1));
+        x += len;
+      }
+    }
+    return;
+  }
+  if (mat === 'plaster' || mat === 'dirt') {
+    // Rough render: fine speckles and a few soft stains.
+    const step = mat === 'dirt' ? 2.5 : 3;
+    for (let y = Math.floor(t0); y < t1; y += step) {
+      for (let x = Math.floor(s0); x < s1; x += step) {
+        const g = grain(x, y, salt);
+        if (g < 0.16) rect(x, y, 1, 1, DARKEN(0.13));
+        else if (g > 0.9) rect(x, y, 1, 1, LIGHTEN(0.16));
+      }
+    }
+    for (let i = 0; i < w * (t1 - t0) / 260; i++) {
+      const g = grain(i, salt, 7);
+      rect(s0 + g * w, t0 + grain(salt, i, 9) * (t1 - t0), 4 + g * 5, 2 + g * 3, DARKEN(0.05));
+    }
+    return;
+  }
+  if (mat === 'wood' || mat === 'boards') {
+    // Upright boards with dark gaps and streaks of grain.
+    const board = mat === 'boards' ? 3 : 4;
+    for (let x = Math.floor(s0 / board) * board; x < s1; x += board) {
+      rect(x, t0, 0.8, t1 - t0, DARKEN(0.3));
+      rect(x + 0.8, t0, 0.6, t1 - t0, LIGHTEN(0.07));
+      for (let y = Math.floor(t0); y < t1; y += 3) {
+        const g = grain(x, y, salt);
+        if (g < 0.22) rect(x + 1.5 + g * 4, y, 0.6, 2 + g * 6, DARKEN(0.16));
+        if (g > 0.93) rect(x + 2, y, 1.2, 1.2, DARKEN(0.35));
+      }
+    }
+    return;
+  }
+  if (mat === 'thatch') {
+    // Layers of straw running down the slope, each layer's lower edge in shadow.
+    for (let r = Math.floor(t0 / 6); r * 6 < t1; r++) {
+      const y = r * 6;
+      rect(s0, y, w, 1.2, DARKEN(0.22));
+      for (let x = Math.floor(s0); x < s1; x += 1.5) {
+        const g = grain(x * 2, r, salt);
+        rect(x, y + 1.2, 0.7, 2 + g * 4, g < 0.5 ? DARKEN(0.12) : LIGHTEN(0.13));
+      }
+    }
+    return;
+  }
+  // Roof tiles and slates: rows with joints, every tile lit along its top.
+  const row = mat === 'slate' ? 3.5 : 4;
+  const tile = mat === 'slate' ? 5 : 6;
+  for (let r = Math.floor(t0 / row); r * row < t1; r++) {
+    const y = r * row;
+    rect(s0, y, w, 1, DARKEN(0.3));
+    for (let x = Math.floor(s0 / tile) * tile - (r % 2) * (tile / 2); x < s1; x += tile) {
+      const g = grain(x, r, salt);
+      rect(x, y, 0.8, row, DARKEN(0.2));
+      rect(x + 1, y + row - 1.5, tile - 2, 0.8, LIGHTEN(mat === 'slate' ? 0.1 : 0.16));
+      if (g < 0.2) rect(x + 1, y + 1, tile - 1.5, row - 1.5, DARKEN(0.1));
+    }
+  }
+}
+
 /**
  * Draws simple solids in the isometric view. u and v are tile coordinates inside
  * the building's footprint, z is height in pixels. In shadow mode the same calls
@@ -43,7 +159,53 @@ function hull(points: Pt[]): Pt[] {
 class Pen {
   private shadows: Pt[][] = [];
 
+  /** Surfaces get textures: only in the pictures that are kept, so live drawing stays cheap. */
+  textured = false;
+
   constructor(private ctx: Ctx, private sx: number, private sy: number, private shadowMode: boolean) {}
+
+  /**
+   * Fills a face, then lays its material over it. `o` is a corner of the face in (u, v, z), `ds` and
+   * `dt` the steps in (u, v, z) of one texture pixel along the face and up it.
+   */
+  face(color: string, pts: Pt[], mat: Material | undefined, o: [number, number, number], ds: [number, number, number], dt: [number, number, number]): void {
+    this.poly(color, pts);
+    if (!mat || !this.textured || this.shadowMode) return;
+    const c = this.ctx;
+    const [ox, oy] = this.p(...o);
+    const sp = this.p(o[0] + ds[0], o[1] + ds[1], o[2] + ds[2]);
+    const tp = this.p(o[0] + dt[0], o[1] + dt[1], o[2] + dt[2]);
+    const a = sp[0] - ox;
+    const b = sp[1] - oy;
+    const cc = tp[0] - ox;
+    const d = tp[1] - oy;
+    const det = a * d - b * cc;
+    if (Math.abs(det) < 1e-6) return;
+    // The face's corners in texture space give the area to cover.
+    let s0 = Infinity;
+    let s1 = -Infinity;
+    let t0 = Infinity;
+    let t1 = -Infinity;
+    for (const [x, y] of pts) {
+      const dx = x - ox;
+      const dy = y - oy;
+      const s = (d * dx - cc * dy) / det;
+      const t = (-b * dx + a * dy) / det;
+      s0 = Math.min(s0, s);
+      s1 = Math.max(s1, s);
+      t0 = Math.min(t0, t);
+      t1 = Math.max(t1, t);
+    }
+    c.save();
+    c.beginPath();
+    c.moveTo(pts[0][0], pts[0][1]);
+    for (const [x, y] of pts.slice(1)) c.lineTo(x, y);
+    c.closePath();
+    c.clip();
+    c.transform(a, b, cc, d, ox, oy);
+    paintMaterial(c, mat, s0, s1, t0, t1, Math.round(o[0] * 7 + o[1] * 13 + o[2]));
+    c.restore();
+  }
 
   p(u: number, v: number, z = 0): Pt {
     return [this.sx + (u - v) * HW, this.sy + (u + v) * HH - z];
@@ -82,9 +244,13 @@ class Pen {
       this.cast([[u0, v0, z0], [u1, v0, z0], [u1, v1, z0], [u0, v1, z0], [u0, v0, z1], [u1, v0, z1], [u1, v1, z1], [u0, v1, z1]]);
       return;
     }
-    this.poly(shade(color, 0.7), [this.p(u0, v1, z0), this.p(u1, v1, z0), this.p(u1, v1, z1), this.p(u0, v1, z1)]);
-    this.poly(shade(color, 0.9), [this.p(u1, v1, z0), this.p(u1, v0, z0), this.p(u1, v0, z1), this.p(u1, v1, z1)]);
-    this.poly(top ?? shade(color, 1.1), [this.p(u0, v0, z1), this.p(u1, v0, z1), this.p(u1, v1, z1), this.p(u0, v1, z1)]);
+    const mat = MATERIALS[color];
+    const px = 1 / HW;
+    // Texture rows run from the ground up; t grows upwards, so it starts at the bottom edge.
+    this.face(shade(color, 0.7), [this.p(u0, v1, z0), this.p(u1, v1, z0), this.p(u1, v1, z1), this.p(u0, v1, z1)], mat, [u0, v1, z0], [px, 0, 0], [0, 0, 1]);
+    this.face(shade(color, 0.9), [this.p(u1, v1, z0), this.p(u1, v0, z0), this.p(u1, v0, z1), this.p(u1, v1, z1)], mat, [u1, v0, z0], [0, px, 0], [0, 0, 1]);
+    const topMat = top ? MATERIALS[top] : mat === 'stone' || mat === 'ashlar' ? 'flags' : mat === 'wood' ? 'boards' : mat;
+    this.face(top ?? shade(color, 1.1), [this.p(u0, v0, z1), this.p(u1, v0, z1), this.p(u1, v1, z1), this.p(u0, v1, z1)], topMat, [u0, v0, z1], [px, 0, 0], [0, px, 0]);
   }
 
   /** Pitched roof. The ridge runs along u when `alongU`, otherwise along v. */
@@ -96,14 +262,22 @@ class Pen {
       this.cast([[u0, v0, z], [u1, v0, z], [u1, v1, z], [u0, v1, z], ...ridge]);
       return;
     }
+    const mat = MATERIALS[color];
+    const endMat = MATERIALS[end];
+    const px = 1 / HW;
+    // One texture pixel up the slope, from the eave towards the ridge.
+    const up = (dv: number, du: number) => {
+      const len = Math.hypot((du + dv) * HW * 0.7, h) || 1;
+      return [du / len, dv / len, h / len] as [number, number, number];
+    };
     if (alongU) {
-      this.poly(shade(color, 1.1), [this.p(u0, v0, z), this.p(u1, v0, z), this.p(u1, vm, z + h), this.p(u0, vm, z + h)]);
-      this.poly(shade(color, 0.78), [this.p(u0, v1, z), this.p(u1, v1, z), this.p(u1, vm, z + h), this.p(u0, vm, z + h)]);
-      this.poly(shade(end, 0.9), [this.p(u1, v0, z), this.p(u1, v1, z), this.p(u1, vm, z + h)]);
+      this.face(shade(color, 1.1), [this.p(u0, v0, z), this.p(u1, v0, z), this.p(u1, vm, z + h), this.p(u0, vm, z + h)], mat, [u0, v0, z], [px, 0, 0], up(vm - v0, 0));
+      this.face(shade(color, 0.78), [this.p(u0, v1, z), this.p(u1, v1, z), this.p(u1, vm, z + h), this.p(u0, vm, z + h)], mat, [u0, v1, z], [px, 0, 0], up(vm - v1, 0));
+      this.face(shade(end, 0.9), [this.p(u1, v0, z), this.p(u1, v1, z), this.p(u1, vm, z + h)], endMat, [u1, v0, z], [0, px, 0], [0, 0, 1]);
     } else {
-      this.poly(shade(color, 0.7), [this.p(u0, v0, z), this.p(u0, v1, z), this.p(um, v1, z + h), this.p(um, v0, z + h)]);
-      this.poly(color, [this.p(u1, v0, z), this.p(u1, v1, z), this.p(um, v1, z + h), this.p(um, v0, z + h)]);
-      this.poly(shade(end, 0.7), [this.p(u0, v1, z), this.p(u1, v1, z), this.p(um, v1, z + h)]);
+      this.face(shade(color, 0.7), [this.p(u0, v0, z), this.p(u0, v1, z), this.p(um, v1, z + h), this.p(um, v0, z + h)], mat, [u0, v0, z], [0, px, 0], up(0, um - u0));
+      this.face(color, [this.p(u1, v0, z), this.p(u1, v1, z), this.p(um, v1, z + h), this.p(um, v0, z + h)], mat, [u1, v0, z], [0, px, 0], up(0, um - u1));
+      this.face(shade(end, 0.7), [this.p(u0, v1, z), this.p(u1, v1, z), this.p(um, v1, z + h)], endMat, [u0, v1, z], [px, 0, 0], [0, 0, 1]);
     }
   }
 
@@ -115,24 +289,31 @@ class Pen {
       return;
     }
     const apex = this.p(um, vm, z + h);
-    this.poly(shade(color, 1.1), [this.p(u0, v0, z), this.p(u1, v0, z), apex]);
-    this.poly(shade(color, 0.85), [this.p(u0, v0, z), this.p(u0, v1, z), apex]);
-    this.poly(shade(color, 0.72), [this.p(u0, v1, z), this.p(u1, v1, z), apex]);
-    this.poly(color, [this.p(u1, v1, z), this.p(u1, v0, z), apex]);
+    // Team-coloured spires are tiled too.
+    const mat = MATERIALS[color] ?? (PLAYER_COLORS.includes(color) ? 'tiles' : undefined);
+    const px = 1 / HW;
+    const up = (du: number, dv: number) => {
+      const len = Math.hypot((du + dv) * HW * 0.7, h) || 1;
+      return [du / len, dv / len, h / len] as [number, number, number];
+    };
+    this.face(shade(color, 1.1), [this.p(u0, v0, z), this.p(u1, v0, z), apex], mat, [u0, v0, z], [px, 0, 0], up(0, vm - v0));
+    this.face(shade(color, 0.85), [this.p(u0, v0, z), this.p(u0, v1, z), apex], mat, [u0, v0, z], [0, px, 0], up(um - u0, 0));
+    this.face(shade(color, 0.72), [this.p(u0, v1, z), this.p(u1, v1, z), apex], mat, [u0, v1, z], [px, 0, 0], up(0, vm - v1));
+    this.face(color, [this.p(u1, v1, z), this.p(u1, v0, z), apex], mat, [u1, v0, z], [0, px, 0], up(um - u1, 0));
   }
 
   /** Flat rectangle on the left-facing wall plane v = const. */
   onV(v: number, uA: number, uB: number, zA: number, zB: number, color: string): void {
-    this.poly(shade(color, 0.8), [this.p(uA, v, zA), this.p(uB, v, zA), this.p(uB, v, zB), this.p(uA, v, zB)]);
+    this.face(shade(color, 0.8), [this.p(uA, v, zA), this.p(uB, v, zA), this.p(uB, v, zB), this.p(uA, v, zB)], MATERIALS[color], [uA, v, zA], [1 / HW, 0, 0], [0, 0, 1]);
   }
 
   /** Flat rectangle on the right-facing wall plane u = const. */
   onU(u: number, vA: number, vB: number, zA: number, zB: number, color: string): void {
-    this.poly(color, [this.p(u, vA, zA), this.p(u, vB, zA), this.p(u, vB, zB), this.p(u, vA, zB)]);
+    this.face(color, [this.p(u, vA, zA), this.p(u, vB, zA), this.p(u, vB, zB), this.p(u, vA, zB)], MATERIALS[color], [u, vA, zA], [0, 1 / HW, 0], [0, 0, 1]);
   }
 
   ground(u0: number, v0: number, u1: number, v1: number, color: string): void {
-    this.poly(color, [this.p(u0, v0), this.p(u1, v0), this.p(u1, v1), this.p(u0, v1)]);
+    this.face(color, [this.p(u0, v0), this.p(u1, v0), this.p(u1, v1), this.p(u0, v1)], MATERIALS[color], [u0, v0, 0], [1 / HW, 0, 0], [0, 1 / HW, 0]);
   }
 
   /** Battlements around the top edge of a wall or tower. */
@@ -624,5 +805,7 @@ function paintBuilding(ctx: Ctx, kind: Kind, team: string, seed: number, sx: num
   const shadowPen = new Pen(ctx, sx, sy, true);
   design(shadowPen, team, state);
   shadowPen.fillShadows();
-  design(new Pen(ctx, sx, sy, false), team, state);
+  const pen = new Pen(ctx, sx, sy, false);
+  pen.textured = state.now < 0;
+  design(pen, team, state);
 }

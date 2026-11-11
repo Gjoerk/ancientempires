@@ -2365,6 +2365,26 @@ function frame(now: number): void {
   drawGround();
 
   if (placing) {
+    // A faint grid of tiles around the cursor, fading out with distance, shows where things line up.
+    const [gx, gy] = placementSpot();
+    const reach = 11;
+    ctx.lineWidth = 1;
+    for (let ty = gy - reach; ty <= gy + reach; ty++) {
+      for (let tx = gx - reach; tx <= gx + reach; tx++) {
+        if (tx < 0 || ty < 0 || tx >= map.size || ty >= map.size || !explored[ty * map.size + tx]) continue;
+        const fade = 1 - Math.hypot(tx - gx, ty - gy) / reach;
+        if (fade <= 0) continue;
+        const [ax, ay] = tileToScreen(tx, ty);
+        const [bx, by] = tileToScreen(tx + 1, ty);
+        const [cx, cy] = tileToScreen(tx, ty + 1);
+        ctx.strokeStyle = `rgba(255,250,225,${(0.34 * fade).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(ax, ay);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+      }
+    }
     // Ghost of the footprint; a wall shows the whole line being dragged.
     const spots = placing === 'wall' && wallStart ? lineTiles(wallStart, placementSpot()) : [placementSpot()];
     for (const [px, py] of spots) {
