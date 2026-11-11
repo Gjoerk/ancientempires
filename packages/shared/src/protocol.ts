@@ -43,6 +43,8 @@ export type ClientMessage =
   | { t: 'join'; name: string }
   | { t: 'cmd'; cmd: Command }
   | { t: 'chat'; text: string }
+  /** A player picks their own team (and with it their colour) in the lobby. */
+  | { t: 'team'; team: number }
   /** Ask for a pause, answer someone's request, or say you are ready to continue ('yes'). */
   | { t: 'pause'; answer: 'request' | 'yes' | 'no' };
 

@@ -127,6 +127,9 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
         game.command(slot, msg.cmd);
       } else if (msg.t === 'chat' && slot !== undefined && cleanChat(msg.text)) {
         broadcast({ t: 'chat', from: slot, text: cleanChat(msg.text) });
+      } else if (msg.t === 'team' && slot !== undefined) {
+        game.setTeam(slot, msg.team);
+        sendLobby();
       } else if (msg.t === 'pause' && slot !== undefined) {
         const news = game.answerPause(slot, msg.answer);
         if (news) broadcast(news);

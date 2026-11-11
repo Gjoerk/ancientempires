@@ -162,3 +162,96 @@ export function findPathToArea(
   };
   return search(map, sx, sy, isGoal, h, team);
 }
+
+// Walking areas: every walkable tile is labelled with the connected area it belongs to, per team
+// (a team walks through its own gates). Asking whether a unit can get somewhere at all is then
+// instant, instead of a search that floods the whole map before giving up.
+const areas = new WeakMap<GameMap, { version: number; byTeam: Map<number, Int32Array> }>();
+
+function areaLabels(map: GameMap, team: number): Int32Array {
+  let cache = areas.get(map);
+  if (!cache || cache.version !== map.version) {
+    cache = { version: map.version, byTeam: new Map() };
+    areas.set(map, cache);
+  }
+  let labels = cache.byTeam.get(team);
+  if (labels) return labels;
+  const n = map.size;
+  labels = new Int32Array(n * n);
+  const queue = new Int32Array(n * n);
+  let next = 0;
+  for (let i = 0; i < n * n; i++) {
+    if (labels[i] !== 0 || !isWalkable(map, i % n, (i / n) | 0, team)) continue;
+    next++;
+    labels[i] = next;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = i;
+    while (head < tail) {
+      const cur = queue[head++];
+      const cx = cur % n;
+      const cy = (cur - cx) / n;
+      for (const [dx, dy] of DIRS) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (!isWalkable(map, nx, ny, team)) continue;
+        if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy, team) || !isWalkable(map, cx, cy + dy, team))) continue;
+        const ni = ny * n + nx;
+        if (labels[ni] !== 0) continue;
+        labels[ni] = next;
+        queue[tail++] = ni;
+      }
+    }
+  }
+  cache.byTeam.set(team, labels);
+  return labels;
+}
+
+/** The walking area a tile belongs to, or 0 where nobody can stand. */
+export function areaAt(map: GameMap, x: number, y: number, team = -1): number {
+  if (x < 0 || y < 0 || x >= map.size || y >= map.size) return 0;
+  return areaLabels(map, team)[y * map.size + x];
+}
+
+/**
+ * Whether someone at (sx, sy) can walk to the tile (gx, gy), or right next to the square area
+ * at (gx, gy) of size `s`. Someone standing where nobody can stand (just freed from a building
+ * site, say) is given the benefit of the doubt.
+ */
+export function canReach(map: GameMap, sx: number, sy: number, gx: number, gy: number, team = -1, s = 0): boolean {
+  const from = areaAt(map, sx, sy, team);
+  if (from === 0) return true;
+  if (s === 0) return areaAt(map, gx, gy, team) === from;
+  for (let y = gy - 1; y <= gy + s; y++) {
+    for (let x = gx - 1; x <= gx + s; x++) {
+      const edge = x === gx - 1 || x === gx + s || y === gy - 1 || y === gy + s;
+      if (edge && areaAt(map, x, y, team) === from) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The tile nearest to (gx, gy) that someone at (sx, sy) can walk to: (gx, gy) itself when it can
+ * be reached, otherwise the closest tile of the walker's own area, looked for ring by ring.
+ */
+export function nearestReachable(map: GameMap, sx: number, sy: number, gx: number, gy: number, team = -1): [number, number] {
+  const from = areaAt(map, sx, sy, team);
+  if (from === 0 || areaAt(map, gx, gy, team) === from) return [gx, gy];
+  for (let ring = 1; ring < map.size; ring++) {
+    let best: [number, number] | undefined;
+    let bestD = Infinity;
+    for (let y = gy - ring; y <= gy + ring; y++) {
+      for (let x = gx - ring; x <= gx + ring; x++) {
+        if (Math.max(Math.abs(x - gx), Math.abs(y - gy)) !== ring || areaAt(map, x, y, team) !== from) continue;
+        const d = Math.hypot(x - gx, y - gy);
+        if (d < bestD) {
+          bestD = d;
+          best = [x, y];
+        }
+      }
+    }
+    if (best) return best;
+  }
+  return [sx, sy];
+}

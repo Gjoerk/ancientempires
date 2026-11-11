@@ -34,6 +34,8 @@ export interface GameMap {
   gate: Uint8Array;
   /** Start tile per player slot. */
   starts: [number, number][];
+  /** Goes up whenever what can be walked on changes, so that cached walking areas are redone. */
+  version: number;
 }
 
 /** Small deterministic PRNG so host and guests build the same map from a seed. */
@@ -64,6 +66,7 @@ export function markBuilding(map: GameMap, x0: number, y0: number, size: number,
       if (!inBounds(map, x, y)) continue;
       map.footprint[y * map.size + x] = value;
       if (!walkable) map.blocked[y * map.size + x] = value;
+      map.version++;
     }
   }
 }
@@ -142,5 +145,5 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
 
   const amount = new Uint16Array(size * size);
   for (let i = 0; i < tiles.length; i++) amount[i] = TILE_RESOURCE[tiles[i] as Tile]?.amount ?? 0;
-  return { size, tiles, amount, blocked: new Uint8Array(size * size), footprint: new Uint8Array(size * size), gate: new Uint8Array(size * size), starts };
+  return { size, tiles, amount, blocked: new Uint8Array(size * size), footprint: new Uint8Array(size * size), gate: new Uint8Array(size * size), starts, version: 0 };
 }

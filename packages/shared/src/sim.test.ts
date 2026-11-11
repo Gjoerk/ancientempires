@@ -764,3 +764,31 @@ test('a pause needs everyone to agree, and everyone to continue', () => {
   host.leave(1);
   assert.equal(host.pause, undefined);
 });
+
+test('a crowd stopped by a wall never walks through it, and does not slow the game down', () => {
+  const s = createGame(3, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+  s.map.blocked.fill(0);
+  s.map.footprint.fill(0);
+  s.map.tiles.fill(Tile.Grass);
+  spawn(s, 0, 'king', 2, 2);
+  spawn(s, 1, 'king', 93, 93);
+  for (let y = 0; y < 96; y++) spawn(s, 1, 'wall', 50, y);
+  const enemies = [0, 1, 2, 3].map((i) => spawn(s, 1, 'swordsman', 53 + i, 40));
+  const ids: number[] = [];
+  for (let i = 0; i < 40; i++) ids.push(spawn(s, 0, i % 3 ? 'swordsman' : 'archer', 38 + (i % 8), 36 + Math.floor(i / 8)).id);
+  applyCommand(s, 0, { type: 'amove', ids, x: 60, y: 40 });
+  const half = ids.slice(0, 20);
+  applyCommand(s, 0, { type: 'interact', ids: half, target: enemies[0].id });
+  const started = performance.now();
+  for (let t = 0; t < 400; t++) {
+    step(s);
+    for (const id of ids) assert.ok((s.entities.get(id)?.x ?? 0) < 50, `unit ${id} is through the wall at tick ${t}`);
+  }
+  assert.ok(performance.now() - started < 1500, `400 ticks took ${(performance.now() - started).toFixed(0)} ms`);
+  // They went up to the wall and stopped there.
+  assert.ok(ids.every((id) => s.entities.get(id)!.path.length === 0), 'everyone has stopped');
+  assert.ok(ids.filter((id) => s.entities.get(id)!.x > 44).length >= 10, 'they came up to the wall');
+});

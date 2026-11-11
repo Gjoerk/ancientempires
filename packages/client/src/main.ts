@@ -463,7 +463,7 @@ function paintEdgeMist(n: number, seed: number): HTMLCanvasElement {
   return c;
 }
 
-/** Draws the mist around the edge of the map over everything on the ground. */
+/** Draws the mist around the edge of the map, on the ground beyond the border. */
 function drawEdgeMist(): void {
   if (!map || !edgeMist) return;
   const k = drawScale;
@@ -1184,9 +1184,8 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
     const name = document.createElement('span');
     name.className = 'grow';
     name.textContent = p.name + (tags.length ? ` (${tags.join(', ')})` : '');
-    // The host puts players into teams; same team means allies.
+    // Everyone picks their own team colour, and the host can set anyone's; same team means allies.
     const team = document.createElement('select');
-    team.title = 'Team';
     for (let t = 0; t < MAX_TEAMS; t++) {
       const option = new Option(`● Team ${t + 1} · ${TEAM_NAMES[t]}`, String(t));
       option.style.color = TEAM_COLORS[t];
@@ -1196,13 +1195,15 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
     team.value = String(p.team);
     team.className = 'team';
     team.style.setProperty('--gem', `var(--gem-${p.team})`);
-    team.disabled = !hosting;
+    team.disabled = !hosting && p.slot !== you;
+    team.title = team.disabled ? 'Team (each player picks their own)' : 'Pick your team colour; players with the same one are allies';
     team.style.color = TEAM_COLORS[p.team];
     team.addEventListener('change', () => {
       team.style.setProperty('--gem', `var(--gem-${team.value})`);
       team.style.color = TEAM_COLORS[Number(team.value)];
       chip.style.setProperty('--gem', `var(--gem-${team.value})`);
-      session?.host?.setTeam(p.slot, Number(team.value));
+      if (session?.host) session.host.setTeam(p.slot, Number(team.value));
+      else session?.send({ t: 'team', team: Number(team.value) });
     });
     li.append(chip, name);
     // Remove sits before the team dropdown, so that every row's dropdown lines up on the right.
@@ -2173,9 +2174,10 @@ function renderPanel(): void {
       for (const id of TECH_IDS) {
         const tech = TECHS[id];
         if (tech.at !== v.kind || has(id) || ((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) continue;
-        if (id === 'age3' && age < 2) continue;
+        // Upgrades only appear once the age they belong to is reached.
+        if ((id === 'age3' && age < 2) || tech.age > age) continue;
         const d = describeTech(id, has, age);
-        const short = tech.age > age ? AGE_NAMES[tech.age].replace(' Age', '') : d.warn ? 'locked' : undefined;
+        const short = d.warn ? 'locked' : undefined;
         buttons.push({ label: tech.label, icon: id, cost: tech.cost, locked: !!d.warn, short, detail: d, data: { train: id, at } });
       }
       if (v.kind === 'market') {
@@ -2834,6 +2836,9 @@ function frame(now: number): void {
 
   drawGround();
   drawWaves(now);
+  // The mist beyond the border lies on the ground, behind everything standing on the map, so that
+  // tall buildings near the far edges rise in front of it rather than vanishing into it.
+  drawEdgeMist();
 
   if (placing) {
     // A faint grid of tiles around the cursor, fading out with distance, shows where things line up.
@@ -3029,7 +3034,6 @@ function frame(now: number): void {
 
   if (breeze.active) breeze.draw(ctx, now, worldToScreen);
   drawFog();
-  drawEdgeMist();
 
   // The marker where units were sent is drawn over the fog, so it shows on unexplored ground too.
   if (marker) {

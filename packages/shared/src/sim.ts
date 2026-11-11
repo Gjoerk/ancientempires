@@ -3,7 +3,7 @@ import {
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, markBuilding, Tile, TILE_RESOURCE } from './map';
-import { findPath, findPathToArea } from './path';
+import { areaAt, canReach, findPath, findPathToArea, nearestReachable } from './path';
 
 /** Simulation steps per second. The host runs this; guests only draw snapshots. */
 export const TICK_RATE = 10;
@@ -16,7 +16,7 @@ export type Order =
   | { t: 'gather'; tile: number; farm: number; res: Res; phase: 'go' | 'work' | 'return'; drop: number }
   | { t: 'build'; id: number }
   /** `then` is where an attack-move continues to once the fight is over. */
-  | { t: 'attack'; id: number; auto: boolean; then?: [number, number] }
+  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean }
   /** Walk to a point, fighting anything met on the way. */
   | { t: 'amove'; x: number; y: number }
   /** Walk to a town centre or castle and go inside (villagers and the king). */
@@ -196,7 +196,10 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
   if (def.building) setBlocked(state.map, e, 1);
   // A farm's `carry` is the food left before it must be sown again.
   if (kind === 'farm') e.carry = FARM_FOOD;
-  if (kind === 'gate') state.map.gate[ty * state.map.size + tx] = teamOf(state, owner) + 1;
+  if (kind === 'gate') {
+    state.map.gate[ty * state.map.size + tx] = teamOf(state, owner) + 1;
+    state.map.version++;
+  }
   return e;
 }
 
@@ -220,7 +223,10 @@ function kill(state: GameState, e: Entity): void {
   const owner = state.players.get(e.owner);
   for (const item of e.queue) if (isTech(item)) owner?.researching.delete(item);
   setBlocked(state.map, e, 0);
-  if (e.kind === 'gate') state.map.gate[e.y * state.map.size + e.x] = 0;
+  if (e.kind === 'gate') {
+    state.map.gate[e.y * state.map.size + e.x] = 0;
+    state.map.version++;
+  }
   eject(state, e);
 }
 
@@ -391,6 +397,7 @@ function freeSpotAround(state: GameState, e: Entity, r: Rect, maxRing = 2): [num
       for (let x = r.x - ring; x <= r.x + r.s - 1 + ring; x++) {
         const edge = x === r.x - ring || x === r.x + r.s - 1 + ring || y === r.y - ring || y === r.y + r.s - 1 + ring;
         if (!edge || !isWalkable(map, x, y, teamOf(state, e.owner)) || isTaken(state, y * map.size + x, e)) continue;
+        if (!canReach(map, Math.floor(e.x), Math.floor(e.y), x, y, teamOf(state, e.owner))) continue;
         const d = Math.hypot(x + 0.5 - e.x, y + 0.5 - e.y);
         if (d < bestD) {
           bestD = d;
@@ -515,10 +522,28 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number): voi
   // A group keeps formation and walks at the pace of its slowest member.
   const slots = formation(state, units, x, y);
   const pace = units.length > 1 ? Math.min(...units.map((e) => DEFS[e.kind].speed ?? 1)) : undefined;
+  const nearby = new Map<string, { spots: [number, number][]; next: number }>();
   for (const e of units) {
-    const spot = slots.get(e);
+    let spot = slots.get(e);
     if (!spot) continue;
-    e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
+    // Somewhere that cannot be walked to (behind a wall, across water): go as near as possible
+    // instead, without a search that floods the whole map to find that out.
+    const ex = Math.floor(e.x);
+    const ey = Math.floor(e.y);
+    const team = teamOf(state, e.owner);
+    if (!canReach(state.map, ex, ey, spot[0], spot[1], team)) {
+      // One set of spots per walking area the group stands in, shared out among its members.
+      const key = `${team}:${areaAt(state.map, ex, ey, team)}`;
+      let near = nearby.get(key);
+      if (!near) {
+        const [nx, ny] = nearestReachable(state.map, ex, ey, Math.floor(x), Math.floor(y), team);
+        const free = freeTilesNear(state.map, nx, ny, 40).filter(([fx, fy]) => canReach(state.map, ex, ey, fx, fy, team));
+        near = { spots: free.length > 0 ? free : [[nx, ny]], next: 0 };
+        nearby.set(key, near);
+      }
+      spot = near.spots[near.next++ % near.spots.length];
+    }
+    e.path = findPath(state.map, ex, ey, spot[0], spot[1], team);
     e.order = { t: 'move' };
     e.pace = pace;
   }
@@ -775,8 +800,11 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
     // Only units are picked on sight; buildings are attacked when a player orders it.
     if (isBuilding(other) || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
     const d = distance(e, other);
-    if (d > reach) continue;
-    if (d < bestScore) {
+    if (d > reach || d >= bestScore) continue;
+    // Never pick a fight with someone who cannot be got at (behind a wall, across water), unless
+    // they can be shot from here: chasing them would go nowhere.
+    if (!isBuilding(e) && d > rangeOf(e.kind, hasTech(state, e.owner)) && !canReach(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(other.x), Math.floor(other.y), teamOf(state, e.owner))) continue;
+    {
       bestScore = d;
       best = other;
     }
@@ -801,6 +829,7 @@ function strike(state: GameState, e: Entity, target: Entity): void {
 
 function depleteTile(state: GameState, tile: number): void {
   state.map.tiles[tile] = Tile.Grass;
+  state.map.version++;
   state.changedTiles.set(tile, Tile.Grass);
   state.tileEvents.push([tile, Tile.Grass]);
 }
@@ -981,6 +1010,22 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
     return;
   }
   if (isBuilding(e) || (o.auto && d > (def.sight ?? DEFAULT_SIGHT) + 4)) return endAttack(state, e, o);
+  // Out of reach and no way to get there, e.g. behind a wall: searching again and again would only
+  // flood the whole map each time. Picked fights are dropped; an ordered one walks as near as it
+  // can once and then gives up there.
+  const area = isBuilding(target) ? rectOf(target) : { x: Math.floor(target.x), y: Math.floor(target.y), s: 0 };
+  if (!canReach(state.map, Math.floor(e.x), Math.floor(e.y), area.x, area.y, teamOf(state, e.owner), area.s)) {
+    if (o.auto) return endAttack(state, e, o);
+    if (!o.walled) {
+      o.walled = true;
+      const ex = Math.floor(e.x);
+      const ey = Math.floor(e.y);
+      const [nx, ny] = nearestReachable(state.map, ex, ey, area.x, area.y, teamOf(state, e.owner));
+      e.path = findPath(state.map, ex, ey, nx, ny, teamOf(state, e.owner));
+    } else if (e.path.length === 0) e.order = { t: 'idle' };
+    return;
+  }
+  o.walled = false;
   // Chase, re-planning now and then because the target moves. Melee fighters each go for their own
   // tile next to the target, so that a crowd surrounds it instead of piling onto one spot.
   if (e.path.length === 0 || (state.tick + e.id) % 5 === 0) {
@@ -990,8 +1035,9 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
       const spot = d < 6 ? freeSpotAround(state, e, r) : undefined;
       if (spot) {
         e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
-        // Already on that tile but off its centre: step to the centre, which is in reach.
-        if (e.path.length === 0) e.path = [spot[0], spot[1]];
+        // Already on that tile but off its centre: step to the centre, which is in reach. (An empty path
+        // otherwise means the spot cannot be reached, e.g. it is behind a wall: never walk straight there.)
+        if (e.path.length === 0 && Math.floor(e.x) === spot[0] && Math.floor(e.y) === spot[1]) e.path = [spot[0], spot[1]];
         claim(state, e);
       } else if (!goAdjacent(state, e, r) && o.auto) endAttack(state, e, o);
     } else {
@@ -1252,7 +1298,9 @@ function spreadIdleUnits(state: GameState): void {
     else taken.add(tile);
   }
   for (const e of crowded) {
-    const spot = freeTilesNear(state.map, Math.floor(e.x), Math.floor(e.y), 16).find(([x, y]) => !taken.has(y * state.map.size + x));
+    const team = teamOf(state, e.owner);
+    const spot = freeTilesNear(state.map, Math.floor(e.x), Math.floor(e.y), 16)
+      .find(([x, y]) => !taken.has(y * state.map.size + x) && canReach(state.map, Math.floor(e.x), Math.floor(e.y), x, y, team));
     if (!spot) continue;
     taken.add(spot[1] * state.map.size + spot[0]);
     e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
