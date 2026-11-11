@@ -312,8 +312,8 @@ export const FARM_RATE = 0.7;
  * for some wood; left fallow too long it is gone.
  */
 export const FARM_FOOD = 300;
-export const RESEED_COST = 25;
-export const FALLOW_SECONDS = 45;
+export const RESEED_COST = 50;
+export const FALLOW_SECONDS = 60;
 /** The technology that speeds up gathering each resource. */
 export const GATHER_TECH: Record<Res, TechId> = { food: 'ploughs', wood: 'axes', gold: 'picks', stone: 'picks' };
 export const QUEUE_MAX = 15;
