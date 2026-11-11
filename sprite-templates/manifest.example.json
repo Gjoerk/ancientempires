@@ -2,73 +2,157 @@
   "unit.villager": {
     "src": "villager.png",
     "anchor": [
-      12,
-      26
+      8,
+      28
     ],
     "teamMask": "villager_mask.png"
   },
   "unit.king": {
     "src": "king.png",
     "anchor": [
-      12,
-      26
+      9,
+      31
     ],
     "teamMask": "king_mask.png"
   },
   "unit.swordsman": {
     "src": "swordsman.png",
     "anchor": [
-      12,
-      26
+      7,
+      28
     ],
     "teamMask": "swordsman_mask.png"
   },
   "unit.spearman": {
     "src": "spearman.png",
     "anchor": [
-      12,
-      30
+      11,
+      38
     ],
     "teamMask": "spearman_mask.png"
   },
   "unit.archer": {
     "src": "archer.png",
     "anchor": [
-      12,
-      26
+      11,
+      28
     ],
     "teamMask": "archer_mask.png"
   },
   "unit.monk": {
     "src": "monk.png",
     "anchor": [
-      12,
-      26
+      8,
+      32
     ],
     "teamMask": "monk_mask.png"
   },
   "unit.scout": {
     "src": "scout.png",
     "anchor": [
-      16,
-      28
+      15,
+      34
     ],
     "teamMask": "scout_mask.png"
   },
   "unit.rider": {
     "src": "rider.png",
     "anchor": [
-      18,
-      30
+      19,
+      33
     ],
     "teamMask": "rider_mask.png"
   },
   "unit.ram": {
     "src": "ram.png",
     "anchor": [
-      18,
-      22
+      20,
+      21
     ],
     "teamMask": "ram_mask.png"
+  },
+  "resource.tree.0": {
+    "src": "tree_0.png",
+    "anchor": [
+      27,
+      67
+    ]
+  },
+  "resource.tree.1": {
+    "src": "tree_1.png",
+    "anchor": [
+      30,
+      48
+    ]
+  },
+  "resource.tree.2": {
+    "src": "tree_2.png",
+    "anchor": [
+      22,
+      55
+    ]
+  },
+  "resource.berries.0": {
+    "src": "berries_0.png",
+    "anchor": [
+      20,
+      18
+    ]
+  },
+  "resource.berries.1": {
+    "src": "berries_1.png",
+    "anchor": [
+      20,
+      18
+    ]
+  },
+  "resource.berries.2": {
+    "src": "berries_2.png",
+    "anchor": [
+      20,
+      18
+    ]
+  },
+  "resource.gold.0": {
+    "src": "gold_0.png",
+    "anchor": [
+      20,
+      15
+    ]
+  },
+  "resource.gold.1": {
+    "src": "gold_1.png",
+    "anchor": [
+      20,
+      15
+    ]
+  },
+  "resource.gold.2": {
+    "src": "gold_2.png",
+    "anchor": [
+      20,
+      15
+    ]
+  },
+  "resource.stone.0": {
+    "src": "stone_0.png",
+    "anchor": [
+      18,
+      15
+    ]
+  },
+  "resource.stone.1": {
+    "src": "stone_1.png",
+    "anchor": [
+      19,
+      15
+    ]
+  },
+  "resource.stone.2": {
+    "src": "stone_2.png",
+    "anchor": [
+      20,
+      15
+    ]
   }
 }

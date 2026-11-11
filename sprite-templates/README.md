@@ -1,6 +1,6 @@
 # Unit sprite templates
 
-Each unit's built-in sprite, exported at the size the game draws it, so you can paint over it.
+Each unit's and resource's built-in sprite, exported at the size the game draws it, so you can paint over it.
 For every unit there is:
 
 - `<kind>.png`: the sprite itself, facing **right** (the game mirrors it for left).
@@ -9,15 +9,18 @@ For every unit there is:
 
 | Unit | Key | Size (px) | Feet / anchor |
 | --- | --- | --- | --- |
-| Villager | `unit.villager` | 24 × 26 | [12, 26] |
-| King | `unit.king` | 24 × 26 | [12, 26] |
-| Swordsman | `unit.swordsman` | 24 × 26 | [12, 26] |
-| Spearman | `unit.spearman` | 24 × 30 | [12, 30] |
-| Archer | `unit.archer` | 24 × 26 | [12, 26] |
-| Monk | `unit.monk` | 24 × 26 | [12, 26] |
-| Scout | `unit.scout` | 32 × 28 | [16, 28] |
-| Rider (knight) | `unit.rider` | 36 × 30 | [18, 30] |
-| Battering ram | `unit.ram` | 36 × 22 | [18, 22] |
+| Villager | `unit.villager` | 16 × 28 | [8, 28] |
+| King | `unit.king` | 18 × 31 | [9, 31] |
+| Swordsman | `unit.swordsman` | 14 × 28 | [7, 28] |
+| Spearman | `unit.spearman` | 22 × 38 | [11, 38] |
+| Archer | `unit.archer` | 22 × 28 | [11, 28] |
+| Monk | `unit.monk` | 16 × 32 | [8, 32] |
+| Scout | `unit.scout` | 30 × 34 | [15, 34] |
+| Rider (knight) | `unit.rider` | 38 × 33 | [19, 33] |
+| Battering ram | `unit.ram` | 40 × 21 | [20, 21] |
+
+Resources come as three looks each (`tree_0.png` … `stone_2.png`, keys `resource.<name>.0` to `.2`).
+Their anchor is the centre of the tile, a few pixels above the base of the image.
 
 ## Format
 
@@ -33,5 +36,5 @@ For every unit there is:
 ## Using them
 
 Copy the finished files into `packages/client/public/sprites/` and list them in its `manifest.json`;
-`manifest.example.json` here lists all nine with the right anchors. Full options are in
+`manifest.example.json` here lists them all with the right anchors. Full options are in
 `packages/client/public/sprites/README.md`.

@@ -2183,7 +2183,7 @@ function paintLobbyPicture(w: number, h: number, now: number): HTMLCanvasElement
     const ty = Math.floor(index / map!.size);
     const [x, y] = tileToScreen(tx + 0.5, ty + 0.5);
     if (x < -40 || y < -10 || x > w + 40 || y > h + 60) continue;
-    items.push({ depth: tx + ty + 1, draw: () => drawProp(c, tile, x, y, Math.floor(hash(tx, ty) * 3), now) });
+    items.push({ depth: tx + ty + 1, draw: () => drawProp(c, tile, x, y, Math.floor(hash(tx, ty) * 6), now) });
   }
   for (const b of lobbyTown) {
     const s = sizeOf(b.kind);
@@ -2276,7 +2276,7 @@ function frame(now: number): void {
     const ty = Math.floor(index / map.size);
     const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
     if (sx < -40 || sy < -10 || sx > canvas.width + 40 || sy > canvas.height + 60 || !explored[index]) continue;
-    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 3), now) });
+    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now) });
   }
   const onScreen = (tx: number, ty: number, margin: number) => {
     const [x, y] = tileToScreen(tx, ty);

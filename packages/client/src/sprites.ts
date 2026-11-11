@@ -1,3 +1,4 @@
+import { PROP_COLORS, PROP_VARIANTS, PropName, propArt, UNIT_COLORS, unitArt } from './pixelart';
 import { Kind, Tile } from '@kingsfall/shared';
 import { drawSprite, findSprite } from './assets';
 
@@ -55,152 +56,6 @@ function shadow(ctx: Ctx, x: number, y: number, rx: number, ry: number): void {
   ctx.ellipse(x + rx * 0.45, y + 1, rx * 1.15, ry * 0.8, 0.12, 0, Math.PI * 2);
   ctx.fill();
 }
-
-// Palette letters: s skin, e eye, t team colour, l leg, d boot, h hair, m metal, a dark metal,
-// w blade/bowstring/feather, k wood, g green, c cape, y gold, o brown (horse, robe, apron),
-// n dark brown, u tan (light horse, beard), f straw, r red, b ermine. Upper case is the same colour darker.
-// Each has its own outline: straw hat, shield and sword, tall spear with pennant, hood and bow,
-// robe and staff, crown and cape, light horse, armoured horse with lance, and the ram's shed.
-const UNIT_SPRITES: Partial<Record<Kind, string[]>> = {
-  villager: [
-    '....ffff....',
-    '..ffffffff..',
-    '....hsss....',
-    '....hsse....',
-    '....ssss....',
-    '...tttttt...',
-    '..tttttttt..',
-    '..Ttoooott..',
-    '..sToooots..',
-    '....nnnn....',
-    '....l..l....',
-    '....l..l....',
-    '....d..dd...',
-  ],
-  king: [
-    '...y.y.y....',
-    '...yyryy..r.',
-    '...hssss..y.',
-    '...hssse..y.',
-    '...huuuu..y.',
-    '.cbebebeb.y.',
-    'ccttttyttsy.',
-    'cctttyytT...',
-    'cctttyttT...',
-    'ccnnnnnnn...',
-    'cc..l..l....',
-    'c...l..l....',
-    '....d..dd...',
-  ],
-  swordsman: [
-    '..........w.',
-    '....mmmm..w.',
-    '...mmmmmm.w.',
-    '....msse..w.',
-    '....ssss..w.',
-    'aaaaammmmyyy',
-    'atttatmmmsn.',
-    'atytatmmmT..',
-    'atttammmmT..',
-    '.atatnnnn...',
-    '..a..m..m...',
-    '.....m..m...',
-    '.....d..dd..',
-  ],
-  spearman: [
-    '.........w..',
-    '.........w..',
-    '.........ktt',
-    '.........kt.',
-    '....mmmm.k..',
-    '..aaaaaaaak.',
-    '....hsse.k..',
-    '....ssss.k..',
-    '...mmtttsk..',
-    '...mmtttTk..',
-    '...tttttTk..',
-    '...nnnnn.k..',
-    '....l..l....',
-    '....l..l....',
-    '....d..dd...',
-  ],
-  archer: [
-    '....g.......',
-    '...ggg......',
-    '..gggggg.k..',
-    '.rggsse..wk.',
-    '.nggssss.w.k',
-    '.nnttttttw.k',
-    '.nntoootsk.k',
-    '..ttoooottwk',
-    '..tttttttwk.',
-    '...nnnnn.k..',
-    '....n..n....',
-    '....n..n....',
-    '....d..dd...',
-  ],
-  monk: [
-    '..........y.',
-    '...hssh..yyy',
-    '...hssse..k.',
-    '....ssss..k.',
-    '...OOOOOO.k.',
-    '..ooottoosk.',
-    '..ooottooOk.',
-    '..yyyttyy.k.',
-    '..ooottoo.k.',
-    '.oooottoook.',
-    '.oooottooo..',
-    'ooooooooooo.',
-    '..d....d....',
-  ],
-  scout: [
-    '...w............',
-    '....wgg.........',
-    '....gggg........',
-    '....hsse...u....',
-    '....ssss..nuuu..',
-    '...tttttt.nueuu.',
-    '...ttttttsuuuuun',
-    '.uuuuuttuuuu....',
-    'nuuuuuuluuuu....',
-    'n.uuuuuduuu.....',
-    '..uuuuuuuuu.....',
-    '..uu.....uu.....',
-    '..uu.....uu.....',
-    '..nn.....nn.....',
-  ],
-  rider: [
-    '.....tt.......w...',
-    '....mmmm.....k....',
-    '....mmmm....k.....',
-    '....meem...ktt....',
-    '....mmmm..k.o.....',
-    '...mtmmmms.nmmm...',
-    '...mtmmmT..noeoo..',
-    '...mtmmm...ooooon.',
-    '.ttttttttttoo.....',
-    'nttttttattttt.....',
-    'n.ttttttdttt......',
-    '..yyyyyyyyy.......',
-    '..oo.....oo.......',
-    '..oo.....oo.......',
-    '..nn.....nn.......',
-  ],
-  ram: [
-    '.....ttttttt......',
-    '....ttTttTttt.....',
-    '...tttttttttttt...',
-    '..nnnnnnnnnnnnnn..',
-    '..k.oooooooooooaa.',
-    '..k.ooooooooooooaa',
-    '..k.oooooooooooaa.',
-    '..kkkkkkkkkkkkkk..',
-    '..nnn.......nnn...',
-    '..nyn.......nyn...',
-    '..nnn.......nnn...',
-  ],
-};
 
 export interface Work {
   /** 1 wood, 2 berries, 3 gold, 4 stone, 5 farm, 6 build. */
@@ -282,23 +137,19 @@ function drawTool(ctx: Ctx, x: number, y: number, w: Work): void {
 
 /** How tall a unit is drawn, for placing its health bar above it. */
 export function unitHeight(kind: Kind): number {
-  return (UNIT_SPRITES[kind]?.length ?? 13) * 2;
+  return unitArt(kind, 0).length;
 }
 
 /** How wide a unit is drawn, for fitting it into a portrait. */
 export function unitWidth(kind: Kind): number {
-  return (UNIT_SPRITES[kind]?.[0].length ?? 12) * 2;
+  return unitArt(kind, 0)[0].length;
 }
 
 const unitPalettes = new Map<number, Record<string, string>>();
 function unitPalette(owner: number): Record<string, string> {
   let palette = unitPalettes.get(owner);
   if (!palette) {
-    palette = {
-      s: '#e2b48c', e: '#2a2018', l: '#6b4a2b', d: '#3a2a1a', h: '#5a3b1e', m: '#9aa0a8', w: '#e6e9ee', k: '#7a5230',
-      g: '#3f6b3a', c: '#7a2d8a', y: '#f2cf3a', o: '#8a5a33', n: '#4a2e18', t: PLAYER_COLORS[owner % PLAYER_COLORS.length],
-      a: '#5e646c', u: '#c49660', f: '#dcb75e', r: '#c8302f', b: '#f4efe2',
-    };
+    palette = { ...UNIT_COLORS, t: PLAYER_COLORS[owner % PLAYER_COLORS.length] };
     for (const [key, color] of Object.entries(palette)) palette[key.toUpperCase()] = shade(color, 0.72);
     unitPalettes.set(owner, palette);
   }
@@ -333,82 +184,49 @@ export function drawUnit(
     ctx.fillStyle = 'rgba(0,0,0,.25)';
     ctx.fillRect(Math.round(x + bx), Math.round(y - 12 - bob), 6, 1);
   }
-  blit(ctx, UNIT_SPRITES[kind] ?? UNIT_SPRITES.villager!, palette, x, y - bob, 2, flip, step);
+  blit(ctx, unitArt(kind, step), palette, x, y - bob, 1, flip, 0);
   if (work) drawTool(ctx, x, y - bob, work);
 }
-
-const TREE = [
-  '....aa....',
-  '...aaba...',
-  '..aabbaa..',
-  '..abbbba..',
-  '.aabbbbaa.',
-  '.abbbbbba.',
-  'aabbbbbbaa',
-  '.abbbbbba.',
-  '..aabbaa..',
-  '....kk....',
-  '....kk....',
-  '....kk....',
-];
-const BUSH = [
-  '..aaaa..',
-  '.arabaa.',
-  'aabaaraa',
-  'araabaab',
-  '.aaraaa.',
-];
-const ROCK = [
-  '...ss...',
-  '..sysss.',
-  '.ssyssys',
-  'sysssyss',
-  'ssssysss',
-];
 
 const PROP_NAMES: Record<number, string> = { [Tile.Forest]: 'tree', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold', [Tile.Stone]: 'stone' };
 
 /** Draws the thing standing on a resource tile, with (x, y) at the tile centre. */
 export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: number, now = 0): void {
   const name = PROP_NAMES[tile];
-  const custom = findSprite([`resource.${name}.${variant}`, `resource.${name}`]);
+  const custom = findSprite([`resource.${name}.${variant % 3}`, `resource.${name}`]);
   if (custom) {
     if (custom.def.shadow !== false) shadow(ctx, x, y + 5, 12, 5);
     drawSprite(ctx, custom, '#ffffff', x, y, now);
     return;
   }
   // Shadow and sprite together are drawn once per kind and variant, then reused.
-  const key = tile * 10 + (tile === Tile.Forest ? variant % 3 : 0);
+  const art = propArt(name as PropName, variant);
+  const key = `${name}|${variant % PROP_VARIANTS[name as PropName]}`;
   let img = propCache.get(key);
   if (!img) {
+    const w = art[0].length;
+    const h = art.length;
+    // Room below the base for the shadow, which falls to the lower right like the buildings'.
     img = document.createElement('canvas');
-    img.width = 48;
-    img.height = 48;
+    img.width = w + 16;
+    img.height = h + 8;
     const c = img.getContext('2d')!;
-    const [cx, cy] = [24, 36];
-    if (tile === Tile.Forest) {
-      shadow(c, cx, cy + 4, 10, 5);
-      blit(c, TREE, TREE_PALETTES[variant % 3], cx, cy + 4);
-    } else if (tile === Tile.Berries) {
-      shadow(c, cx, cy + 5, 12, 5);
-      blit(c, BUSH, BUSH_PALETTE, cx, cy + 7, 3);
-    } else if (tile === Tile.Gold) {
-      shadow(c, cx, cy + 5, 13, 5);
-      blit(c, ROCK, GOLD_PALETTE, cx, cy + 7, 3);
-    } else if (tile === Tile.Stone) {
-      shadow(c, cx, cy + 5, 13, 5);
-      blit(c, ROCK, STONE_PALETTE, cx, cy + 7, 3);
-    }
+    const tall = name === 'tree';
+    shadow(c, w / 2 + 2, h - 1, tall ? 22 : 14, tall ? 9 : 5);
+    blit(c, art, PROP_PALETTE, w / 2, h + 1, 1);
     propCache.set(key, img);
   }
-  ctx.drawImage(img, Math.round(x) - 24, Math.round(y) - 36);
+  // The base sits a little in front of the tile centre.
+  ctx.drawImage(img, Math.round(x - (img.width - 16) / 2), Math.round(y + PROP_BASE[name] - (img.height - 8)));
 }
 
-const propCache = new Map<number, HTMLCanvasElement>();
-const TREE_PALETTES = [['#2f6b2c', '#3f8a37'], ['#28602f', '#37803f'], ['#356e25', '#4a9030']].map(([a, b]) => ({ a, b, k: '#5a3b1e' }));
-const BUSH_PALETTE = { a: '#2f6b2c', b: '#4a9030', r: '#d43b5a' };
-const GOLD_PALETTE = { s: '#7a6f5a', y: '#f2cf3a' };
-const STONE_PALETTE = { s: '#85898f', y: '#c4c8cf' };
+const PROP_BASE: Record<string, number> = { tree: 5, berries: 6, gold: 7, stone: 7 };
+const propCache = new Map<string, HTMLCanvasElement>();
+const PROP_PALETTE: Record<string, string> = (() => {
+  const palette: Record<string, string> = { ...PROP_COLORS };
+  for (const [key, color] of Object.entries(PROP_COLORS)) palette[key.toUpperCase()] = shade(color, 0.72);
+  return palette;
+})();
 
 export function shade(hex: string, f: number): string {
   const n = parseInt(hex.slice(1), 16);
