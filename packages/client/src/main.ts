@@ -1752,7 +1752,7 @@ window.addEventListener('keydown', (ev) => {
 });
 
 const idleVillagers = () => [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0);
-const idleSoldiers = () => [...views.values()].filter((v) => v.owner === me && v.act === 0 && !isBuilding(v.kind) && v.kind !== 'villager' && v.kind !== 'king');
+const allSoldiers = () => [...views.values()].filter((v) => v.owner === me && !isBuilding(v.kind) && v.kind !== 'villager' && v.kind !== 'king');
 
 /** Selects the next villager with nothing to do and looks at it. */
 function nextIdleVillager(): void {
@@ -1766,9 +1766,9 @@ function nextIdleVillager(): void {
   [cam.x, cam.y] = tileToWorld(next.x, next.y);
 }
 
-/** Selects every soldier that is standing around. */
+/** Selects the whole army, busy or not (everyone but villagers and the king). */
 function selectIdleSoldiers(): void {
-  const idle = idleSoldiers();
+  const idle = allSoldiers();
   if (idle.length === 0) return;
   selected.clear();
   selectedTile = -1;
@@ -1788,7 +1788,7 @@ $('idle-mil-btn').addEventListener('click', selectIdleSoldiers);
 let idleSignature = '';
 function renderIdle(): void {
   const vil = idleVillagers().length;
-  const mil = idleSoldiers().length;
+  const mil = allSoldiers().length;
   const signature = `${vil}|${mil}|${me}`;
   if (signature === idleSignature) return;
   idleSignature = signature;
