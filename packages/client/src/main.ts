@@ -409,10 +409,81 @@ function paintTile(m: GameMap, index: number): void {
   else props.delete(index);
 }
 
+/**
+ * Mist around the edge of the map: clouds that thicken towards the border and beyond it, so the
+ * world fades away instead of ending in a hard cut. Painted once per map in tile units, a few
+ * pixels per tile, and stretched over the view like the fog.
+ */
+let edgeMist: HTMLCanvasElement | undefined;
+const MIST_PAD = 14;
+const MIST_RES = 4;
+const MIST_COLOR = '#1b2621';
+
+function paintEdgeMist(n: number, seed: number): HTMLCanvasElement {
+  const size = (n + MIST_PAD * 2) * MIST_RES;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(size, size);
+  const noise = (x: number, y: number) => {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = x - ix;
+    const fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const h = (a: number, b: number) => hash(a + seed * 7, b - seed * 3);
+    const a = h(ix, iy);
+    const b = h(ix + 1, iy);
+    const c2 = h(ix, iy + 1);
+    const d = h(ix + 1, iy + 1);
+    return a + (b - a) * sx + (c2 - a) * sy + (a - b - c2 + d) * sx * sy;
+  };
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const u = px / MIST_RES - MIST_PAD;
+      const v = py / MIST_RES - MIST_PAD;
+      // How far inside the map this point is (negative outside it).
+      const inside = Math.min(u, v, n - u, n - v);
+      const cloud = noise(u / 5, v / 5) * 0.6 + noise(u / 2.2 + 40, v / 2.2) * 0.4;
+      // The mist starts a few tiles in, thickening outwards; its inner edge is ragged with the clouds.
+      const k = Math.max(0, Math.min(1, (8 - inside + (cloud - 0.5) * 5) / 8.5));
+      const alpha = k * k * (3 - 2 * k);
+      // Lighter puffs of cloud, which settle into the plain mist colour at the outer rim.
+      const puff = cloud * 30 * Math.max(0, 1 - Math.max(0, -inside) / MIST_PAD);
+      const o = (py * size + px) * 4;
+      img.data[o] = 27 + puff * 0.85;
+      img.data[o + 1] = 38 + puff * 1.12;
+      img.data[o + 2] = 33 + puff;
+      img.data[o + 3] = Math.round(alpha * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Draws the mist around the edge of the map over everything on the ground. */
+function drawEdgeMist(): void {
+  if (!map || !edgeMist) return;
+  const k = drawScale;
+  ctx.save();
+  ctx.setTransform(HW * k, HH * k, -HW * k, HH * k, (viewW() / 2 - cam.x) * k, (viewH() / 2 - cam.y) * k);
+  ctx.imageSmoothingEnabled = true;
+  // Only the band along each side has mist in it; the middle of the picture is clear, so it is skipped.
+  const n = map.size + MIST_PAD * 2;
+  const band = MIST_PAD + 10;
+  const r = MIST_RES;
+  for (const [u, v, w, h] of [[0, 0, n, band], [0, n - band, n, band], [0, band, band, n - band * 2], [n - band, band, band, n - band * 2]]) {
+    ctx.drawImage(edgeMist, u * r, v * r, w * r, h * r, u - MIST_PAD, v - MIST_PAD, w, h);
+  }
+  ctx.restore();
+}
+
 /** Water tiles, with how far a wave may stray from the middle of each (less next to the shore). */
 let waterTiles: { index: number; room: number }[] = [];
 
 function buildTerrain(m: GameMap): void {
+  edgeMist = paintEdgeMist(m.size, m.size * 31 + (m.starts[0]?.[0] ?? 0));
   waterTiles = [];
   const n = m.size;
   for (let i = 0; i < m.tiles.length; i++) {
@@ -560,7 +631,8 @@ function paintFarSquare(row: number, col: number, scale: number, img: HTMLCanvas
   const c = img.getContext('2d')!;
   c.setTransform(scale, 0, 0, scale, -left * scale, -top * scale);
   c.imageSmoothingEnabled = true;
-  c.fillStyle = '#0b0e0a';
+  // Off the map is mist, the same as around the near view.
+  c.fillStyle = MIST_COLOR;
   c.fillRect(left, top, FAR_SIZE, FAR_SIZE);
   let detailed = true;
   for (let by = 0; by < blocks; by++) {
@@ -894,6 +966,8 @@ function onMessage(msg: ServerMessage): void {
     for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching, w0, w1, w2, w3, bell] of msg.players) {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
+      // Everyone hears when another player reaches a new age.
+      if (old && age > old.age && slot !== me) showNotice(slot, `has reached the ${AGE_NAMES[age] ?? 'next age'}.`);
       if (old && age > old.age) {
         // A new age: the player's buildings change to its style, each in a puff of dust.
         for (const b of views.values()) {
@@ -946,6 +1020,18 @@ function showChat(from: number, text: string): void {
   $('chat-log').append(line);
   setTimeout(() => line.remove(), 12000);
   play('chat', 0);
+}
+
+/** A line in the chat from the game itself, such as another player reaching a new age. */
+function showNotice(from: number, text: string): void {
+  const line = document.createElement('div');
+  line.className = 'notice';
+  const who = document.createElement('b');
+  who.textContent = roster.find((p) => p.slot === from)?.name ?? 'Someone';
+  who.style.color = PLAYER_COLORS[from] ?? '';
+  line.append(who, ` ${text}`);
+  $('chat-log').append(line);
+  setTimeout(() => line.remove(), 12000);
 }
 
 /** Tells the player when something of theirs is attacked where they are not looking. */
@@ -2646,7 +2732,8 @@ function frame(now: number): void {
   last = now;
   requestAnimationFrame(frame);
   ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
-  ctx.fillStyle = '#0b0e0a';
+  // Beyond the mist around the map: more of the same dark mist.
+  ctx.fillStyle = me < 0 ? '#0b0e0a' : MIST_COLOR;
   ctx.fillRect(0, 0, viewW(), viewH());
   if (me < 0) return drawLobbyScene(now);
   if (!map) return;
@@ -2847,6 +2934,7 @@ function frame(now: number): void {
 
   if (breeze.active) breeze.draw(ctx, now, worldToScreen);
   drawFog();
+  drawEdgeMist();
 
   // The marker where units were sent is drawn over the fog, so it shows on unexplored ground too.
   if (marker) {
