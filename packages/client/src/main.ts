@@ -44,6 +44,7 @@ import { clearIcons, icon, setIconAge } from './icons';
 import { installMenuArt } from './menu-art';
 import { paintGround } from './ground';
 import { Breeze } from './breeze';
+import { cloudWall, drawClouds, Puff } from './clouds';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { effectsState, musicState, nextTrack, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
@@ -415,6 +416,8 @@ function paintTile(m: GameMap, index: number): void {
  * in tile units, a few pixels per tile, and stretched over the view like the fog.
  */
 let edgeMist: HTMLCanvasElement | undefined;
+/** The wall of clouds standing along the edges of the map. */
+let cloudPuffs: Puff[] = [];
 const MIST_PAD = 14;
 const MIST_RES = 4;
 const MIST_COLOR = '#4a5a53';
@@ -484,6 +487,7 @@ let waterTiles: { index: number; room: number }[] = [];
 
 function buildTerrain(m: GameMap): void {
   edgeMist = paintEdgeMist(m.size, m.size * 31 + (m.starts[0]?.[0] ?? 0));
+  cloudPuffs = cloudWall(m.size, m.size + (m.starts[0]?.[1] ?? 0), tileToWorld);
   waterTiles = [];
   const n = m.size;
   for (let i = 0; i < m.tiles.length; i++) {
@@ -962,6 +966,22 @@ function onMessage(msg: ServerMessage): void {
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
     let defeatChanged = false;
     gameTick = msg.tick;
+    // Everyone hears when a monk picks up the relic, and when it is brought home.
+    msg.relics.forEach(([, , carrier, monastery], i) => {
+      const before = relics[i];
+      if (!before) return;
+      if (carrier >= 0 && before[2] < 0) {
+        const monk = views.get(carrier);
+        if (monk) {
+          showNotice(monk.owner, 'found the relic!');
+          play('relic', 500);
+        }
+      }
+      if (monastery >= 0 && before[3] < 0) {
+        const home = views.get(monastery);
+        if (home) showNotice(home.owner, `brought the relic to their monastery (+${RELIC_ATTACK} attack).`);
+      }
+    });
     relics = msg.relics;
     for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching, w0, w1, w2, w3, bell] of msg.players) {
       const old = players.get(slot);
@@ -2935,6 +2955,7 @@ function frame(now: number): void {
   if (breeze.active) breeze.draw(ctx, now, worldToScreen);
   drawFog();
   drawEdgeMist();
+  drawClouds(ctx, cloudPuffs, cam.x - viewW() / 2, cam.y - viewH() / 2, viewW(), viewH());
 
   // The marker where units were sent is drawn over the fog, so it shows on unexplored ground too.
   if (marker) {
@@ -2972,5 +2993,5 @@ requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __spawn: spawn, __game: { breeze, play, effectsState, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
+  Object.assign(window, { __spawn: spawn, __game: { breeze, play, effectsState, cloudsOff: () => { cloudPuffs = []; }, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

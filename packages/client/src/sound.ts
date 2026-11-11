@@ -151,8 +151,8 @@ export type SoundName = keyof typeof SOUNDS;
 const custom = new Map<string, { buffer: AudioBuffer; gain: number }[]>();
 let customLoading = false;
 /** Sounds that have no built-in version and stay silent unless a file is given. */
-const FILE_ONLY = new Set(['select', 'heal', 'convert', 'error', 'click', 'start', 'bell']);
-type FileOnly = 'select' | 'heal' | 'convert' | 'error' | 'click' | 'start' | 'bell';
+const FILE_ONLY = new Set(['select', 'heal', 'convert', 'error', 'click', 'start', 'bell', 'relic']);
+type FileOnly = 'select' | 'heal' | 'convert' | 'error' | 'click' | 'start' | 'bell' | 'relic';
 /**
  * Sounds that play quieter than the rest, as a share of the common loudness. Orders are heard
  * all the time, so they stay in the background; monks heal and convert for long stretches, so
