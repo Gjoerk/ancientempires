@@ -20,6 +20,7 @@ import {
   maxHpOf,
   PlayerInfo,
   QUEUE_ITEMS,
+  MAX_TEAMS,
   Res,
   RELIC_ATTACK,
   RELIC_MAX,
@@ -39,16 +40,15 @@ import {
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
-import { drawBuilding } from './buildings';
+import { clearBuildingCache, drawBuilding } from './buildings';
 import { clearIcons, icon, setIconAge } from './icons';
 import { installMenuArt } from './menu-art';
 import { paintGround } from './ground';
 import { Breeze } from './breeze';
-import { cloudWall, drawClouds, Puff } from './clouds';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { effectsState, musicState, nextTrack, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
-import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
+import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setPlayerColors, unitHeight } from './sprites';
 
 interface View {
   id: number;
@@ -416,8 +416,6 @@ function paintTile(m: GameMap, index: number): void {
  * in tile units, a few pixels per tile, and stretched over the view like the fog.
  */
 let edgeMist: HTMLCanvasElement | undefined;
-/** The wall of clouds standing along the edges of the map. */
-let cloudPuffs: Puff[] = [];
 const MIST_PAD = 14;
 const MIST_RES = 4;
 const MIST_COLOR = '#4a5a53';
@@ -487,7 +485,6 @@ let waterTiles: { index: number; room: number }[] = [];
 
 function buildTerrain(m: GameMap): void {
   edgeMist = paintEdgeMist(m.size, m.size * 31 + (m.starts[0]?.[0] ?? 0));
-  cloudPuffs = cloudWall(m.size, m.size + (m.starts[0]?.[1] ?? 0), tileToWorld);
   waterTiles = [];
   const n = m.size;
   for (let i = 0; i < m.tiles.length; i++) {
@@ -857,7 +854,7 @@ function renderPlayers(): void {
   for (const p of roster) {
     const chip = document.createElement('span');
     chip.className = 'chip';
-    chip.style.setProperty('--gem', `var(--gem-${p.slot})`);
+    chip.style.setProperty('--gem', `var(--gem-${p.team})`);
     const label = document.createElement('span');
     label.textContent = p.name + (p.slot === me ? (p.slot === myOwnSlot ? ' (you)' : ' (playing)') : '');
     label.style.marginRight = '14px';
@@ -882,6 +879,10 @@ function onMessage(msg: ServerMessage): void {
     popLimit = msg.popLimit;
     buildTerrain(map);
     roster = msg.players;
+    // Every player plays in their team's colour.
+    setPlayerColors(new Map(roster.map((p) => [p.slot, p.team])));
+    clearBuildingCache();
+    clearIcons();
     $('room-code').textContent = msg.room;
     renderPlayers();
     $('lobby').style.display = 'none';
@@ -1126,7 +1127,7 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
     const li = document.createElement('li');
     const chip = document.createElement('span');
     chip.className = 'gem';
-    chip.style.setProperty('--gem', `var(--gem-${p.slot})`);
+    chip.style.setProperty('--gem', `var(--gem-${p.team})`);
     const tags = [
       p.slot === you ? 'you' : '', p.slot === host ? 'host' : '', p.test ? 'played by the host' : '', p.ai ? 'computer' : '',
     ].filter(Boolean);
@@ -1136,13 +1137,14 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
     // The host puts players into teams; same team means allies.
     const team = document.createElement('select');
     team.title = 'Team';
-    for (let t = 0; t < 4; t++) team.add(new Option(`Team ${t + 1}`, String(t)));
+    for (let t = 0; t < MAX_TEAMS; t++) team.add(new Option(`Team ${t + 1}`, String(t)));
     team.value = String(p.team);
     team.className = 'team';
     team.style.setProperty('--gem', `var(--gem-${p.team})`);
     team.disabled = !hosting;
     team.addEventListener('change', () => {
       team.style.setProperty('--gem', `var(--gem-${team.value})`);
+      chip.style.setProperty('--gem', `var(--gem-${team.value})`);
       session?.host?.setTeam(p.slot, Number(team.value));
     });
     li.append(chip, name);
@@ -2078,13 +2080,11 @@ function renderPanel(): void {
     if (v.kind === 'castle' && v.extra >= 100) {
       card.sub = v.task & 2 ? `The king is inside${v.target > 1 ? ` with ${v.target - 1} more` : ''}` : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
     }
+    // Buttons that come and go are added after all the others, so that nothing moves.
+    const later: PanelButton[] = [];
     if (DEFS[v.kind].garrison && v.extra >= 100) {
       if (v.task === 1) card.sub = `${v.target} sheltering inside`;
-      if (v.task && v.owner === me) buttons.push({ label: 'Send everyone out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
-    }
-    if (v.kind === 'towncenter' && v.owner === me && v.extra >= 100) {
-      const rung = players.get(me)?.bell === true;
-      buttons.push({ label: rung ? 'Back to work' : 'Ring the bell', icon: rung ? 'allclear' : 'bell', detail: describeAction(rung ? 'allclear' : 'bell'), data: { bell: '1' } });
+      if (v.task && v.owner === me) later.push({ label: 'Send everyone out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
     }
     if (v.kind === 'monastery' && v.extra >= 100) {
       const kept = relics.filter((r) => r[3] === v.id).length;
@@ -2103,19 +2103,29 @@ function renderPanel(): void {
       }
       for (const id of TECH_IDS) {
         const tech = TECHS[id];
-        if (tech.at !== v.kind || has(id) || ((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) continue;
-        if (id === 'age3' && age < 2) continue;
+        if (tech.at !== v.kind) continue;
+        // Every upgrade keeps its place: once done or queued it stays, greyed out.
+        const done = has(id);
+        const queued = (((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) === 1;
         const d = describeTech(id, has, age);
-        const short = tech.age > age ? AGE_NAMES[tech.age].replace(' Age', '') : d.warn ? 'locked' : undefined;
-        buttons.push({ label: tech.label, icon: id, cost: tech.cost, locked: !!d.warn, short, detail: d, data: { train: id, at } });
+        if (done) d.warn = 'Already researched.';
+        else if (queued) d.warn = 'Being researched.';
+        else if (id === 'age3' && age < 2) d.warn = d.warn ?? 'Needs the Town Age first.';
+        const short = done ? 'done' : queued ? 'queued' : tech.age > age ? AGE_NAMES[tech.age].replace(' Age', '') : id === 'age3' && age < 2 ? 'Town' : d.warn ? 'locked' : undefined;
+        buttons.push({ label: tech.label, icon: id, cost: done || queued ? undefined : tech.cost, locked: done || queued || !!d.warn, short, detail: d, data: { train: id, at } });
+      }
+      if (v.kind === 'towncenter') {
+        const rung = players.get(me)?.bell === true;
+        buttons.push({ label: rung ? 'Back to work' : 'Ring the bell', icon: rung ? 'allclear' : 'bell', detail: describeAction(rung ? 'allclear' : 'bell'), data: { bell: '1' } });
       }
       if (v.kind === 'market') {
         for (const r of TRADE_GOODS) buttons.push({ label: `Sell ${r}`, icon: `sell.${r}`, gain: { gold: TRADE_SELL }, locked: (my?.res[r] ?? 0) < 100, short: `100 ${r}`, detail: describeAction(`sell.${r}`), data: { sell: r, at } });
         for (const r of TRADE_GOODS) buttons.push({ label: `Buy ${r}`, icon: `buy.${r}`, cost: { gold: TRADE_BUY }, detail: describeAction(`buy.${r}`), data: { buy: r, at } });
       }
-      if (queue) buttons.push({ label: 'Cancel last', icon: 'cancel', detail: describeAction('cancel'), data: { cancel: at } });
+      if (queue) later.push({ label: 'Cancel last', icon: 'cancel', detail: describeAction('cancel'), data: { cancel: at } });
       if (def.trains) detail.lines.push('Right-click the map to set a gathering point.');
     }
+    buttons.push(...later);
   } else if (chosen.length > 1) {
     const counts = new Map<Kind, number>();
     for (const v of chosen) counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);
@@ -2955,7 +2965,6 @@ function frame(now: number): void {
   if (breeze.active) breeze.draw(ctx, now, worldToScreen);
   drawFog();
   drawEdgeMist();
-  drawClouds(ctx, cloudPuffs, cam.x - viewW() / 2, cam.y - viewH() / 2, viewW(), viewH());
 
   // The marker where units were sent is drawn over the fog, so it shows on unexplored ground too.
   if (marker) {
@@ -2993,5 +3002,5 @@ requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __spawn: spawn, __game: { breeze, play, effectsState, cloudsOff: () => { cloudPuffs = []; }, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
+  Object.assign(window, { __spawn: spawn, __game: { breeze, play, effectsState, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

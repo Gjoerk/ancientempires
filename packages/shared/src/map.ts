@@ -5,6 +5,8 @@ export const MAP_SIZE = 80;
 export const MAP_SIZES = { small: 96, medium: 128, large: 160 } as const;
 export type MapSizeName = keyof typeof MAP_SIZES;
 export const MAX_PLAYERS = 4;
+/** Teams to choose from in the lobby; each has its own colour. */
+export const MAX_TEAMS = 8;
 /** Radius around each start tile kept free for the town centre and castle. */
 const BASE_RADIUS = 6.5;
 

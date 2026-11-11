@@ -1243,6 +1243,11 @@ const CACHE_TOP = 120;
 const CACHE_BOTTOM = 40;
 const buildingCache = new Map<string, HTMLCanvasElement>();
 
+/** Forgets the kept pictures of buildings, after the players' colours have changed. */
+export function clearBuildingCache(): void {
+  buildingCache.clear();
+}
+
 function paintBuilding(ctx: Ctx, kind: Kind, team: string, seed: number, sx: number, sy: number, state: BuildingState): void {
   const s = DEFS[kind].size ?? 1;
   if (kind === 'farm') {

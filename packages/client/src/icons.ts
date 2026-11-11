@@ -398,7 +398,29 @@ export function icon(id: string, owner = 0): string {
     c.fillRect(30, 34, 14, 4);
     c.fillRect(38, 30, 4, 12);
   } else if (id === 'eject') {
-    thing(c, 'king', owner, SIZE, 0, 0);
+    // A doorway with an arrow leading out of it: everyone comes out.
+    c.fillStyle = '#2a2018';
+    c.fillRect(6, 8, 18, 32);
+    c.fillStyle = '#5a3b1e';
+    c.fillRect(9, 11, 12, 29);
+    c.fillStyle = '#e0b030';
+    c.fillRect(17, 25, 2, 3);
+    c.fillStyle = '#2a2018';
+    c.fillRect(20, 20, 18, 12);
+    c.beginPath();
+    c.moveTo(34, 12);
+    c.lineTo(46, 26);
+    c.lineTo(34, 40);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#7fd16a';
+    c.fillRect(22, 22, 14, 8);
+    c.beginPath();
+    c.moveTo(35, 16);
+    c.lineTo(43, 26);
+    c.lineTo(35, 36);
+    c.closePath();
+    c.fill();
   } else {
     glyph(c, id === 'cancel' ? 'cross' : id === 'rally' ? 'flag' : id, team, 4, 4, 4);
   }

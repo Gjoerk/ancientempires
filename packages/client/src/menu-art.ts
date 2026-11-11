@@ -1,4 +1,4 @@
-import { PLAYER_COLORS, shade } from './sprites';
+import { shade, TEAM_COLORS } from './sprites';
 
 // Pixel art for the start menu and waiting room: the fleur-de-lis pattern, the shield arrow and gems.
 // Everything is drawn once into small images and handed to the page as CSS variables.
@@ -68,5 +68,5 @@ export function installMenuArt(): void {
   root.setProperty('--pat-fleur', fleurPattern());
   root.setProperty('--arrow-shield', shieldArrow());
   // One gem per player and team colour, numbered like the teams.
-  PLAYER_COLORS.forEach((color, i) => root.setProperty(`--gem-${i}`, gem(color, shade(color, 0.45))));
+  TEAM_COLORS.forEach((color, i) => root.setProperty(`--gem-${i}`, gem(color, shade(color, 0.45))));
 }

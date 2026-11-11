@@ -2,7 +2,24 @@ import { PROP_COLORS, PROP_VARIANTS, PropName, propArt, relicArt, UNIT_COLORS, u
 import { Kind, Tile } from '@kingsfall/shared';
 import { drawSprite, findSprite } from './assets';
 
-export const PLAYER_COLORS = ['#3b6fd4', '#d43b3b', '#3bb85a', '#e0c12f'];
+/** The team colours: blue, red, green, yellow, purple, orange, teal and pink. */
+export const TEAM_COLORS = ['#3b6fd4', '#d43b3b', '#3bb85a', '#e0c12f', '#9a4fd6', '#e8832a', '#2fb8b0', '#e05aa8'];
+
+/** Each player's colour, by slot: the colour of their team, set when a game starts. */
+export const PLAYER_COLORS = TEAM_COLORS.slice(0, 4);
+
+/** Gives every player their team's colour; `teams` is the team of each slot. */
+export function setPlayerColors(teams: Map<number, number>): void {
+  let changed = false;
+  for (const [slot, team] of teams) {
+    const color = TEAM_COLORS[team % TEAM_COLORS.length];
+    if (PLAYER_COLORS[slot] !== color) {
+      PLAYER_COLORS[slot] = color;
+      changed = true;
+    }
+  }
+  if (changed) unitPalettes.clear();
+}
 
 // Isometric tile half-width and half-height in screen pixels.
 export const HW = 32;

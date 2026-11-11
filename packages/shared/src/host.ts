@@ -1,5 +1,5 @@
 import { DEFS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
-import { MAP_SIZES, MAX_PLAYERS } from './map';
+import { MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
 import { runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
@@ -40,7 +40,7 @@ export class GameHost {
 
   setTeam(slot: number, team: number): void {
     const player = this.players.get(slot);
-    if (player && !this.state && Number.isInteger(team) && team >= 0 && team < MAX_PLAYERS) player.team = team;
+    if (player && !this.state && Number.isInteger(team) && team >= 0 && team < MAX_TEAMS) player.team = team;
   }
 
   /** Starts a fresh game with everyone who is in the lobby. */
