@@ -196,4 +196,19 @@ export function runAi(state: GameState, slot: number): void {
       notes.waves++;
     }
   }
+  // Soldiers only pick fights with units by themselves, so the computer points idle ones at nearby buildings.
+  for (const e of army) {
+    if (e.order.t !== 'idle' || e.inside >= 0) continue;
+    let near: Entity | undefined;
+    let nearD = 10;
+    for (const b of state.entities.values()) {
+      if (!DEFS[b.kind].building || !isEnemy(state, b.owner, slot)) continue;
+      const d = Math.hypot(b.x - e.x, b.y - e.y);
+      if (d < nearD) {
+        nearD = d;
+        near = b;
+      }
+    }
+    if (near) applyCommand(state, slot, { type: 'interact', ids: [e.id], target: near.id });
+  }
 }

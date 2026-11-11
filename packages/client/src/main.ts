@@ -21,6 +21,7 @@ import {
   PlayerInfo,
   QUEUE_ITEMS,
   Res,
+  Stance,
   RESOURCES,
   ServerMessage,
   TECH_IDS,
@@ -39,6 +40,7 @@ import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
 import { clearIcons, icon } from './icons';
 import { installMenuArt } from './menu-art';
+import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { isMuted, play, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
@@ -199,17 +201,24 @@ function unitScreen(v: View): [number, number] {
 function workSpot(v: View, now: number): [number, number] | undefined {
   // Only real work (tasks 1-6) pulls a unit towards a spot; an attacker walks there itself.
   if (!map || v.task === 0 || v.task > 6 || v.act !== 2 || isBuilding(v.kind)) return undefined;
-  if (v.task <= 4) return [(v.target % map.size) + 0.5, Math.floor(v.target / map.size) + 0.5];
+  if (v.task <= 4) {
+    const spot: [number, number] = [(v.target % map.size) + 0.5, Math.floor(v.target / map.size) + 0.5];
+    // Only a unit standing right beside its resource leans in; one pausing elsewhere (say, at a drop-off) stays put.
+    return Math.hypot(spot[0] - v.x, spot[1] - v.y) < 1.6 ? spot : undefined;
+  }
   const b = views.get(v.target);
   if (!b) return undefined;
   const s = sizeOf(b.kind);
+  const nx = Math.max(b.x, Math.min(b.x + s, v.x));
+  const ny = Math.max(b.y, Math.min(b.y + s, v.y));
+  if (Math.hypot(nx - v.x, ny - v.y) > (v.task === 5 ? 0.05 : 1.2)) return undefined;
   if (v.task === 5) {
     // Farmers stand on their field and move slowly up and down their furrow.
     const fx = Math.max(b.x + 0.3, Math.min(b.x + s - 0.3, v.x + Math.cos(now / 4000 + v.id) * 0.35));
     const fy = Math.max(b.y + 0.3, Math.min(b.y + s - 0.3, v.y + Math.sin(now / 3100 + v.id * 2) * 0.2));
     return [fx, fy];
   }
-  return [Math.max(b.x, Math.min(b.x + s, v.x)), Math.max(b.y, Math.min(b.y + s, v.y))];
+  return [nx, ny];
 }
 
 /** Eases working units towards their work so they do not stand a tile away from it. */
@@ -691,6 +700,7 @@ function resetGame(): void {
 }
 
 function showLobby(message: string): void {
+  if (document.pointerLockElement) document.exitPointerLock();
   session = undefined;
   resetGame();
   $('waiting').style.display = 'none';
@@ -848,8 +858,12 @@ function unitAt(sx: number, sy: number): View | undefined {
   let bestD = 18;
   for (const v of views.values()) {
     if (isBuilding(v.kind) || !canSee(v)) continue;
+    // The whole figure counts, from the feet up to the head, even where a building is drawn over it.
     const [x, y] = unitScreen(v);
-    const d = Math.hypot(x - sx, y - 10 - sy);
+    const dx = Math.abs(x - sx);
+    const dy = sy - y;
+    if (dx > 13 || dy > 6 || dy < -34) continue;
+    const d = Math.hypot(dx, (dy + 14) / 2);
     if (d < bestD) {
       bestD = d;
       best = v;
@@ -1286,6 +1300,8 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+// In fullscreen the pointer is kept on this screen while playing, so edge scrolling cannot lose it to another monitor.
+installCursorLock(canvas, () => !$('bottom').hidden);
 $('resign-btn').addEventListener('click', () => {
   $('menu').hidden = true;
   if (confirm('Give up? Your king dies and you are out of the game.')) send({ type: 'resign' });
@@ -1329,7 +1345,8 @@ $('actions').addEventListener('click', (ev) => {
   // A press-and-hold only showed the details; it does not also use the button.
   if (pressShown) return void (pressShown = false);
   if (button.classList.contains('locked')) return;
-  const { build, train, cancel, eject, sell, buy } = button.dataset;
+  const { build, train, cancel, eject, sell, buy, stance } = button.dataset;
+  if (stance) send({ type: 'stance', ids: ownSelectedUnits().map((v) => v.id), stance: stance as Stance });
   if (sell) send({ type: 'trade', building: Number(button.dataset.at), res: sell as Res, buy: false });
   if (buy) send({ type: 'trade', building: Number(button.dataset.at), res: buy as Res, buy: true });
   if (eject) send({ type: 'eject', building: Number(eject) });
@@ -1415,6 +1432,8 @@ interface PanelButton {
   icon: string;
   detail: Detail;
   data: Record<string, string>;
+  /** Shown pressed in: the setting that is in effect. */
+  active?: boolean;
 }
 
 /** What the selection card shows. */
@@ -1597,6 +1616,16 @@ function renderPanel(): void {
     }
   }
 
+  // Soldiers can be told to go for anything they see, or to stand their ground until struck.
+  const fighters = mine.filter((v) => !isBuilding(v.kind) && DEFS[v.kind].attack && v.kind !== 'villager' && v.kind !== 'king');
+  if (!placing && fighters.length > 0) {
+    const defensive = fighters.filter((v) => v.extra >= 10000).length;
+    for (const stance of ['aggressive', 'defensive'] as const) {
+      buttons.push({ label: stance === 'aggressive' ? 'Aggressive' : 'Defensive', icon: `stance.${stance}`, detail: describeAction(`stance.${stance}`),
+        data: { stance }, active: stance === 'defensive' ? defensive === fighters.length : defensive === 0 });
+    }
+  }
+
   // A new selection forgets the button that was looked at last.
   const selKey = [...selected].join() + '|' + selectedTile + '|' + (placing ?? '') + '|' + me;
   if (selKey !== focusSelection) {
@@ -1612,7 +1641,7 @@ function renderPanel(): void {
     panelSignature = signature;
     renderCard(card);
   }
-  const buttonSignature = JSON.stringify([me, buttons.map((b) => [buttonKey(b), b.label, b.locked, b.cost && !canAfford(b.cost)])]);
+  const buttonSignature = JSON.stringify([me, buttons.map((b) => [buttonKey(b), b.label, b.locked, b.active, b.cost && !canAfford(b.cost)])]);
   if (buttonSignature === lastButtons) return;
   lastButtons = buttonSignature;
   renderButtons(buttons);
@@ -1733,6 +1762,7 @@ function renderButtons(buttons: PanelButton[]): void {
     if (b.locked && b.short) last.textContent = b.short;
     else last.append(...costChips(b.gain ?? b.cost ?? {}, b.gain ? '+' : ''));
     el.classList.toggle('locked', !!b.locked);
+    el.classList.toggle('on', !!b.active);
     el.classList.toggle('poor', !b.locked && !!b.cost && !canAfford(b.cost));
     el.classList.toggle('focus', el.dataset.key === focusKey);
   });
@@ -2041,9 +2071,9 @@ function drawTargetMark(v: View, alpha: number, width: number): void {
   ctx.stroke();
 }
 
-function drawUnitView(v: View, x: number, y: number, now: number, ghost = false): void {
+function drawUnitView(v: View, x: number, y: number, now: number): void {
   let [sx, sy] = tileToScreen(x + v.ox, y + v.oy);
-  if (selected.has(v.id) && !ghost) {
+  if (selected.has(v.id)) {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -2078,8 +2108,7 @@ function drawUnitView(v: View, x: number, y: number, now: number, ghost = false)
     foeDir = tileToScreen(...centreOf(foe))[0] >= sx ? 1 : -1;
   }
   const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) % 10 : -1;
-  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face, ghost);
-  if (ghost) return;
+  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face);
   if (slash) {
     ctx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - slash.k)})`;
     ctx.lineWidth = 3;
@@ -2265,26 +2294,6 @@ function frame(now: number): void {
   }
   drawables.sort((a, b) => a.depth - b.depth);
   for (const d of drawables) d.draw();
-
-  // Our own and allied units hidden behind a building are drawn again, faintly, on top, so they can be seen and clicked.
-  const covers: { depth: number; x0: number; x1: number; y0: number; y1: number }[] = [];
-  for (const b of shown) {
-    if (!isBuilding(b.kind) || b.kind === 'farm' || b.kind === 'wall') continue;
-    const s = sizeOf(b.kind);
-    const [bx, by] = tileToScreen(b.x, b.y);
-    covers.push({ depth: b.x + b.y + s, x0: bx - s * HW, x1: bx + s * HW, y0: by - 80, y1: by + s * HH * 2 - 6 });
-  }
-  if (covers.length > 0) {
-    ctx.globalAlpha = 0.5;
-    for (const v of shown) {
-      if (isBuilding(v.kind) || !sharedSight.has(v.owner)) continue;
-      const [x, y] = viewPos(v, alpha);
-      const [sx, sy] = tileToScreen(x + v.ox, y + v.oy);
-      const depth = x + v.ox + y + v.oy;
-      if (covers.some((c) => c.depth > depth && sx > c.x0 && sx < c.x1 && sy - 4 > c.y0 && sy - 20 < c.y1)) drawUnitView(v, x, y, now, true);
-    }
-    ctx.globalAlpha = 1;
-  }
 
   blessings = blessings.filter((b) => now - b.t < 600);
   for (const b of blessings) {

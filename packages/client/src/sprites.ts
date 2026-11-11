@@ -275,7 +275,6 @@ function unitPalette(owner: number): Record<string, string> {
 export function drawUnit(
   ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1, activity = 0, now = 0,
   face = 1,
-  ghost = false,
 ): void {
   const big = kind === 'king' || kind === 'rider' || kind === 'scout' || kind === 'ram';
   // The monk's robe is brown, so his palette uses the horse colour for it.
@@ -286,13 +285,13 @@ export function drawUnit(
   const state = work ? `work.${WORK_NAMES[work.task]}` : ['idle', 'walk', 'work', 'attack'][activity] ?? 'idle';
   const custom = findSprite([`unit.${kind}.${state}`, `unit.${kind}.${state.split('.')[0]}`, `unit.${kind}`]);
   if (custom) {
-    if (custom.def.shadow !== false && !ghost) shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
+    if (custom.def.shadow !== false) shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
     drawSprite(ctx, custom, PLAYER_COLORS[owner % PLAYER_COLORS.length], x, y - bob, now, flip);
     // Without a dedicated working image, the built-in tool is swung over the sprite.
     if (work && !custom.key.includes('.work')) drawTool(ctx, x, y - bob, work);
     return;
   }
-  if (!ghost) shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
+  shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
   const palette = unitPalette(owner);
   if (carry >= 0 && !work) {
     // A bundle of whatever is being carried home, on the back.

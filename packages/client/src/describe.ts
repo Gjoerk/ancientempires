@@ -106,6 +106,14 @@ export function describeAction(id: string): Detail {
     return { title: `Buy 100 ${res}`, icon: id, cost: { gold: TRADE_BUY }, stats: [],
       lines: [`Buys 100 ${res} for ${TRADE_BUY} gold.`, 'Handy when a resource runs out near your town.'] };
   }
+  if (id === 'stance.aggressive') {
+    return { title: 'Aggressive', icon: id, stats: [], lines: ['Soldiers attack any enemy unit they see and chase it a little way.',
+      'Buildings are only attacked when you right-click one.'] };
+  }
+  if (id === 'stance.defensive') {
+    return { title: 'Defensive', icon: id, stats: [], lines: ['Soldiers hold their ground and only fight back when they are attacked.',
+      'Good for guards that should not be lured away. An attack-move (Ctrl + right-click) still fights its way through.'] };
+  }
   if (id === 'eject') {
     return { title: 'Send everyone out', icon: id, stats: [], lines: ['Everyone sheltering inside comes out. Outside they can be attacked, the king too.'] };
   }

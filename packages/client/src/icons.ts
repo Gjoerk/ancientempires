@@ -348,6 +348,16 @@ export function icon(id: string, owner = 0): string {
     c.fillStyle = action === 'buy' ? '#c8402f' : '#5f9a3a';
     c.fillRect(34, 6, 10, 4);
     if (action === 'sell') c.fillRect(37, 3, 4, 10);
+  } else if (id === 'stance.aggressive') {
+    // Crossed swords: goes for anything in sight.
+    glyph(c, 'sword', team, 2, 6, 3);
+    c.save();
+    c.translate(SIZE, 0);
+    c.scale(-1, 1);
+    glyph(c, 'sword', team, 2, 6, 3);
+    c.restore();
+  } else if (id === 'stance.defensive') {
+    glyph(c, 'shield', team, 4, 4, 4);
   } else if (id === 'eject') {
     thing(c, 'king', owner, SIZE, 0, 0);
   } else {

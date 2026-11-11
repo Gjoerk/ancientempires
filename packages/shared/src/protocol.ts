@@ -23,7 +23,7 @@ export interface GameSettings {
 /**
  * [id, owner, kind index into KINDS, x, y, hp, activity, extra, task, target]
  * activity: 0 idle, 1 moving, 2 working, 3 fighting.
- * extra: units carry `amount + 100 * resource index`; buildings report construction progress 0-100.
+ * extra: units carry `amount + 100 * resource index + 1000 * queued sites + 10000 if defensive`; buildings report construction progress 0-100.
  * task/target: see `taskOf` for units; for castles task is 1 while a king is inside.
  */
 export type EntitySnapshot = [number, number, number, number, number, number, number, number, number, number];

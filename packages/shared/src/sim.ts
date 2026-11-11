@@ -56,7 +56,11 @@ export interface Entity {
   tasks?: number[];
   /** Id of the castle this unit is sheltering in, or -1. */
   inside: number;
+  /** Soldiers: 'defensive' ones only fight back when struck; otherwise they go for enemies they see. */
+  stance?: Stance;
 }
+
+export type Stance = 'aggressive' | 'defensive';
 
 export interface PlayerState {
   slot: number;
@@ -119,6 +123,7 @@ export type Command =
   | { type: 'trade'; building: number; res: Res; buy: boolean }
   | { type: 'amove'; ids: number[]; x: number; y: number }
   | { type: 'stop'; ids: number[] }
+  | { type: 'stance'; ids: number[]; stance: Stance }
   /** Destroys one of the player's own units or buildings. */
   | { type: 'delete'; id: number }
   | { type: 'cancel'; building: number }
@@ -679,6 +684,18 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
       e.path = [];
       e.order = { t: 'idle' };
     }
+  } else if (cmd.type === 'stance') {
+    if (cmd.stance !== 'aggressive' && cmd.stance !== 'defensive') return;
+    for (const e of ownUnits(state, slot, cmd.ids)) {
+      if (!DEFS[e.kind].attack || e.kind === 'villager' || e.kind === 'king') continue;
+      if (cmd.stance === 'defensive') e.stance = 'defensive';
+      else delete e.stance;
+      // Going defensive calls off fights the unit picked itself.
+      if (cmd.stance === 'defensive' && e.order.t === 'attack' && e.order.auto) {
+        e.path = [];
+        e.order = { t: 'idle' };
+      }
+    }
   } else if (cmd.type === 'copy') {
     const from = state.entities.get(cmd.from);
     if (!from || from.owner !== slot || from.kind !== 'villager') return;
@@ -708,13 +725,12 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
   let best: Entity | undefined;
   let bestScore = Infinity;
   for (const other of state.entities.values()) {
-    if (!isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
+    // Only units are picked on sight; buildings are attacked when a player orders it.
+    if (isBuilding(other) || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
     const d = distance(e, other);
     if (d > reach) continue;
-    // Prefer units over buildings at a similar distance.
-    const score = isBuilding(other) ? d + 4 : d;
-    if (score < bestScore) {
-      bestScore = score;
+    if (d < bestScore) {
+      bestScore = d;
       best = other;
     }
   }
@@ -731,7 +747,7 @@ function strike(state: GameState, e: Entity, target: Entity): void {
   target.hp -= dmg;
   if (target.hp <= 0) return kill(state, target);
   // Soldiers standing around fight back, even against something beyond their sight.
-  if (target.order.t === 'idle' && DEFS[target.kind].attack && !isBuilding(target) && target.kind !== 'villager') {
+  if (target.order.t === 'idle' && DEFS[target.kind].attack && !isBuilding(target) && !isBuilding(e) && target.kind !== 'villager') {
     target.order = { t: 'attack', id: e.id, auto: true };
   }
 }
@@ -1105,7 +1121,9 @@ export function step(state: GameState): void {
 
     // Soldiers and towers pick fights on their own; villagers and kings do not.
     const now = e.order;
-    if ((now.t === 'idle' || now.t === 'amove') && def.attack && e.kind !== 'villager' && (state.tick + e.id) % 5 === 0) {
+    // Defensive soldiers wait until struck, though they still fight their way through an attack-move.
+    const looking = now.t === 'amove' || (now.t === 'idle' && e.stance !== 'defensive');
+    if (looking && def.attack && e.kind !== 'villager' && (state.tick + e.id) % 5 === 0) {
       const reach = isBuilding(e) ? rangeOf(e.kind, hasTech(state, e.owner)) : def.sight ?? DEFAULT_SIGHT;
       const enemy = findEnemy(state, e, reach);
       if (enemy) e.order = { t: 'attack', id: enemy.id, auto: true, then: now.t === 'amove' ? [now.x, now.y] : undefined };

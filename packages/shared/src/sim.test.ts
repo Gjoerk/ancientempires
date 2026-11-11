@@ -7,6 +7,7 @@ import {
 
 const owned = (s: GameState, slot: number, kind: string): Entity[] =>
   [...s.entities.values()].filter((e) => e.owner === slot && e.kind === kind);
+const attacking = (e: Entity, target: Entity) => e.order.t === 'attack' && e.order.id === target.id;
 const run = (s: GameState, ticks: number) => {
   for (let i = 0; i < ticks; i++) step(s);
 };
@@ -597,4 +598,37 @@ test('a villager copies the job of another', () => {
   applyCommand(s, 0, { type: 'copy', ids: [b.id], from: a.id });
   assert.equal(b.order.t, 'gather');
   assert.equal(b.order.t === 'gather' && b.order.res, 'wood');
+});
+
+test('soldiers only pick fights with units; buildings wait for an order', () => {
+  const s = createGame(11);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  const sword = spawn(s, 0, 'swordsman', 30, 30);
+  const house = spawn(s, 1, 'house', 32, 29);
+  run(s, 30);
+  assert.equal(sword.order.t, 'idle');
+  const foe = spawn(s, 1, 'villager', 33, 32);
+  run(s, 10);
+  assert.ok(attacking(sword, foe));
+  applyCommand(s, 0, { type: 'interact', ids: [sword.id], target: house.id });
+  assert.ok(attacking(sword, house));
+});
+
+test('defensive soldiers wait until struck, then fight back', () => {
+  const s = createGame(11);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  const guard = spawn(s, 0, 'swordsman', 30, 30);
+  applyCommand(s, 0, { type: 'stance', ids: [guard.id], stance: 'defensive' });
+  assert.equal(guard.stance, 'defensive');
+  const passer = spawn(s, 1, 'villager', 32, 30);
+  run(s, 30);
+  assert.equal(guard.order.t, 'idle');
+  const raider = spawn(s, 1, 'archer', 34, 30);
+  run(s, 40);
+  assert.ok(attacking(guard, raider) || !s.entities.has(raider.id));
+  assert.ok(s.entities.has(passer.id));
+  applyCommand(s, 0, { type: 'stance', ids: [guard.id], stance: 'aggressive' });
+  assert.equal(guard.stance, undefined);
 });

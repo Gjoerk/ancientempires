@@ -2,7 +2,7 @@ import type { Res } from './defs';
 
 export const MAP_SIZE = 80;
 /** Map sizes the host can choose from, in tiles along one edge. */
-export const MAP_SIZES = { small: 64, medium: 80, large: 112 } as const;
+export const MAP_SIZES = { small: 96, medium: 128, large: 160 } as const;
 export type MapSizeName = keyof typeof MAP_SIZES;
 export const MAX_PLAYERS = 4;
 /** Radius around each start tile kept free for the town centre and castle. */

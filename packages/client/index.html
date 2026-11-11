@@ -141,6 +141,7 @@
     .res.short { color: #ff8a70; }
     #actions button.poor img.pic { filter: saturate(.4) brightness(.8); }
     #actions button.locked { opacity: .4; }
+    body #actions button.on { background: #24493a; box-shadow: inset 0 0 0 2px var(--accent), inset 0 3px 6px rgba(0, 0, 0, .55); }
     #actions button.focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 
     #details { grid-area: details; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
@@ -410,7 +411,8 @@
     T gives the selected villagers the same job as the villager you gave an order last<br>
     Shift while placing buildings puts them on the villagers' list: they build one after the other<br>
     Groups walk in formation at the pace of their slowest member; fields can be walked over.<br>
-    Enter chat · F fullscreen · M sound · H or Esc closes this<br>
+    Soldiers are Aggressive (attack enemy units they see) or Defensive (fight back only when hit); they attack buildings only when told to<br>
+    Enter chat · F fullscreen (the cursor stays on the screen; Esc frees it) · M sound · H or Esc closes this<br>
     <b>Good to know</b><br>
     Build a mill, lumber camp or mining camp next to food, wood, gold or stone so villagers walk less.<br>
     Walls are dragged out as a line and block everyone; a gate lets you and your allies through.<br>
@@ -433,9 +435,9 @@
       <ul id="room-players"></ul>
       <label class="check">Map size
         <select id="size-select">
-          <option value="small">Small (64 × 64)</option>
-          <option value="medium">Medium (80 × 80)</option>
-          <option value="large">Large (112 × 112)</option>
+          <option value="small">Small (96 × 96)</option>
+          <option value="medium">Medium (128 × 128)</option>
+          <option value="large">Large (160 × 160)</option>
         </select>
       </label>
       <label class="check">Population limit

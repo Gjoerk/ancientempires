@@ -75,6 +75,6 @@ can be replaced the same way, with the key `icon.<id>`. Icons are shown square; 
 - **Units and buildings:** `icon.<kind>`, for example `icon.villager`, `icon.barracks` (used on build and train buttons and as the portrait)
 - **Upgrades:** `icon.<id>` with id one of `age2`, `age3`, `loom`, `handcart`, `ploughs`, `axes`, `picks`, `weapons`, `armour`,
   `pikes`, `jacks`, `blades`, `shields`, `longbows`, `quickdraw`, `lances`, `barding`, `ironhead`, `arrowslits`
-- **Actions:** `icon.cancel`, `icon.eject`, `icon.sell.food`, `icon.sell.wood`, `icon.sell.stone`, `icon.buy.food`, `icon.buy.wood`, `icon.buy.stone`
+- **Actions:** `icon.cancel`, `icon.eject`, `icon.stance.aggressive`, `icon.stance.defensive`, `icon.sell.food`, `icon.sell.wood`, `icon.sell.stone`, `icon.buy.food`, `icon.buy.wood`, `icon.buy.stone`
 
 Example: `"icon.gold": { "src": "icons/gold.png" }`
