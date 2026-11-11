@@ -1,5 +1,5 @@
 import {
-  AGE_NAMES, armorOf, attackOf, BUILDABLE, Cost, DEFS, FARM_FOOD, isTech, Kind, maxHpOf, rangeOf, RESEED_COST, TECH_IDS, TechId, TECHS,
+  AGE_NAMES, armorOf, attackOf, BUILDABLE, Cost, DEFS, FALLOW_SECONDS, FARM_FOOD, isTech, Kind, maxHpOf, rangeOf, RESEED_COST, TECH_IDS, TechId, TECHS,
   TRADE_BUY, TRADE_SELL,
 } from '@kingsfall/shared';
 
@@ -34,7 +34,7 @@ const ROLE: Record<Kind, string> = {
   mill: 'Drop-off point for food. Build it next to berry bushes or among your farms.',
   lumbercamp: 'Drop-off point for wood. Build it at the edge of a forest so villagers walk less.',
   miningcamp: 'Drop-off point for gold and stone. Build it right next to a mine.',
-  farm: `A field that keeps giving food. It yields ${FARM_FOOD} food, then is sown again automatically for ${RESEED_COST} wood.`,
+  farm: `A field of food. It yields ${FARM_FOOD} food and then lies fallow: send a villager to sow it again for ${RESEED_COST} wood, or after ${FALLOW_SECONDS} s it is gone.`,
   barracks: 'Trains foot soldiers.',
   range: 'Trains archers.',
   stable: 'Trains mounted units.',

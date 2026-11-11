@@ -1,5 +1,5 @@
 import {
-  armorOf, attackOf, bonusOf, CARRY_CAPACITY, CONVERT_REST, CONVERT_TIME, cooldownOf, TRADE_GOODS, Cost, DEFAULT_SIGHT, DEFS, FARM_FOOD, FARM_RATE, GATHER_RATE, GATHER_TECH, RESEED_COST, isTech, Kind, KINDS, maxHpOf, POP_MAX,
+  armorOf, attackOf, bonusOf, CARRY_CAPACITY, FALLOW_SECONDS, CONVERT_REST, CONVERT_TIME, cooldownOf, TRADE_GOODS, Cost, DEFAULT_SIGHT, DEFS, FARM_FOOD, FARM_RATE, GATHER_RATE, GATHER_TECH, RESEED_COST, isTech, Kind, KINDS, maxHpOf, POP_MAX,
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, markBuilding, Tile, TILE_RESOURCE } from './map';
@@ -72,6 +72,8 @@ export interface Entity {
   pace?: number;
   /** Building sites a villager will work on next, in order. */
   tasks?: number[];
+  /** Farms: the tick the field ran out of food and went fallow, until it is sown again. */
+  fallow?: number;
   /** A villager's job that ended by itself, kept for a while so they can go back to it (see resumeWork). */
   resume?: { order: Order; since: number; tries: number };
   /** Id of the castle this unit is sheltering in, or -1. */
@@ -680,6 +682,14 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
         && (target.progress < 1 || (target.hp < DEFS[target.kind].hp && target.kind !== 'farm'))) {
         // Finish the building, or repair it.
         e.order = { t: 'build', id: target.id };
+      } else if (target.kind === 'farm' && e.kind === 'villager' && target.fallow !== undefined) {
+        // Sowing a fallow field again costs wood; whoever sows it farms it.
+        if (player.res.wood >= RESEED_COST) {
+          player.res.wood -= RESEED_COST;
+          target.carry = FARM_FOOD;
+          target.fallow = undefined;
+          e.order = gatherOrder(-1, target.id, 'food');
+        }
       } else if (target.kind === 'farm' && e.kind === 'villager' && farmIsFree(state, target, e)) {
         e.order = gatherOrder(-1, target.id, 'food');
       } else if (isBuilding(target)) {
@@ -988,17 +998,23 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
   const has = hasTech(state, e.owner);
   const capacity = CARRY_CAPACITY + (has('handcart') ? 5 : 0);
   if (farm && farm.carry <= 0) {
-    // The field is exhausted: sow it again if there is wood for it, otherwise wait.
-    const owner = state.players.get(e.owner)!;
-    if (owner.res.wood < RESEED_COST) return;
-    owner.res.wood -= RESEED_COST;
-    farm.carry = FARM_FOOD;
+    // The field is used up: it lies fallow, and the farmer takes what they have to the mill and stops.
+    farm.fallow ??= state.tick;
+    if (e.carry > 0) {
+      o.farm = -1;
+      o.phase = 'return';
+      o.drop = -1;
+    } else e.order = { t: 'idle' };
+    return;
   }
   e.work += ((o.farm >= 0 ? FARM_RATE : GATHER_RATE) * (has(GATHER_TECH[o.res]) ? 1.2 : 1)) / TICK_RATE;
   while (e.work >= 1 && e.carry < capacity) {
     e.work -= 1;
     e.carry++;
-    if (farm && --farm.carry <= 0) break;
+    if (farm && --farm.carry <= 0) {
+      farm.fallow = state.tick;
+      break;
+    }
     if (o.farm < 0) {
       state.amountEvents.set(o.tile, --map.amount[o.tile]);
       if (map.amount[o.tile] <= 0) {
@@ -1493,7 +1509,7 @@ function watchIdle(state: GameState, e: Entity, before: Order): void {
     else e.resume = undefined;
   } else if (o.t === 'gather' && o.farm >= 0) {
     const farm = state.entities.get(o.farm);
-    if (farm && farm.progress >= 1 && farmIsFree(state, farm, e)) e.order = gatherOrder(-1, farm.id, 'food');
+    if (farm && farm.progress >= 1 && farm.fallow === undefined && farmIsFree(state, farm, e)) e.order = gatherOrder(-1, farm.id, 'food');
     else e.resume = undefined;
   } else if (o.t === 'gather') {
     const from = o.tile >= 0 ? o.tile : Math.floor(e.y) * state.map.size + Math.floor(e.x);
@@ -1533,6 +1549,11 @@ export function step(state: GameState): void {
     if (e.cooldown > 0) e.cooldown--;
     if (isBuilding(e) && e.progress < 1) continue;
     if (isBuilding(e)) stepTraining(state, e);
+    // A field left fallow too long is gone.
+    if (e.fallow !== undefined && state.tick - e.fallow >= FALLOW_SECONDS * TICK_RATE) {
+      kill(state, e);
+      continue;
+    }
 
     const o = e.order;
     if (o.t === 'gather') stepGather(state, e, o);

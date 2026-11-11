@@ -37,6 +37,8 @@ import {
   TRADE_GOODS,
   rangeOf,
   TRADE_SELL,
+  RESEED_COST,
+  FALLOW_SECONDS,
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
@@ -933,6 +935,11 @@ function onMessage(msg: ServerMessage): void {
         if (Math.abs(turn) > 0.01) v.face = turn > 0 ? 1 : -1;
         if (hp < v.hp && v.owner === me) underAttack(v, now);
         if (v.owner === me && isBuilding(v.kind) && v.extra < 100 && extra >= 100) play(`built.${v.kind}`, 400);
+        // One of your fields has run out.
+        if (v.owner === me && v.kind === 'farm' && !(v.task & 2) && (task & 2)) {
+          showNotice(-1, `A farm has run out of food. Sow it again with a villager (${RESEED_COST} wood) within ${FALLOW_SECONDS} s, or it is lost.`);
+          play('collapse.farm', 300);
+        }
         // A monk may have converted it, so the owner can change too.
         Object.assign(v, { owner, x, y, hp, act, extra, task, target });
       } else {
@@ -984,11 +991,22 @@ function onMessage(msg: ServerMessage): void {
       if (seen) puffs.push({ x: x + half, y: y + half, t: now, big: isBuilding(kind) });
       // Losses of your own are always heard, wherever you are looking.
       if (seen || owner === me) play(isBuilding(kind) ? `collapse.${kind}` : `death.${kind}`, 150);
+      if (owner === me && kind === 'farm') showNotice(-1, 'A farm has been lost.');
     }
     rallies.clear();
     for (const [id, x, y] of msg.rallies) rallies.set(id, [x, y]);
     queues.clear();
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
+    // A finished unit stuck waiting for room: tell the player, now and then, that houses are needed.
+    const mine = players.get(me);
+    if (mine && mine.pop >= mine.cap && mine.cap < popLimit && now - housingWarned > 30000) {
+      const waiting = msg.queues.some(([id, progress, first]) => views.get(id)?.owner === me && progress >= 100 && !isTech(QUEUE_ITEMS[first]));
+      if (waiting) {
+        housingWarned = now;
+        showNotice(-1, 'Out of room: build more houses so your units can come out.');
+        play('error', 300);
+      }
+    }
     let defeatChanged = false;
     gameTick = msg.tick;
     // Everyone hears when a player first sets eyes on the relic, when a monk picks it up, and when it is brought home.
@@ -1043,6 +1061,7 @@ function onMessage(msg: ServerMessage): void {
           const fresh = techs & ~old.techs;
           const id = TECH_IDS.find((_, i) => (fresh >> i) & 1);
           play(id ? `research.${id}` : 'research');
+          if (id) showNotice(-1, `Research complete: ${TECHS[id].label}.`);
         }
         if (defeated === 1 && !old.defeated) play('defeat');
       }
@@ -1124,7 +1143,10 @@ function showNotice(from: number, text: string): void {
   const who = document.createElement('b');
   who.textContent = roster.find((p) => p.slot === from)?.name ?? 'Someone';
   who.style.color = PLAYER_COLORS[from] ?? '';
-  if (from < 0) line.append(text);
+  if (from < 0) {
+    line.classList.add('mine');
+    line.append(text);
+  }
   else line.append(who, ` ${text}`);
   $('chat-log').append(line);
   setTimeout(() => line.remove(), 12000);
@@ -1420,6 +1442,7 @@ function missing(cost: Cost): string {
 }
 
 let refuseTimer = 0;
+let housingWarned = -Infinity;
 /** The error sound, with a short red line above the bottom bar saying why. */
 function refuse(why: string): void {
   play('error', 250);
@@ -1491,6 +1514,9 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
     return;
   }
   const target = unitAt(sx, sy) ?? buildingAt(sx, sy);
+  const sowing = target?.kind === 'farm' && target.owner === me && (target.task & 2) !== 0
+    && ids.some((id) => views.get(id)?.kind === 'villager');
+  if (sowing && (players.get(me)?.res.wood ?? 0) < RESEED_COST) return refuse(`Sowing the farm again needs ${RESEED_COST} wood.`);
   if (target && (target.owner !== me || isBuilding(target.kind))) {
     send({ type: 'interact', ids, target: target.id });
     marker = undefined;
@@ -2197,6 +2223,13 @@ function renderPanel(): void {
     if ((def.range ?? 0) > 2) card.stats.push(['bow', String(rangeOf(v.kind, theirs))]);
     if (!isBuilding(v.kind) || def.attack) card.stats.push(['shield', String(armorOf(v.kind, theirs))]);
     if (!isBuilding(v.kind) && v.extra % 100 > 0) card.stats.push([RESOURCES[Math.floor(v.extra / 100) % 10], `carrying ${v.extra % 100}`]);
+    if (v.kind === 'farm' && v.extra >= 100) {
+      if (v.task & 2) {
+        card.sub = `Lies fallow · lost in ${v.target} s unless sown again`;
+        card.stats.push(['food', 'no food left']);
+        if (v.owner === me) detail.lines.push(`Send a villager to sow it again for ${RESEED_COST} wood.`);
+      } else card.stats.push(['food', `${v.target} food left`]);
+    }
     if (v.kind === 'castle' && v.extra >= 100) {
       card.sub = v.task & 2 ? `The king is inside${v.target > 1 ? ` with ${v.target - 1} more` : ''}` : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
     }
@@ -2680,7 +2713,7 @@ function drawBuildingView(v: View): void {
     ctx.stroke();
   }
   const sheltering = !!DEFS[v.kind].garrison;
-  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: (sheltering || v.kind === 'farm') && (v.task & 1) !== 0, now: performance.now(), age: players.get(v.owner)?.age ?? 1 });
+  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: (sheltering || v.kind === 'farm') && (v.task & 1) !== 0, fallow: v.kind === 'farm' && (v.task & 2) !== 0, now: performance.now(), age: players.get(v.owner)?.age ?? 1 });
   if ((v.kind === 'farm' || v.kind === 'wall') && v.extra >= 100 && v.hp >= def.hp && !selected.has(v.id)) return;
   // Bars sit above the roof line of tall buildings.
   const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'catapulttower' ? 58 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);

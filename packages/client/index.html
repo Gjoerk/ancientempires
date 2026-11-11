@@ -222,6 +222,8 @@
       text-shadow: 0 1px 2px #000; font-variant: normal; }
     #chat-log div { background: rgba(0, 0, 0, .5); padding: 1px 8px; border-radius: 3px; }
     #chat-log div.notice { font-style: italic; background: rgba(20, 40, 28, .7); border-left: 2px solid var(--accent); }
+    /* Only for you: news about your own things. */
+    #chat-log div.notice.mine { color: #f3d77e; border-left-color: #f3d77e; }
     #chat-input { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; width: min(460px, calc(100vw - 20px)); box-sizing: border-box;
       background: var(--page); color: #fff; font-variant: normal; }
     #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; line-height: 1.6;

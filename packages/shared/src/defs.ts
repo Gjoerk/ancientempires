@@ -307,9 +307,13 @@ export const CARRY_CAPACITY = 10;
 /** Resources gathered per second. */
 export const GATHER_RATE = 1;
 export const FARM_RATE = 0.7;
-/** Food a farm yields before it has to be sown again, and the wood that costs. */
+/**
+ * Food a farm yields before it runs out. An empty farm lies fallow until a villager sows it again
+ * for some wood; left fallow too long it is gone.
+ */
 export const FARM_FOOD = 300;
 export const RESEED_COST = 25;
+export const FALLOW_SECONDS = 45;
 /** The technology that speeds up gathering each resource. */
 export const GATHER_TECH: Record<Res, TechId> = { food: 'ploughs', wood: 'axes', gold: 'picks', stone: 'picks' };
 export const QUEUE_MAX = 15;

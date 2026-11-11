@@ -427,8 +427,10 @@ export interface BuildingState {
   built: number;
   /** A king is sheltering inside (town centres and castles). */
   kingInside: boolean;
-  /** Someone is sheltering inside: the building flies a flag. */
+  /** Someone is sheltering inside: the building flies a flag. Farms: someone farms it. */
   occupied?: boolean;
+  /** A farm that has run out of food: bare, harvested soil. */
+  fallow?: boolean;
   /** Time for animations; -1 while drawing the still picture that is kept and reused. */
   now: number;
   /** The owner's age, 1 to 3: buildings are built of timber, then stone and plaster, then brick. */
@@ -1177,13 +1179,25 @@ export function drawRoyalFlag(ctx: Ctx, base: Pt, team: string, now: number): vo
 
 function drawFarm(pen: Pen, team: string, state: BuildingState, seed: number): void {
   const done = state.built >= 1;
-  pen.ground(0.04, 0.04, 1.96, 1.96, done ? '#6e4f2c' : '#7d6a4c');
+  const bare = done && state.fallow === true;
+  pen.ground(0.04, 0.04, 1.96, 1.96, bare ? '#756449' : done ? '#6e4f2c' : '#7d6a4c');
   const rows = 8;
   for (let i = 0; i < rows; i++) {
     const v0 = 0.12 + (i * 1.76) / rows;
-    if (i % 2 === 0) pen.ground(0.12, v0, 1.88, v0 + 1.76 / rows, done ? '#7d5a33' : '#8a7654');
+    if (i % 2 === 0) pen.ground(0.12, v0, 1.88, v0 + 1.76 / rows, bare ? '#82704f' : done ? '#7d5a33' : '#8a7654');
   }
-  if (done) {
+  if (bare) {
+    // Harvested: only dry stubble is left in the furrows.
+    for (let i = 0; i < rows; i++) {
+      const v = 0.12 + ((i + 0.5) * 1.76) / rows;
+      for (let k = 0; k < 9; k++) {
+        const u = 0.22 + (k * 1.56) / 8 + (((seed + i * 7 + k * 3) % 5) - 2) * 0.012;
+        const [x, y] = pen.p(u, v);
+        pen.line([x, y], [x + (k % 2 ? 1 : -1), y - 2], '#a89366', 1);
+      }
+    }
+  }
+  if (done && !bare) {
     // Crops in every furrow, at different stages of ripeness.
     for (let i = 0; i < rows; i++) {
       const v = 0.12 + ((i + 0.5) * 1.76) / rows;
@@ -1244,13 +1258,14 @@ export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, 
     // Finished buildings are drawn once into a picture and then copied; only moving parts are drawn live.
     const age = state.age ?? 2;
     const farmed = kind === 'farm' && state.occupied === true;
-    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}|${age}|${farmed ? 1 : 0}`;
+    const fallow = kind === 'farm' && state.fallow === true;
+    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}|${age}|${farmed ? 1 : 0}|${fallow ? 1 : 0}`;
     let img = buildingCache.get(key);
     if (!img) {
       img = document.createElement('canvas');
       img.width = s * HW * 2 + CACHE_LEFT + CACHE_RIGHT;
       img.height = s * HH * 2 + CACHE_TOP + CACHE_BOTTOM;
-      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, occupied: farmed, now: -1, age });
+      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, occupied: farmed, fallow, now: -1, age });
       buildingCache.set(key, img);
     }
     ctx.drawImage(img, Math.round(sx) - s * HW - CACHE_LEFT, Math.round(sy) - CACHE_TOP);

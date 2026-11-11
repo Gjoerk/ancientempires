@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addPlayer, applyCommand, armorOf, attackOf, canPlace, createGame, DEFS, hasTech, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
-  TILE_RESOURCE,
+  TILE_RESOURCE, RESEED_COST, FARM_FOOD, FALLOW_SECONDS,
 } from './index';
 
 const owned = (s: GameState, slot: number, kind: string): Entity[] =>
@@ -361,7 +361,7 @@ test('each resource is delivered only where it belongs, and camps put their buil
   assert.equal(p.res.gold, goldBefore, 'a lumber camp takes no gold');
 });
 
-test('a farm runs dry and is sown again for wood', () => {
+test('a farm runs out and lies fallow until a villager sows it again, or is gone', () => {
   const s = createGame(53);
   addPlayer(s, 0);
   const [sx, sy] = s.map.starts[0];
@@ -369,10 +369,27 @@ test('a farm runs dry and is sown again for wood', () => {
   farm.carry = 4;
   const p = s.players.get(0)!;
   const wood = p.res.wood;
-  applyCommand(s, 0, { type: 'interact', ids: [owned(s, 0, 'villager')[0].id], target: farm.id });
+  const farmer = owned(s, 0, 'villager')[0];
+  applyCommand(s, 0, { type: 'interact', ids: [farmer.id], target: farm.id });
   run(s, 200);
-  assert.equal(p.res.wood, wood - 25);
-  assert.ok(farm.carry > 250);
+  // Used up: fallow, no wood spent, the farmer has stopped and is not sent back by itself.
+  assert.ok(farm.fallow !== undefined, 'the farm lies fallow');
+  assert.equal(p.res.wood, wood);
+  run(s, 100);
+  assert.equal(farmer.order.t, 'idle');
+  // A villager sows it again for wood and farms it.
+  applyCommand(s, 0, { type: 'interact', ids: [farmer.id], target: farm.id });
+  assert.equal(p.res.wood, wood - RESEED_COST);
+  assert.equal(farm.fallow, undefined);
+  assert.equal(farm.carry, FARM_FOOD);
+  assert.equal((farmer.order as { t: string }).t, 'gather');
+  // Left fallow too long, it is gone.
+  farm.carry = 1;
+  run(s, 100);
+  assert.ok(farm.fallow !== undefined);
+  applyCommand(s, 0, { type: 'stop', ids: [farmer.id] });
+  run(s, FALLOW_SECONDS * 10 + 5);
+  assert.ok(!s.entities.has(farm.id), 'the fallow farm is gone');
 });
 
 test('resigning kills the king and ends the game for that player', () => {

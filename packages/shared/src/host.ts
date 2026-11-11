@@ -1,4 +1,4 @@
-import { DEFS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
+import { DEFS, FALLOW_SECONDS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
 import { MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
 import { runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
@@ -148,7 +148,10 @@ export class GameHost {
       // Buildings that shelter units report 1 when someone is inside and 2 more when it is the king, and how many.
       const inside = building && DEFS[e.kind].garrison ? countInside(s, e) : 0;
       const [task, target] = building
-        ? e.kind === 'farm' ? [farmed.has(e.id) ? 1 : 0, 0] : [(inside > 0 ? 1 : 0) | (hasKingInside(s, e) ? 2 : 0), inside]
+        ? e.kind === 'farm'
+          ? [(farmed.has(e.id) ? 1 : 0) | (e.fallow !== undefined ? 2 : 0),
+            e.fallow !== undefined ? Math.ceil(FALLOW_SECONDS - (s.tick - e.fallow) / TICK_RATE) : e.carry]
+          : [(inside > 0 ? 1 : 0) | (hasKingInside(s, e) ? 2 : 0), inside]
         : taskOf(e);
       ents.push([
         e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
