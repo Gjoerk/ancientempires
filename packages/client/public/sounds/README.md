@@ -35,6 +35,7 @@ folder and list it in `manifest.json`; anything not listed keeps its built-in so
 | `victory` | Your team wins | victory fanfare | 1–3 s |
 | `defeat` | You are defeated | falling notes | 1–3 s |
 
-Tips: keep files short and normalised to about −3 dB peak; the game plays them at 60 % volume.
+Tips: keep files short. They play at the level they were made at, so set loudness in the file
+(the built-in sounds peak around −12 dB).
 Very frequent sounds (`hit`, `arrow`, `order`) are limited to a few per second, so big battles
 do not turn into noise. OGG, MP3 and WAV all work.

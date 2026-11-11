@@ -141,9 +141,8 @@ export function play(name: SoundName, gap = 90): void {
   if (buffer) {
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.6;
-    src.connect(gain).connect(ctx.destination);
+    // Played at the level it was made at.
+    src.connect(ctx.destination);
     src.start();
     return;
   }

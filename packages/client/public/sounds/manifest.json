@@ -1,1 +1,12 @@
-{}
+{
+  "age": "age.ogg",
+  "alarm": "alarm.ogg",
+  "built": "built.ogg",
+  "chat": "chat.ogg",
+  "collapse": "collapse.ogg",
+  "death": "death.ogg",
+  "defeat": "defeat.ogg",
+  "order": "order.ogg",
+  "trained": "trained.ogg",
+  "victory": "victory.ogg"
+}
