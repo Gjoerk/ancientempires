@@ -1179,8 +1179,8 @@ function drawFarm(pen: Pen, team: string, state: BuildingState, seed: number): v
   };
   fence([0.04, 0.04], [1.96, 0.04]);
   fence([0.04, 0.04], [0.04, 1.96]);
-  if (done) {
-    // Scarecrow wearing the owner's colour.
+  if (done && state.occupied) {
+    // Scarecrow wearing the owner's colour, standing only while someone farms the field.
     const foot = pen.p(0.45, 0.45);
     pen.line(foot, [foot[0], foot[1] - 20], TIMBER, 2);
     pen.line([foot[0] - 7, foot[1] - 14], [foot[0] + 7, foot[1] - 14], TIMBER, 2);
@@ -1215,13 +1215,14 @@ export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, 
   if (done) {
     // Finished buildings are drawn once into a picture and then copied; only moving parts are drawn live.
     const age = state.age ?? 2;
-    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}|${age}`;
+    const farmed = kind === 'farm' && state.occupied === true;
+    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}|${age}|${farmed ? 1 : 0}`;
     let img = buildingCache.get(key);
     if (!img) {
       img = document.createElement('canvas');
       img.width = s * HW * 2 + CACHE_LEFT + CACHE_RIGHT;
       img.height = s * HH * 2 + CACHE_TOP + CACHE_BOTTOM;
-      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, now: -1, age });
+      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, occupied: farmed, now: -1, age });
       buildingCache.set(key, img);
     }
     ctx.drawImage(img, Math.round(sx) - s * HW - CACHE_LEFT, Math.round(sy) - CACHE_TOP);

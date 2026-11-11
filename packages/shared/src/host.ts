@@ -134,6 +134,9 @@ export class GameHost {
     const rallies: [number, number, number][] = [];
     const mask = (set: Set<string>) => TECH_IDS.reduce((m, id, i) => (set.has(id) ? m | (1 << i) : m), 0);
     const workers = new Map<number, Record<string, number>>();
+    // Fields someone is assigned to, coming and going included.
+    const farmed = new Set<number>();
+    for (const e of s.entities.values()) if (e.order.t === 'gather' && e.order.farm >= 0) farmed.add(e.order.farm);
     for (const e of s.entities.values()) {
       if (e.order.t === 'gather') {
         const count = workers.get(e.owner) ?? {};
@@ -144,7 +147,9 @@ export class GameHost {
       const building = DEFS[e.kind].building;
       // Buildings that shelter units report 1 when someone is inside and 2 more when it is the king, and how many.
       const inside = building && DEFS[e.kind].garrison ? countInside(s, e) : 0;
-      const [task, target] = building ? [(inside > 0 ? 1 : 0) | (hasKingInside(s, e) ? 2 : 0), inside] : taskOf(e);
+      const [task, target] = building
+        ? e.kind === 'farm' ? [farmed.has(e.id) ? 1 : 0, 0] : [(inside > 0 ? 1 : 0) | (hasKingInside(s, e) ? 2 : 0), inside]
+        : taskOf(e);
       ents.push([
         e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
         // Units: carried amount + 100 * resource + 1000 * building sites still queued.

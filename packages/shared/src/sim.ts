@@ -432,7 +432,11 @@ function claim(state: GameState, e: Entity): void {
   if (!state.occupied.has(tile)) state.occupied.set(tile, e.id);
 }
 
-function nearestResourceTile(map: GameMap, from: number, res: Res, radius: number): number {
+/**
+ * The nearest tile of a resource within `radius` of a tile. With `by`, only tiles that unit can
+ * walk up to count: a tree in the middle of a wood, with no free side to stand at, is skipped.
+ */
+function nearestResourceTile(map: GameMap, from: number, res: Res, radius: number, by?: { e: Entity; team: number }): number {
   const fx = from % map.size;
   const fy = Math.floor(from / map.size);
   let best = -1;
@@ -442,7 +446,9 @@ function nearestResourceTile(map: GameMap, from: number, res: Res, radius: numbe
       const i = y * map.size + x;
       if (TILE_RESOURCE[map.tiles[i] as Tile]?.res !== res) continue;
       const d = Math.hypot(x - fx, y - fy);
-      if (d < bestD) {
+      if (d >= bestD) continue;
+      if (by && !canReach(map, Math.floor(by.e.x), Math.floor(by.e.y), x, y, by.team, 1)) continue;
+      {
         bestD = d;
         best = i;
       }
@@ -632,7 +638,11 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     patch.sort((a, b) => dist(a) - dist(b));
     const workers = units.filter((e) => e.kind === 'villager');
     workers.forEach((e, i) => {
-      e.order = gatherOrder(patch[i % patch.length], -1, res);
+      // Only tiles with a free side to stand at; a villager given one deep inside a wood would just stand there.
+      const team = teamOf(state, e.owner);
+      const open = patch.filter((t) => canReach(map, Math.floor(e.x), Math.floor(e.y), t % map.size, Math.floor(t / map.size), team, 1));
+      const choice = open.length > 0 ? open : [tile];
+      e.order = gatherOrder(choice[i % choice.length], -1, res);
       e.path = [];
     });
     moveUnits(state, units.filter((e) => e.kind !== 'villager'), r.x, r.y);
@@ -884,7 +894,7 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
     rect = rectOf(farm);
   } else {
     if (TILE_RESOURCE[map.tiles[o.tile] as Tile]?.res !== o.res) {
-      const next = nearestResourceTile(map, o.tile, o.res, 8);
+      const next = nearestResourceTile(map, o.tile, o.res, 8, { e, team: teamOf(state, e.owner) });
       if (next < 0) {
         if (e.carry > 0) {
           o.tile = -1;
@@ -909,7 +919,11 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
         e.carryRes = o.res;
       }
     } else if (!(farm ? goOnto(state, e, rect) : goAdjacent(state, e, rect))) {
-      e.order = { t: 'idle' };
+      // That tile cannot be got at (it is walled in by more of the same, or by others' buildings):
+      // work the nearest one of the same kind that can, rather than giving up.
+      const next = farm ? -1 : nearestResourceTile(map, o.tile, o.res, 8, { e, team: teamOf(state, e.owner) });
+      if (next >= 0 && next !== o.tile) o.tile = next;
+      else e.order = { t: 'idle' };
     }
     return;
   }
@@ -961,7 +975,7 @@ function stepBuild(state: GameState, e: Entity, o: Extract<Order, { t: 'build' }
     // Whoever builds a camp or mill starts gathering what it is for, if some is close by.
     const stores = site.kind === 'towncenter' ? undefined : DEFS[site.kind].dropoff;
     for (const res of stores ?? []) {
-      const tile = nearestResourceTile(state.map, site.y * state.map.size + site.x, res, 6);
+      const tile = nearestResourceTile(state.map, site.y * state.map.size + site.x, res, 6, { e, team: teamOf(state, e.owner) });
       if (tile >= 0) return void (e.order = gatherOrder(tile, -1, res));
     }
     // Help with another unfinished building close by, if there is one.

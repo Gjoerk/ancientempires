@@ -56,6 +56,20 @@ function output(): AudioNode {
   return effects;
 }
 
+let limiterNode: DynamicsCompressorNode | undefined;
+function limiter(): AudioNode {
+  if (!limiterNode) {
+    limiterNode = ctx!.createDynamicsCompressor();
+    limiterNode.threshold.value = -4;
+    limiterNode.knee.value = 2;
+    limiterNode.ratio.value = 20;
+    limiterNode.attack.value = 0.002;
+    limiterNode.release.value = 0.15;
+    limiterNode.connect(output());
+  }
+  return limiterNode;
+}
+
 export function effectsState(): { volume: number; muted: boolean } {
   return { volume: effectsVolume, muted };
 }
@@ -158,6 +172,8 @@ type FileOnly = 'select' | 'heal' | 'convert' | 'error' | 'click' | 'start' | 'b
  * all the time, so they stay in the background; monks heal and convert for long stretches, so
  * theirs are only a murmur.
  */
+/** Sounds that come with a line in the chat (a new age, the relic, a message): louder, so none is missed. */
+const LOUDER: Record<string, number> = { age: 2, relic: 2, chat: 1.8 };
 const QUIETER: Record<string, number> = { order: 0.45, click: 0.45, heal: 0.2, convert: 0.2, death: 0.5 };
 /** Sounds that must not overlap: [name prefix, milliseconds between them]. */
 const SPACED: [string, number][] = [['order.move.', 1300]];
@@ -250,8 +266,10 @@ function playFile(name: string): boolean {
   const src = ctx.createBufferSource();
   src.buffer = sound.buffer;
   const gain = ctx.createGain();
-  gain.gain.value = sound.gain * (QUIETER[name.split('.')[0]] ?? 1);
-  src.connect(gain).connect(output());
+  const group = name.split('.')[0];
+  gain.gain.value = sound.gain * (QUIETER[group] ?? 1) * (LOUDER[group] ?? 1);
+  // Boosted sounds go through a limiter so that their peaks never crackle.
+  src.connect(gain).connect(group in LOUDER ? limiter() : output());
   src.start();
   return true;
 }

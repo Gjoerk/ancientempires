@@ -988,7 +988,10 @@ function onMessage(msg: ServerMessage): void {
       }
       if (monastery >= 0 && before[3] < 0) {
         const home = views.get(monastery);
-        if (home) showNotice(home.owner, `brought the relic to their monastery (+${RELIC_ATTACK} attack).`);
+        if (home) {
+          showNotice(home.owner, `brought the relic to their monastery (+${RELIC_ATTACK} attack).`);
+          play('relic', 500);
+        }
       }
     });
     relics = msg.relics;
@@ -996,7 +999,11 @@ function onMessage(msg: ServerMessage): void {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
       // Everyone hears when another player reaches a new age.
-      if (old && age > old.age) showNotice(slot, `has reached the ${AGE_NAMES[age] ?? 'next age'}.`);
+      if (old && age > old.age) {
+        showNotice(slot, `has reached the ${AGE_NAMES[age] ?? 'next age'}.`);
+        // Your own new age has its fanfare below; someone else's is heard too.
+        if (slot !== me) play(`age.${age}`);
+      }
       if (old && age > old.age) {
         // A new age: the player's buildings change to its style, each in a puff of dust.
         for (const b of views.values()) {
@@ -2603,7 +2610,7 @@ function drawBuildingView(v: View): void {
     ctx.stroke();
   }
   const sheltering = !!DEFS[v.kind].garrison;
-  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: sheltering && (v.task & 1) !== 0, now: performance.now(), age: players.get(v.owner)?.age ?? 1 });
+  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: (sheltering || v.kind === 'farm') && (v.task & 1) !== 0, now: performance.now(), age: players.get(v.owner)?.age ?? 1 });
   if ((v.kind === 'farm' || v.kind === 'wall') && v.extra >= 100 && v.hp >= def.hp && !selected.has(v.id)) return;
   // Bars sit above the roof line of tall buildings.
   const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);
@@ -2809,7 +2816,7 @@ function paintLobbyPicture(w: number, h: number, now: number): HTMLCanvasElement
   for (const b of lobbyTown) {
     const s = sizeOf(b.kind);
     const [x, y] = tileToScreen(b.x, b.y);
-    items.push({ depth: b.kind === 'farm' ? -1e9 : b.x + b.y + s, draw: () => drawBuilding(c, b.kind, 0, b.x * 31 + b.y, x, y, { built: 1, kingInside: true, now }) });
+    items.push({ depth: b.kind === 'farm' ? -1e9 : b.x + b.y + s, draw: () => drawBuilding(c, b.kind, 0, b.x * 31 + b.y, x, y, { built: 1, kingInside: true, occupied: true, now }) });
   }
   items.sort((a, b) => a.depth - b.depth);
   for (const item of items) item.draw();
