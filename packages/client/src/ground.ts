@@ -26,7 +26,6 @@ const SHALLOW = ['#4a92c4', '#57a0cf'].map(rgb);
 const FOAM = rgb('#d8edf3');
 const WAVE = rgb('#6fb0dc');
 const BLADE_DARK = rgb('#356a2a');
-const BLADE_LIGHT = rgb('#78b456');
 
 function hash(x: number, y: number): number {
   let h = (x * 374761393 + y * 668265263) | 0;
@@ -71,7 +70,7 @@ function distanceTo(mask: number, fx: number, fy: number): number {
 const pack = (c: [number, number, number]) => (255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
 const P = {
   grass: GRASS.map(pack), forest: FOREST.map(pack), litter: LITTER.map(pack), sand: SAND.map(pack), water: WATER.map(pack),
-  shallow: SHALLOW.map(pack), foam: pack(FOAM), wave: pack(WAVE), bladeDark: pack(BLADE_DARK), bladeLight: pack(BLADE_LIGHT),
+  shallow: SHALLOW.map(pack), foam: pack(FOAM), wave: pack(WAVE), bladeDark: pack(BLADE_DARK),
 };
 
 let buffer: ImageData | undefined;
@@ -160,9 +159,7 @@ export function paintGround(c: CanvasRenderingContext2D, src: GroundSource, x0: 
           const deep = noise(wx / 90, wy / 90);
           const depth = Math.min(1, (shore - 0.32) / 0.9) * 0.75 + deep * 0.35;
           color = P.water[Math.max(0, Math.min(3, 3 - Math.floor(depth * 4)))];
-          // Short wave crests in rows, drifting with the depth.
-          const row = cellY + Math.floor(deep * 6);
-          if (row % 5 === 0 && hash(Math.floor(cellX / 3), row) < 0.32) color = P.wave;
+          // The waves themselves move, so they are drawn over the water every frame.
         }
       } else if (shore > -0.17) {
         color = P.sand[Math.floor(grain * 3)];
@@ -177,10 +174,8 @@ export function paintGround(c: CanvasRenderingContext2D, src: GroundSource, x0: 
         if (edge > 0) {
           color = grain < 0.07 ? P.litter[grain < 0.035 ? 0 : 1] : P.forest[Math.min(3, Math.floor(soft * 4))];
         } else if (grain < 0.025) {
-          // Blades of grass: a dark stalk with a light tip above it.
+          // Blades of grass: a darker stalk here and there.
           color = P.bladeDark;
-        } else if (hash(cellX, cellY + 1) < 0.025) {
-          color = P.bladeLight;
         } else {
           color = P.grass[Math.min(5, Math.floor(soft * 6))];
         }

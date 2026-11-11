@@ -44,7 +44,7 @@ import { paintGround } from './ground';
 import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
-import { effectsState, musicState, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
+import { effectsState, musicState, nextTrack, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
 
 interface View {
@@ -379,7 +379,23 @@ function paintTile(m: GameMap, index: number): void {
   else props.delete(index);
 }
 
+/** Water tiles, with how far a wave may stray from the middle of each (less next to the shore). */
+let waterTiles: { index: number; room: number }[] = [];
+
 function buildTerrain(m: GameMap): void {
+  waterTiles = [];
+  const n = m.size;
+  for (let i = 0; i < m.tiles.length; i++) {
+    if (m.tiles[i] !== Tile.Water) continue;
+    const x = i % n;
+    const y = Math.floor(i / n);
+    const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dy]) => {
+      const tx = x + dx;
+      const ty = y + dy;
+      return tx < 0 || ty < 0 || tx >= n || ty >= n || m.tiles[ty * n + tx] === Tile.Water;
+    });
+    waterTiles.push({ index: i, room: open ? 1 : 0.45 });
+  }
   chunks.clear();
   farSquares.clear();
   chunkSeen = new Int32Array(0);
@@ -596,6 +612,50 @@ function drawFar(scale: number, target: CanvasRenderingContext2D): void {
       const [sx, sy] = toScreen(c * FAR_SIZE - n * HW, r * FAR_SIZE + FAR_Y0);
       // A hair larger, so that no seams show between squares.
       target.drawImage(square.img, Math.floor(sx), Math.floor(sy), FAR_SIZE + 1, FAR_SIZE + 1);
+    }
+  }
+}
+
+/**
+ * Little wave crests on the water: each rises and sinks, drifting slowly to and fro, so the water
+ * moves gently all the time. Only water on screen that has been seen is looked at.
+ */
+function drawWaves(now: number): void {
+  if (!map || waterTiles.length === 0) return;
+  const n = map.size;
+  const w = viewW();
+  const h = viewH();
+  const pick: [number, number, number][] = [];
+  for (const { index, room } of waterTiles) {
+    if (!revealAll && !explored[index]) continue;
+    const tx = index % n;
+    const ty = Math.floor(index / n);
+    const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
+    if (sx < -40 || sy < -20 || sx > w + 40 || sy > h + 20) continue;
+    pick.push([sx, sy, index * 2 + room]);
+  }
+  // A lot of water in view (zoomed out): fewer crests per tile.
+  const crests = pick.length > 1500 ? 1 : pick.length > 700 ? 2 : 3;
+  for (const [sx, sy, key] of pick) {
+    const index = Math.floor(key / 2);
+    const room = key - index * 2;
+    const tx = index % n;
+    const ty = Math.floor(index / n);
+    for (let k = 0; k < crests; k++) {
+      const a = hash(tx * 3 + k, ty * 7 + 1);
+      const b = hash(ty * 5 + k, tx * 11 + 2);
+      const rise = Math.sin(now / 1500 + a * 40);
+      if (rise <= 0.05) continue;
+      const x = Math.round(sx + (a - 0.5) * 34 * room + Math.sin(now / 2100 + b * 9) * 5 * room);
+      const y = Math.round(sy + (b - 0.5) * 14 * room);
+      const len = 3 + Math.floor(b * 3);
+      // A crest: a lit hump with a darker trough under it, like a small wave.
+      ctx.fillStyle = `rgba(205,232,250,${(rise * 0.62).toFixed(3)})`;
+      ctx.fillRect(x - len - 1, y, 2, 1);
+      ctx.fillRect(x - len + 1, y - 1, len * 2 - 2, 1);
+      ctx.fillRect(x + len - 1, y, 2, 1);
+      ctx.fillStyle = `rgba(20,55,100,${(rise * 0.3).toFixed(3)})`;
+      ctx.fillRect(x - len + 1, y + 1, len * 2 - 2, 1);
     }
   }
 }
@@ -1526,6 +1586,10 @@ $('music-vol').addEventListener('input', () => {
   if (musicState().muted && v > 0) toggleMusic();
   showAudio();
 });
+$('skip-btn').addEventListener('click', () => {
+  nextTrack();
+  showAudio();
+});
 $('sfx-btn').addEventListener('click', switchEffects);
 $('sfx-vol').addEventListener('input', () => {
   const v = Number($<HTMLInputElement>('sfx-vol').value) / 100;
@@ -2452,6 +2516,7 @@ function frame(now: number): void {
   breeze.update(now, dt, { left: cam.x - viewW() / 2, right: cam.x + viewW() / 2, top: cam.y - viewH() / 2, bottom: cam.y + viewH() / 2 }, treesOnScreen);
 
   drawGround();
+  drawWaves(now);
 
   if (placing) {
     // A faint grid of tiles around the cursor, fading out with distance, shows where things line up.

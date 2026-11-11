@@ -321,6 +321,15 @@ export function setMusicVolume(volume: number): void {
   store('kingsfall-music-volume', String(musicVolume));
 }
 
+/** Skips to the other song; switches the music on if it was off. */
+export function nextTrack(): void {
+  const m = track();
+  current = (current + 1) % TRACKS.length;
+  m.src = TRACKS[current];
+  if (musicMuted) toggleMusic();
+  else void m.play().catch(() => undefined);
+}
+
 export function toggleMusic(): boolean {
   musicMuted = !musicMuted;
   store('kingsfall-music-muted', musicMuted ? '1' : '0');
