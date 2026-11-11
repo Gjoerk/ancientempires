@@ -54,7 +54,10 @@ ones you want. `select` sounds are new: they stay silent unless you give a file.
 | Name | When it plays |
 | --- | --- |
 | `select`, `select.<kind>` | You click one of your own units or buildings, e.g. `select.house`, `select.villager`, `select.king`. A building without its own select sound plays its `built.<kind>` sound (or `built`) |
-| `order.move` | Units sent somewhere |
+| `order.move` | Units sent somewhere (villagers only) |
+| `order.move.soldier` | Only foot soldiers sent somewhere (swordsmen, spearmen, archers, monks, the king) |
+| `order.move.horse` | Only riders and scouts sent somewhere |
+| `order.move.army` | A mixed group sent somewhere (foot and horse, or troops with villagers or a ram) |
 | `order.attack` | Attack order or attack-move |
 | `order.gather.wood` / `.berries` / `.gold` / `.stone` | Villagers sent to gather |
 | `order.build` | Villagers sent to help build or repair |

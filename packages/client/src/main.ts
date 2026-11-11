@@ -1169,6 +1169,22 @@ function canAfford(cost: Cost): boolean {
   return !!p && RESOURCES.every((r) => p.res[r] >= (cost[r] ?? 0));
 }
 
+const MOUNTED = new Set<Kind>(['rider', 'scout']);
+
+/**
+ * The sound for sending these units somewhere: foot soldiers, horsemen, or a mixed army each have
+ * their own; villagers alone use the general order sound.
+ */
+function moveSound(units: View[]): `order.move${string}` {
+  const troops = units.filter((v) => v.kind !== 'villager');
+  if (troops.length === 0) return 'order.move';
+  const horses = troops.filter((v) => MOUNTED.has(v.kind)).length;
+  const foot = troops.filter((v) => !MOUNTED.has(v.kind) && v.kind !== 'ram').length;
+  if (troops.length === units.length && horses === troops.length) return 'order.move.horse';
+  if (troops.length === units.length && foot === troops.length) return 'order.move.soldier';
+  return 'order.move.army';
+}
+
 /** The resource on a tile, for naming gather sounds. */
 const PROP_NAME: Partial<Record<number, string>> = { [Tile.Forest]: 'wood', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold', [Tile.Stone]: 'stone' };
 
@@ -1204,7 +1220,7 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
     return;
   }
   const tile = resourceTileAt(sx, sy);
-  play(tile >= 0 && map ? `order.gather.${PROP_NAME[map.tiles[tile]] ?? 'wood'}` : 'order.move');
+  play(tile >= 0 && map ? `order.gather.${PROP_NAME[map.tiles[tile]] ?? 'wood'}` : moveSound(units));
   if (tile >= 0) {
     send({ type: 'gather', ids, tile });
     tileFlash = { tile, t: performance.now() };
@@ -1694,7 +1710,11 @@ minimap.addEventListener('mousedown', (ev) => {
     if (tx < 0 || ty < 0 || tx >= map.size || ty >= map.size) return;
     const ids = ownSelectedUnits().map((v) => v.id);
     const building = [...selected].map((id) => views.get(id)).find((v) => v && v.owner === me && DEFS[v.kind].trains);
-    if (ids.length > 0) send(ev.ctrlKey || ev.metaKey ? { type: 'amove', ids, x: tx, y: ty } : { type: 'move', ids, x: tx, y: ty });
+    if (ids.length > 0) {
+      const attack = ev.ctrlKey || ev.metaKey;
+      send(attack ? { type: 'amove', ids, x: tx, y: ty } : { type: 'move', ids, x: tx, y: ty });
+      play(attack ? 'order.attack' : moveSound(ownSelectedUnits()));
+    }
     else if (building) send({ type: 'rally', building: building.id, x: Math.floor(tx), y: Math.floor(ty) });
     else return;
     minimapPing = { x: tx, y: ty, t: performance.now() };

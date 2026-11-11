@@ -41,5 +41,8 @@
   "convert": "healconvert.ogg",
   "error": "error.ogg",
   "click": "order.ogg",
-  "start": "victory.ogg"
+  "start": "victory.ogg",
+  "order.move.soldier": "order_soldier.ogg",
+  "order.move.horse": "order_horse.ogg",
+  "order.move.army": "order_army.ogg"
 }
