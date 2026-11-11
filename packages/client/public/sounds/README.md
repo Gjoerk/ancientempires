@@ -35,7 +35,36 @@ folder and list it in `manifest.json`; anything not listed keeps its built-in so
 | `victory` | Your team wins | victory fanfare | 1–3 s |
 | `defeat` | You are defeated | falling notes | 1–3 s |
 
-Tips: keep files short. They play at the level they were made at, so set loudness in the file
-(the built-in sounds peak around −12 dB).
-Very frequent sounds (`hit`, `arrow`, `order`) are limited to a few per second, so big battles
-do not turn into noise. OGG, MP3 and WAV all work.
+## Detailed sounds (optional)
+
+Any sound can be made more specific by adding details after a dot. The most detailed file that
+exists is played, otherwise the general one, otherwise the built-in sound, so you only make the
+ones you want. `select` sounds are new: they stay silent unless you give a file.
+
+| Name | When it plays |
+| --- | --- |
+| `select`, `select.<kind>` | You click one of your own units or buildings, e.g. `select.house`, `select.villager`, `select.king` |
+| `order.move` | Units sent somewhere |
+| `order.attack` | Attack order or attack-move |
+| `order.gather.wood` / `.berries` / `.gold` / `.stone` | Villagers sent to gather |
+| `order.build` | Villagers sent to help build or repair |
+| `order.farm` | Villager sent to a farm |
+| `order.enter` | Units sent into one of your buildings |
+| `order.place.<kind>` | You place a building, e.g. `order.place.house` |
+| `order.copy` | T: copy the last villager's job |
+| `built.<kind>` | That building is finished, e.g. `built.farm`, `built.castle` |
+| `trained.<kind>` | That unit comes out, e.g. `trained.archer`, `trained.monk` |
+| `death.<kind>` | That unit dies, e.g. `death.villager`, `death.rider` |
+| `collapse.<kind>` | That building is destroyed, e.g. `collapse.house`, `collapse.wall` |
+| `research.<id>` | That upgrade finishes, e.g. `research.loom`, `research.blades` |
+| `age.2`, `age.3` | Town Age, Kingdom Age reached |
+
+Kinds: villager, king, swordsman, spearman, archer, rider, scout, monk, ram, towncenter, house,
+mill, lumbercamp, miningcamp, farm, barracks, range, stable, tower, castle, blacksmith, market,
+workshop, wall, gate, monastery. Upgrade ids: loom, handcart, ploughs, axes, picks, weapons,
+armour, pikes, jacks, blades, shields, longbows, quickdraw, lances, barding, ironhead, arrowslits.
+
+Tips: keep files short and trim silence at the start. Every file is measured when it loads and
+turned up or down so that all sounds play about equally loud; players set the overall level with
+the sound slider (70 % by default). Very frequent sounds (`hit`, `arrow`, `order`) are limited to a
+few per second, so big battles do not turn into noise. OGG, MP3 and WAV all work.

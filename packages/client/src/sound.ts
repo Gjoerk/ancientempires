@@ -35,6 +35,41 @@ export function toggleMute(): boolean {
   return muted;
 }
 
+/** Volume of the sound effects, 0 to 1; the music has its own. */
+let effectsVolume = (() => {
+  try {
+    const v = Number(localStorage.getItem('kingsfall-effects-volume') ?? '0.7');
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.7;
+  } catch {
+    return 0.7;
+  }
+})();
+let effects: GainNode | undefined;
+
+/** Where every sound effect goes: one volume for all of them. */
+function output(): AudioNode {
+  if (!effects) {
+    effects = ctx!.createGain();
+    effects.gain.value = effectsVolume;
+    effects.connect(ctx!.destination);
+  }
+  return effects;
+}
+
+export function effectsState(): { volume: number; muted: boolean } {
+  return { volume: effectsVolume, muted };
+}
+
+export function setEffectsVolume(volume: number): void {
+  effectsVolume = Math.max(0, Math.min(1, volume));
+  if (effects) effects.gain.value = effectsVolume;
+  try {
+    localStorage.setItem('kingsfall-effects-volume', String(effectsVolume));
+  } catch {
+    // Not remembered, but still applied.
+  }
+}
+
 function tone(freq: number, start: number, length: number, volume: number, type: OscillatorType = 'triangle', slideTo?: number): void {
   if (!ctx) return;
   const t = ctx.currentTime + start;
@@ -46,7 +81,7 @@ function tone(freq: number, start: number, length: number, volume: number, type:
   gain.gain.setValueAtTime(0, t);
   gain.gain.linearRampToValueAtTime(volume, t + 0.01);
   gain.gain.exponentialRampToValueAtTime(0.0001, t + length);
-  osc.connect(gain).connect(ctx.destination);
+  osc.connect(gain).connect(output());
   osc.start(t);
   osc.stop(t + length + 0.02);
 }
@@ -64,7 +99,7 @@ function noise(start: number, length: number, volume: number, cutoff: number): v
   filter.frequency.value = cutoff;
   const gain = ctx.createGain();
   gain.gain.value = volume;
-  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.connect(filter).connect(gain).connect(output());
   src.start(t);
 }
 
@@ -107,10 +142,39 @@ export type SoundName = keyof typeof SOUNDS;
 
 /**
  * Your own sound files, listed in public/sounds/manifest.json as { "<sound name>": "file.ogg" }.
- * A listed sound replaces the built-in one; anything not listed keeps its synthesised sound.
+ * A name can be general ("built") or more detailed ("built.farm", "order.gather.wood"); the most
+ * detailed one there is gets played, so detailed files are optional. Anything without a file keeps
+ * its built-in sound. Each file is measured when it loads and turned up or down so that all of them
+ * sound about equally loud.
  */
-const custom = new Map<string, AudioBuffer>();
+const custom = new Map<string, { buffer: AudioBuffer; gain: number }>();
 let customLoading = false;
+/** Sounds that have no built-in version and stay silent unless a file is given. */
+const FILE_ONLY = new Set(['select']);
+/** How loud every file is made: the loudness of its sounding part, as an RMS level (about -18 dB). */
+const TARGET_RMS = 0.126;
+
+function levelOf(buffer: AudioBuffer): number {
+  // Loudness of the part that sounds: silence before and after does not count.
+  let sum = 0;
+  let count = 0;
+  let peak = 0;
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const data = buffer.getChannelData(c);
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]);
+      if (v > peak) peak = v;
+      if (v > 0.003) {
+        sum += v * v;
+        count++;
+      }
+    }
+  }
+  if (count === 0 || peak === 0) return 1;
+  const rms = Math.sqrt(sum / count);
+  // Never so loud that the file would clip.
+  return Math.min(TARGET_RMS / rms, 0.95 / peak, 12);
+}
 
 function loadCustomSounds(): void {
   if (customLoading || !ctx) return;
@@ -120,33 +184,43 @@ function loadCustomSounds(): void {
     .then((res) => (res.ok ? res.json() : {}))
     .then((list: Record<string, string>) => {
       for (const [name, file] of Object.entries(list)) {
-        if (!(name in SOUNDS) || typeof file !== 'string') continue;
+        const base = name.split('.')[0];
+        if ((!(base in SOUNDS) && !FILE_ONLY.has(base)) || typeof file !== 'string') continue;
         void fetch('sounds/' + file)
           .then((res) => res.arrayBuffer())
           .then((data) => audio.decodeAudioData(data))
-          .then((buffer) => custom.set(name, buffer))
+          .then((buffer) => custom.set(name, { buffer, gain: levelOf(buffer) }))
           .catch(() => console.warn(`Sound "${name}" (${file}) could not be loaded; the built-in one is used.`));
       }
     })
     .catch(() => undefined);
 }
 
-/** Plays a sound, at most once per `gap` milliseconds so that big fights do not turn into noise. */
-export function play(name: SoundName, gap = 90): void {
+/**
+ * Plays a sound, at most once per `gap` milliseconds for its kind so that big fights do not turn
+ * into noise. `name` may carry details after dots, like "built.farm": the most detailed sound
+ * file there is gets played, else the general one, else the built-in sound.
+ */
+export function play(name: SoundName | `${SoundName | 'select'}.${string}` | 'select', gap = 90): void {
   if (muted || !ctx) return;
+  const base = name.split('.')[0];
   const now = performance.now();
-  if (now - (lastPlayed.get(name) ?? -1e9) < gap) return;
-  lastPlayed.set(name, now);
-  const buffer = custom.get(name);
-  if (buffer) {
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    // Played at the level it was made at.
-    src.connect(ctx.destination);
-    src.start();
-    return;
+  if (now - (lastPlayed.get(base) ?? -1e9) < gap) return;
+  lastPlayed.set(base, now);
+  for (let key: string = name; ; key = key.slice(0, key.lastIndexOf('.'))) {
+    const sound = custom.get(key);
+    if (sound) {
+      const src = ctx.createBufferSource();
+      src.buffer = sound.buffer;
+      const gain = ctx.createGain();
+      gain.gain.value = sound.gain;
+      src.connect(gain).connect(output());
+      src.start();
+      return;
+    }
+    if (!key.includes('.')) break;
   }
-  SOUNDS[name]();
+  if (base in SOUNDS) SOUNDS[base as SoundName]();
 }
 
 // --- background music ------------------------------------------------------------------------

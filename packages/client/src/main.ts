@@ -44,7 +44,7 @@ import { paintGround } from './ground';
 import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
-import { isMuted, musicState, play, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
+import { effectsState, musicState, play, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
 
 interface View {
@@ -671,7 +671,7 @@ function copyLastJob(): void {
   const from = [...orderedVillagers].reverse().find((id) => !ids.includes(id) && views.get(id)?.owner === me);
   if (from !== undefined) {
     send({ type: 'copy', ids, from });
-    play('order');
+    play('order.copy');
   }
 }
 
@@ -731,14 +731,14 @@ function onMessage(msg: ServerMessage): void {
         const turn = x - v.x - (y - v.y);
         if (Math.abs(turn) > 0.01) v.face = turn > 0 ? 1 : -1;
         if (hp < v.hp && v.owner === me) underAttack(v, now);
-        if (v.owner === me && isBuilding(v.kind) && v.extra < 100 && extra >= 100) play('built', 400);
+        if (v.owner === me && isBuilding(v.kind) && v.extra < 100 && extra >= 100) play(`built.${v.kind}`, 400);
         // A monk may have converted it, so the owner can change too.
         Object.assign(v, { owner, x, y, hp, act, extra, task, target });
       } else {
         const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, struck: 0, hurt: 0, face: 1, px: x, py: y, x, y };
         views.set(id, created);
         setBlocked(created, 1);
-        if (owner === me && !isBuilding(created.kind) && msg.tick > 20) play('trained', 300);
+        if (owner === me && !isBuilding(created.kind) && msg.tick > 20) play(`trained.${created.kind}`, 300);
       }
     }
     for (const [id, v] of views) {
@@ -770,13 +770,13 @@ function onMessage(msg: ServerMessage): void {
       const b = views.get(to);
       if (a && b && (canSee(a) || canSee(b))) blessings.push({ from, to, kind, t: now });
     }
-    for (const [kindIdx, x, y] of msg.deaths) {
+    for (const [kindIdx, x, y, owner] of msg.deaths) {
       const kind = KINDS[kindIdx];
       const half = isBuilding(kind) ? sizeOf(kind) / 2 : 0;
-      if (revealAll || tileSeen(Math.floor(x + half), Math.floor(y + half))) {
-        puffs.push({ x: x + half, y: y + half, t: now, big: isBuilding(kind) });
-        play(isBuilding(kind) ? 'collapse' : 'death', 150);
-      }
+      const seen = revealAll || tileSeen(Math.floor(x + half), Math.floor(y + half));
+      if (seen) puffs.push({ x: x + half, y: y + half, t: now, big: isBuilding(kind) });
+      // Losses of your own are always heard, wherever you are looking.
+      if (seen || owner === me) play(isBuilding(kind) ? `collapse.${kind}` : `death.${kind}`, 150);
     }
     rallies.clear();
     for (const [id, x, y] of msg.rallies) rallies.set(id, [x, y]);
@@ -788,8 +788,13 @@ function onMessage(msg: ServerMessage): void {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
       if (slot === me && old) {
-        if (age > old.age) play('age');
-        else if (techs !== old.techs) play('research');
+        if (age > old.age) play(`age.${age}`);
+        else if (techs !== old.techs) {
+          // The upgrade just finished: the lowest bit that is new.
+          const fresh = techs & ~old.techs;
+          const id = TECH_IDS.find((_, i) => (fresh >> i) & 1);
+          play(id ? `research.${id}` : 'research');
+        }
         if (defeated === 1 && !old.defeated) play('defeat');
       }
       players.set(slot, {
@@ -1087,6 +1092,9 @@ function canAfford(cost: Cost): boolean {
   return !!p && RESOURCES.every((r) => p.res[r] >= (cost[r] ?? 0));
 }
 
+/** The resource on a tile, for naming gather sounds. */
+const PROP_NAME: Partial<Record<number, string>> = { [Tile.Forest]: 'wood', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold', [Tile.Stone]: 'stone' };
+
 function rightClick(sx: number, sy: number, attackMove: boolean): void {
   const [tx, ty] = screenToTile(sx, sy);
   const units = ownSelectedUnits();
@@ -1105,6 +1113,7 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
   marker = { x: tx, y: ty, t: performance.now() };
   if (attackMove) {
     send({ type: 'amove', ids, x: tx, y: ty });
+    play('order.attack');
     return;
   }
   const target = unitAt(sx, sy) ?? buildingAt(sx, sy);
@@ -1112,11 +1121,13 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
     send({ type: 'interact', ids, target: target.id });
     marker = undefined;
     if (isEnemy(target.owner)) attackFlash = { id: target.id, t: performance.now() };
-    play('order');
+    // What the order means: attack, help build, farm, or go inside.
+    const action = isEnemy(target.owner) ? 'attack' : target.extra < 100 && isBuilding(target.kind) ? 'build' : target.kind === 'farm' ? 'farm' : 'enter';
+    play(`order.${action}`);
     return;
   }
   const tile = resourceTileAt(sx, sy);
-  play('order');
+  play(tile >= 0 && map ? `order.gather.${PROP_NAME[map.tiles[tile]] ?? 'wood'}` : 'order.move');
   if (tile >= 0) {
     send({ type: 'gather', ids, tile });
     tileFlash = { tile, t: performance.now() };
@@ -1146,7 +1157,7 @@ function placeAtCursor(keep: boolean): void {
   if (!canPlace(map, placing, x, y) || !canAfford(DEFS[placing].cost)) return;
   // With Shift the site goes on the villagers' list instead of replacing what they are building.
   send({ type: 'place', ids, kind: placing, x, y, queue: keep });
-  play('order');
+  play(`order.place.${placing}`);
   if (!keep) placing = undefined;
 }
 
@@ -1173,6 +1184,7 @@ function clickSelect(sx: number, sy: number): void {
     return;
   }
   selected.add(v.id);
+  if (v.owner === me) play(`select.${v.kind}`, 150);
   // Selecting something of a test opponent hands control to that side.
   if (v.owner !== me && controllable().includes(v.owner)) {
     selected.clear();
@@ -1389,7 +1401,7 @@ window.addEventListener('keydown', (ev) => {
   if (key === ',') selectIdleSoldiers();
   if (key === 'h') $('help').hidden = !$('help').hidden;
   if (key === 'f') toggleFullscreen();
-  if (key === 'm') $('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)';
+  if (key === 'm') switchEffects();
   if (key === 'x') send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
   if (key === 't') copyLastJob();
   if (key === 'delete' || key === 'backspace') {
@@ -1475,28 +1487,43 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
-// Background music: the note turns it on and off, the slider sets how loud it is.
-{
-  const box = $('music');
-  const slider = $<HTMLInputElement>('music-vol');
-  const show = () => {
-    const { volume, muted } = musicState();
-    box.classList.toggle('off', muted);
-    slider.value = String(Math.round(volume * 100));
-    $('music-btn').title = muted ? 'Music off: click to play' : 'Music on: click to mute';
-  };
-  $('music-btn').addEventListener('click', () => {
-    toggleMusic();
-    show();
-  });
-  slider.addEventListener('input', () => {
-    setMusicVolume(Number(slider.value) / 100);
-    // Turning the volume up switches muted music back on.
-    if (musicState().muted && Number(slider.value) > 0) toggleMusic();
-    show();
-  });
-  show();
+// Music and sound effects: each has a button to switch it on and off and a slider for how loud it is.
+function showAudio(): void {
+  const music = musicState();
+  const effects = effectsState();
+  $('music-grp').classList.toggle('off', music.muted);
+  $<HTMLInputElement>('music-vol').value = String(Math.round(music.volume * 100));
+  $('music-btn').title = music.muted ? 'Music off: click to play' : 'Music on: click to mute';
+  $('sfx-grp').classList.toggle('off', effects.muted);
+  $<HTMLInputElement>('sfx-vol').value = String(Math.round(effects.volume * 100));
+  $('sfx-btn').title = effects.muted ? 'Sounds off: click to turn on (M)' : 'Sounds on: click to mute (M)';
+  $('mute-btn').textContent = effects.muted ? 'Sound off (M)' : 'Sound on (M)';
 }
+function switchEffects(): void {
+  toggleMute();
+  showAudio();
+}
+$('music-btn').addEventListener('click', () => {
+  toggleMusic();
+  showAudio();
+});
+$('music-vol').addEventListener('input', () => {
+  const v = Number($<HTMLInputElement>('music-vol').value) / 100;
+  setMusicVolume(v);
+  // Turning the volume up switches muted music back on.
+  if (musicState().muted && v > 0) toggleMusic();
+  showAudio();
+});
+$('sfx-btn').addEventListener('click', switchEffects);
+$('sfx-vol').addEventListener('input', () => {
+  const v = Number($<HTMLInputElement>('sfx-vol').value) / 100;
+  setEffectsVolume(v);
+  if (effectsState().muted && v > 0) toggleMute();
+  showAudio();
+});
+// A sample, so the new loudness can be heard when the slider is let go.
+$('sfx-vol').addEventListener('change', () => play('order', 0));
+showAudio();
 // In fullscreen the pointer is kept on this screen while playing, so edge scrolling cannot lose it to another monitor.
 installCursorLock(canvas, () => !$('bottom').hidden);
 $('resign-btn').addEventListener('click', () => {
@@ -1521,8 +1548,7 @@ installMenuArt();
 // Browsers only allow sound after the player has clicked or pressed a key.
 window.addEventListener('pointerdown', unlockSound);
 window.addEventListener('keydown', unlockSound);
-$('mute-btn').textContent = isMuted() ? 'Sound off (M)' : 'Sound on (M)';
-$('mute-btn').addEventListener('click', () => ($('mute-btn').textContent = toggleMute() ? 'Sound off (M)' : 'Sound on (M)'));
+$('mute-btn').addEventListener('click', switchEffects);
 $('help-close').addEventListener('click', () => ($('help').hidden = true));
 $('chat-btn').addEventListener('click', () => {
   $('menu').hidden = true;
@@ -2622,5 +2648,5 @@ requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __spawn: spawn, __game: { breeze, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
+  Object.assign(window, { __spawn: spawn, __game: { breeze, play, effectsState, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

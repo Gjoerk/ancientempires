@@ -342,21 +342,30 @@
     #music { position: fixed; top: 10px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 6px;
       padding: 3px 8px 3px 3px; border-radius: 6px; background: rgba(10, 24, 17, .72); border: 1px solid rgba(214, 180, 90, .45); }
     #top #music { position: static; background: none; border: 0; padding: 0 4px 0 0; }
-    #music #music-btn { width: 28px; height: 26px; min-width: 0; padding: 0; display: grid; place-items: center; line-height: 0; color: var(--accent); }
-    #music-btn svg { display: block; }
-    #music-btn .cross { display: none; }
-    #music.off #music-btn .cross { display: inline; }
-    #music.off #music-btn { color: #8c8c80; }
-    #music-vol { width: 90px; accent-color: var(--accent); cursor: pointer; }
-    #music.off #music-vol { opacity: .45; }
-    @media (max-width: 700px) { #music-vol { width: 64px; } }
+    #music .grp button { width: 28px; height: 26px; min-width: 0; padding: 0; display: grid; place-items: center; line-height: 0; color: var(--accent); }
+    #music .grp button svg { display: block; }
+    #music .grp { display: flex; align-items: center; gap: 5px; }
+    #music .grp + .grp { padding-left: 8px; border-left: 1px solid rgba(214, 180, 90, .3); }
+    #music .cross { display: none; }
+    #music .grp.off .cross { display: inline; }
+    #music .grp.off .wave { display: none; }
+    #music .grp.off button { color: #8c8c80; }
+    #music input[type=range] { width: 80px; accent-color: var(--accent); cursor: pointer; }
+    #music .grp.off input { opacity: .45; }
+    @media (max-width: 700px) { #music input[type=range] { width: 52px; } }
 </style>
 </head>
 <body data-bar="a" data-skin="3" data-menu="1">
   <canvas id="game"></canvas>
-  <div id="music" title="Music">
-    <button id="music-btn" type="button" aria-label="Music on or off"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><ellipse cx="4.6" cy="12.2" rx="2.4" ry="1.9" fill="currentColor"/><ellipse cx="11.6" cy="10.8" rx="2.4" ry="1.9" fill="currentColor"/><path d="M6.2 12V3.6L13.2 2v8.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.2 3.6L13.2 2v2.2L6.2 5.8z" fill="currentColor"/><path class="cross" d="M2.5 2.5l11 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
-    <input id="music-vol" type="range" min="0" max="100" value="50" aria-label="Music volume">
+  <div id="music">
+    <span id="music-grp" class="grp" title="Music">
+      <button id="music-btn" type="button" aria-label="Music on or off"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><ellipse cx="4.6" cy="12.2" rx="2.4" ry="1.9" fill="currentColor"/><ellipse cx="11.6" cy="10.8" rx="2.4" ry="1.9" fill="currentColor"/><path d="M6.2 12V3.6L13.2 2v8.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.2 3.6L13.2 2v2.2L6.2 5.8z" fill="currentColor"/><path class="cross" d="M2.5 2.5l11 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      <input id="music-vol" type="range" min="0" max="100" value="50" aria-label="Music volume">
+    </span>
+    <span id="sfx-grp" class="grp" title="Sound effects">
+      <button id="sfx-btn" type="button" aria-label="Sound effects on or off"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 6h2.6L8.5 2.6v10.8L4.6 10H2z" fill="currentColor"/><path class="wave" d="M10.6 5.4a3.6 3.6 0 0 1 0 5.2M12.6 3.4a6.4 6.4 0 0 1 0 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path class="cross" d="M10.5 5.5l4 5M14.5 5.5l-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <input id="sfx-vol" type="range" min="0" max="100" value="70" aria-label="Sound effects volume">
+    </span>
   </div>
   <div id="top" class="bar" hidden>
     <div id="resources"></div>
