@@ -152,6 +152,11 @@ const custom = new Map<string, { buffer: AudioBuffer; gain: number }[]>();
 let customLoading = false;
 /** Sounds that have no built-in version and stay silent unless a file is given. */
 const FILE_ONLY = new Set(['select']);
+/**
+ * Sounds that play quieter than the rest, as a share of the common loudness. Orders are heard
+ * all the time, so they stay in the background.
+ */
+const QUIETER: Record<string, number> = { order: 0.45 };
 /** How loud every file is made: the loudness of its sounding part, as an RMS level (about -18 dB). */
 const TARGET_RMS = 0.126;
 
@@ -237,7 +242,7 @@ function playFile(name: string): boolean {
   const src = ctx.createBufferSource();
   src.buffer = sound.buffer;
   const gain = ctx.createGain();
-  gain.gain.value = sound.gain;
+  gain.gain.value = sound.gain * (QUIETER[name.split('.')[0]] ?? 1);
   src.connect(gain).connect(output());
   src.start();
   return true;

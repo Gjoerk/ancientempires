@@ -70,6 +70,6 @@ workshop, wall, gate, monastery. Upgrade ids: loom, handcart, ploughs, axes, pic
 armour, pikes, jacks, blades, shields, longbows, quickdraw, lances, barding, ironhead, arrowslits.
 
 Tips: keep files short and trim silence at the start. Every file is measured when it loads and
-turned up or down so that all sounds play about equally loud; players set the overall level with
+turned up or down so that all sounds play about equally loud (order sounds a little quieter, as they are heard all the time); players set the overall level with
 the sound slider (70 % by default). Very frequent sounds (`hit`, `arrow`, `order`) are limited to a
 few per second, so big battles do not turn into noise. OGG, MP3 and WAV all work.
