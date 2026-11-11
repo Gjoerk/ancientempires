@@ -57,6 +57,7 @@ ones you want. `select` sounds are new: they stay silent unless you give a file.
 | `order.enter` | Units sent into one of your buildings |
 | `order.place.<kind>` | You place a building, e.g. `order.place.house` |
 | `order.copy` | T: copy the last villager's job |
+| `order.train.<kind>` | You queue a unit, e.g. `order.train.villager`, `order.train.archer` |
 | `built.<kind>` | That building is finished, e.g. `built.farm`, `built.castle` |
 | `trained.<kind>` | That unit comes out, e.g. `trained.archer`, `trained.monk` |
 | `death.<kind>` | That unit dies, e.g. `death.villager`, `death.rider` |

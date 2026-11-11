@@ -1650,7 +1650,11 @@ $('actions').addEventListener('click', (ev) => {
   if (buy) send({ type: 'trade', building: Number(button.dataset.at), res: buy as Res, buy: true });
   if (eject) send({ type: 'eject', building: Number(eject) });
   if (build) placing = build as Kind;
-  if (train) send({ type: 'train', building: Number(button.dataset.at), kind: train });
+  if (train) {
+    send({ type: 'train', building: Number(button.dataset.at), kind: train });
+    // Queuing a unit sounds like giving an order; research does not.
+    if (train in DEFS) play(`order.train.${train}`, 120);
+  }
   if (cancel) send({ type: 'cancel', building: Number(cancel) });
 });
 
