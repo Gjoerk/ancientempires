@@ -16,7 +16,7 @@ export type Order =
   | { t: 'gather'; tile: number; farm: number; res: Res; phase: 'go' | 'work' | 'return'; drop: number }
   | { t: 'build'; id: number }
   /** `then` is where an attack-move continues to once the fight is over. */
-  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean }
+  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean; answer?: boolean; hold?: boolean }
   /** Walk to a point, fighting anything met on the way. */
   | { t: 'amove'; x: number; y: number }
   /** Walk to a town centre or castle and go inside (villagers and the king). */
@@ -72,6 +72,8 @@ export interface Entity {
   pace?: number;
   /** Building sites a villager will work on next, in order. */
   tasks?: number[];
+  /** A villager's job that ended by itself, kept for a while so they can go back to it (see resumeWork). */
+  resume?: { order: Order; since: number; tries: number };
   /** Id of the castle this unit is sheltering in, or -1. */
   inside: number;
   /** Soldiers: 'defensive' ones only fight back when struck; otherwise they go for enemies they see. */
@@ -473,7 +475,11 @@ function ownUnits(state: GameState, player: number, ids: unknown, keepTasks = fa
     .slice(0, 200)
     .map((id) => state.entities.get(id))
     .filter((e): e is Entity => !!e && e.owner === player && !isBuilding(e) && e.inside < 0);
-  if (!keepTasks) for (const e of units) e.tasks = undefined;
+  for (const e of units) {
+    if (!keepTasks) e.tasks = undefined;
+    // The player has given new orders: whatever job was left off is forgotten.
+    e.resume = undefined;
+  }
   return units;
 }
 
@@ -652,7 +658,8 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     for (const e of ownUnits(state, slot, cmd.ids)) {
       e.path = [];
       if (isEnemy(state, target.owner, slot)) {
-        if (DEFS[e.kind].attack) e.order = { t: 'attack', id: target.id, auto: false };
+        if (DEFS[e.kind].buildingsOnly && !isBuilding(target)) moveUnits(state, [e], target.x, target.y);
+        else if (DEFS[e.kind].attack) e.order = { t: 'attack', id: target.id, auto: false };
         // Monks try to win enemy units over; kings and buildings cannot be converted.
         else if (DEFS[e.kind].converts && !isBuilding(target) && target.kind !== 'king') e.order = { t: 'convert', id: target.id, progress: 0 };
         // A building (or a king) cannot be won over: monks follow the attack and heal the wounded.
@@ -812,8 +819,10 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
   let best: Entity | undefined;
   let bestScore = Infinity;
   for (const other of state.entities.values()) {
-    // Only units are picked on sight; buildings are attacked when a player orders it.
-    if (isBuilding(other) || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
+    // Only units are picked on sight; buildings are attacked when a player orders it. Siege
+    // engines are the other way round: they go only for buildings.
+    if (isBuilding(other) !== !!DEFS[e.kind].buildingsOnly || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
+    if (other.kind === 'farm' && DEFS[e.kind].buildingsOnly) continue;
     const d = distance(e, other);
     if (d > reach || d >= bestScore || d < (DEFS[e.kind].minRange ?? 0)) continue;
     // Never pick a fight with someone who cannot be got at (behind a wall, across water), unless
@@ -848,9 +857,44 @@ function strike(state: GameState, e: Entity, target: Entity): void {
     }
   }
   if (target.hp <= 0) return kill(state, target);
-  // Soldiers standing around fight back, even against something beyond their sight.
-  if (target.order.t === 'idle' && DEFS[target.kind].attack && !isBuilding(target) && !isBuilding(e) && target.kind !== 'villager') {
-    target.order = { t: 'attack', id: e.id, auto: true };
+  if (!isBuilding(target) && !isBuilding(e)) fightBack(state, target, e);
+}
+
+const isSoldier = (e: Entity) => !isBuilding(e) && !!DEFS[e.kind].attack && !DEFS[e.kind].buildingsOnly && e.kind !== 'villager' && e.kind !== 'king';
+
+/** How far comrades come to help someone who is attacked; those holding their ground only defend their own group. */
+const HELP_RADIUS = 6;
+const HOLD_RADIUS = 3;
+
+/**
+ * A soldier who is struck turns on the attacker, even one beyond their sight (an archer shooting
+ * from afar), unless the player has them busy with something else, and comrades close by come to
+ * help (those holding their ground only when it is their own group). Nobody goes for an attacker
+ * they could never get at.
+ */
+function fightBack(state: GameState, victim: Entity, attacker: Entity): void {
+  const answer = (u: Entity) => {
+    if (!isSoldier(u) || u.inside >= 0) return;
+    const o = u.order;
+    const has = hasTech(state, u.owner);
+    let free = o.t === 'idle' || o.t === 'amove';
+    if (o.t === 'attack' && o.auto) {
+      // A picked fight is dropped for the attacker only when its target is not in reach now.
+      const current = state.entities.get(o.id);
+      free = o.id !== attacker.id && (!current || distance(u, current) > rangeOf(u.kind, has));
+    }
+    if (!free) return;
+    const d = distance(u, attacker);
+    if (d > rangeOf(u.kind, has) && !canReach(state.map, Math.floor(u.x), Math.floor(u.y), Math.floor(attacker.x), Math.floor(attacker.y), teamOf(state, u.owner))) return;
+    const then = o.t === 'amove' ? [o.x, o.y] as [number, number] : o.t === 'attack' ? o.then : undefined;
+    u.order = { t: 'attack', id: attacker.id, auto: true, then, answer: true };
+  };
+  answer(victim);
+  for (const u of state.entities.values()) {
+    if (u === victim || u.owner !== victim.owner || !isSoldier(u)) continue;
+    const radius = u.stance === 'defensive' ? HOLD_RADIUS : HELP_RADIUS;
+    if (Math.abs(u.x - victim.x) > radius || Math.abs(u.y - victim.y) > radius || distance(u, victim) > radius) continue;
+    answer(u);
   }
 }
 
@@ -1048,7 +1092,10 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
     if (e.cooldown <= 0) strike(state, e, target);
     return;
   }
-  if (isBuilding(e) || (o.auto && d > (def.sight ?? DEFAULT_SIGHT) + 4)) return endAttack(state, e, o);
+  // Holding ground: whoever steps out of reach is let go. A picked fight is given up once the enemy
+  // gets well away; answering an attack, a bit further.
+  if (o.hold) return endAttack(state, e, o);
+  if (isBuilding(e) || (o.auto && d > (def.sight ?? DEFAULT_SIGHT) + (o.answer ? 10 : 4))) return endAttack(state, e, o);
   // Out of reach and no way to get there, e.g. behind a wall: searching again and again would only
   // flood the whole map each time. Picked fights are dropped; an ordered one walks as near as it
   // can once and then gives up there.
@@ -1412,6 +1459,50 @@ function moveAlongPath(e: Entity): void {
   }
 }
 
+/** How long a villager who lost their job by themselves stands about before going back to work. */
+const RESUME_TICKS = 5 * TICK_RATE;
+
+/**
+ * Villagers whose work stopped on its own (not by a player's order) and who then just stand there
+ * are put back to it after a few seconds: the same job if it can still be done, otherwise the
+ * nearest of the same kind.
+ */
+function watchIdle(state: GameState, e: Entity, before: Order): void {
+  // (A villager sent only to drop off what they carry is meant to stand by afterwards.)
+  const job = before.t === 'build' || (before.t === 'gather' && (before.tile >= 0 || before.farm >= 0));
+  if (job && e.order.t === 'idle') {
+    e.resume = { order: before, since: state.tick, tries: e.resume?.tries ?? 0 };
+    return;
+  }
+  const r = e.resume;
+  if (!r) return;
+  if (e.order.t !== 'idle') {
+    // Busy again: once they have been at it a good while, the slate is wiped clean.
+    if (state.tick - r.since > 60 * TICK_RATE) e.resume = undefined;
+    return;
+  }
+  if (e.path.length > 0 || state.tick - r.since < RESUME_TICKS) return;
+  if (r.tries >= 3) return void (e.resume = undefined);
+  r.tries++;
+  r.since = state.tick;
+  const o = r.order;
+  const team = teamOf(state, e.owner);
+  if (o.t === 'build') {
+    const site = state.entities.get(o.id);
+    if (site && site.owner === e.owner && (site.progress < 1 || (site.hp < DEFS[site.kind].hp && site.kind !== 'farm'))) e.order = { t: 'build', id: site.id };
+    else e.resume = undefined;
+  } else if (o.t === 'gather' && o.farm >= 0) {
+    const farm = state.entities.get(o.farm);
+    if (farm && farm.progress >= 1 && farmIsFree(state, farm, e)) e.order = gatherOrder(-1, farm.id, 'food');
+    else e.resume = undefined;
+  } else if (o.t === 'gather') {
+    const from = o.tile >= 0 ? o.tile : Math.floor(e.y) * state.map.size + Math.floor(e.x);
+    const tile = nearestResourceTile(state.map, from, o.res, 10, { e, team });
+    if (tile >= 0) e.order = gatherOrder(tile, -1, o.res);
+    else e.resume = undefined;
+  }
+}
+
 /** Advances the simulation by one tick. */
 export function step(state: GameState): void {
   state.tick++;
@@ -1454,15 +1545,18 @@ export function step(state: GameState): void {
     else if (o.t === 'fetch') stepFetch(state, e, o);
     else if (o.t === 'deliver') stepDeliver(state, e, o);
     else if ((o.t === 'move' || o.t === 'amove') && e.path.length === 0) e.order = { t: 'idle' };
+    if (e.kind === 'villager') watchIdle(state, e, o);
 
     // Soldiers and towers pick fights on their own; villagers and kings do not.
     const now = e.order;
     // Defensive soldiers wait until struck, though they still fight their way through an attack-move.
-    const looking = now.t === 'amove' || (now.t === 'idle' && e.stance !== 'defensive');
+    const holding = now.t === 'idle' && e.stance === 'defensive';
+    const looking = now.t === 'amove' || now.t === 'idle';
     if (looking && def.attack && e.kind !== 'villager' && (state.tick + e.id) % 5 === 0) {
-      const reach = isBuilding(e) ? rangeOf(e.kind, hasTech(state, e.owner)) : def.sight ?? DEFAULT_SIGHT;
+      // Holding their ground, they still strike at anyone in reach without stepping out for them.
+      const reach = isBuilding(e) || holding ? rangeOf(e.kind, hasTech(state, e.owner)) + (holding ? 0.3 : 0) : def.sight ?? DEFAULT_SIGHT;
       const enemy = findEnemy(state, e, reach);
-      if (enemy) e.order = { t: 'attack', id: enemy.id, auto: true, then: now.t === 'amove' ? [now.x, now.y] : undefined };
+      if (enemy) e.order = { t: 'attack', id: enemy.id, auto: true, then: now.t === 'amove' ? [now.x, now.y] : undefined, hold: holding || undefined };
     }
     // Idle monks look after wounded friends nearby.
     if (e.order.t === 'idle' && def.heal && (state.tick + e.id) % 5 === 0) {

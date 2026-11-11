@@ -194,13 +194,13 @@ test('ages gate buildings and units, and research unlocks and improves things', 
   run(s, 310);
   assert.ok(p.techs.has('weapons') && p.techs.has('loom'));
   assert.equal(owned(s, 0, 'villager')[0].hp, 40);
-  // Better weapons make a swordsman hit a house for 8 + 1 (upgrade) + 2 (vs buildings) - 3 (armour) = 8.
+  // Better weapons make a swordsman hit a house for 7 + 1 (upgrade) + 2 (vs buildings) - 3 (armour) = 7.
   addPlayer(s, 1);
   const house = spawn(s, 1, 'house', 30, 30);
   const sword = spawn(s, 0, 'swordsman', 29, 30);
   applyCommand(s, 0, { type: 'interact', ids: [sword.id], target: house.id });
   run(s, 2);
-  assert.equal(house.hp, DEFS.house.hp - 8);
+  assert.equal(house.hp, DEFS.house.hp - 7);
 
   // Upgrades for one kind of soldier leave the others alone, and existing units gain the health.
   const spear = spawn(s, 0, 'spearman', 28, 28);
@@ -210,7 +210,7 @@ test('ages gate buildings and units, and research unlocks and improves things', 
   assert.ok(p.techs.has('jacks') && p.techs.has('blades'));
   assert.equal(spear.hp, DEFS.spearman.hp + 15);
   const has = hasTech(s, 0);
-  assert.equal(attackOf('swordsman', has), 8 + 1 + 3);
+  assert.equal(attackOf('swordsman', has), DEFS.swordsman.attack! + 1 + 3);
   assert.equal(attackOf('spearman', has), 4 + 1);
   assert.equal(armorOf('spearman', has), 1);
   assert.equal(armorOf('swordsman', has), 1);
@@ -871,7 +871,7 @@ test('a catapult tower crushes a group, cannot aim at its foot, and falls to ram
   const close = spawn(s2, 0, 'swordsman', 52, 40);
   close.stance = 'defensive';
   run(s2, 100);
-  assert.equal(close.hp, 60, 'safe at its foot');
+  assert.equal(close.hp, DEFS.swordsman.hp, 'safe at its foot');
   assert.ok(t2.hp > 0);
   // Two rams knock it down unharmed.
   const s3 = openField();
@@ -881,4 +881,30 @@ test('a catapult tower crushes a group, cannot aim at its foot, and falls to ram
   run(s3, 600);
   assert.ok(!s3.entities.has(t3.id), 'the rams brought it down');
   assert.ok(rams.every((r) => s3.entities.has(r.id)), 'and both rams survive');
+});
+
+test('a villager whose work stopped by itself goes back to it after a few seconds', () => {
+  const s = openField();
+  s.map.tiles[40 * s.map.size + 50] = Tile.Gold;
+  s.map.amount[40 * s.map.size + 50] = 500;
+  spawn(s, 0, 'towncenter', 40, 39);
+  const v = spawn(s, 0, 'villager', 46, 40);
+  applyCommand(s, 0, { type: 'gather', ids: [v.id], tile: 40 * s.map.size + 50 });
+  // Walls go up all round the gold before the villager gets there: nowhere to stand, so they stop.
+  const walls = [];
+  for (let y = 38; y <= 42; y++) for (let x = 48; x <= 52; x++) if (Math.max(Math.abs(x - 50), Math.abs(y - 40)) === 2) walls.push(spawn(s, 1, 'wall', x, y));
+  run(s, 30);
+  assert.equal(v.order.t, 'idle', 'stuck for now');
+  // The way opens again: without being told, the villager goes back to the gold.
+  for (const w of walls) applyCommand(s, 1, { type: 'delete', id: w.id });
+  assert.ok(walls.every((w) => !s.entities.has(w.id)));
+  run(s, 60);
+  assert.equal((v.order as { t: string }).t, 'gather', 'back at work');
+  const before = s.players.get(0)!.res.gold;
+  run(s, 600);
+  assert.ok(s.players.get(0)!.res.gold > before, 'and bringing gold in');
+  // Someone the player has told to stop stays stopped.
+  applyCommand(s, 0, { type: 'stop', ids: [v.id] });
+  run(s, 100);
+  assert.equal((v.order as { t: string }).t, 'idle');
 });

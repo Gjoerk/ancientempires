@@ -52,6 +52,9 @@ import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setPlayerColors, 
 
 interface View {
   id: number;
+  /** The way last faced while working, and while fighting (1 right, -1 left). */
+  workDir?: number;
+  foeDir?: number;
   owner: number;
   kind: Kind;
   hp: number;
@@ -185,6 +188,7 @@ let remembered = new Map<number, View>();
 let revealAll = false;
 let fogTime = 0;
 let fogMini: HTMLCanvasElement | undefined;
+let miniFog: HTMLCanvasElement | undefined;
 /** Players whose sight is shown: the controlled one, plus all sides a host plays in a test game. */
 let sharedSight = new Set<number>();
 
@@ -353,6 +357,20 @@ function updateFog(now: number): void {
     img.data[i * 4 + 3] = visible[i] ? 0 : explored[i] ? 115 : 255;
   }
   g.putImageData(img, 0, 0);
+  // The minimap's own fog: a misty haze over what is out of sight, so it reads clearly on the small map.
+  miniFog ??= document.createElement('canvas');
+  miniFog.width = miniFog.height = n;
+  const mg = miniFog.getContext('2d')!;
+  const mimg = mg.createImageData(n, n);
+  for (let i = 0; i < n * n; i++) {
+    const seen = visible[i] === 1;
+    const known = explored[i] === 1;
+    mimg.data[i * 4] = known ? 52 : 9;
+    mimg.data[i * 4 + 1] = known ? 64 : 13;
+    mimg.data[i * 4 + 2] = known ? 60 : 10;
+    mimg.data[i * 4 + 3] = seen ? 0 : known ? 165 : 255;
+  }
+  mg.putImageData(mimg, 0, 0);
   // Ground blocks with newly explored tiles in them are drawn again.
   const blocks = Math.ceil(n / CHUNK);
   if (chunkSeen.length !== blocks * blocks) chunkSeen = new Int32Array(blocks * blocks).fill(-1);
@@ -842,7 +860,9 @@ function copyLastJob(): void {
   const kind = placedBy.get(from);
   if (kind) {
     const full = !!DEFS[kind].housing && housingNow() >= popLimit;
-    if (!ageAllows(kind) || !canAfford(DEFS[kind].cost) || full) return void play('error', 250);
+    if (!ageAllows(kind)) return refuse(`Needs the ${AGE_NAMES[DEFS[kind].age ?? 1]}.`);
+    if (full) return refuse(`Your houses already make room for the population limit of ${popLimit}.`);
+    if (!canAfford(DEFS[kind].cost)) return refuse(missing(DEFS[kind].cost));
     placing = kind;
     play('order.copy');
     return;
@@ -1391,6 +1411,29 @@ function placementSpot(): [number, number] {
   return [Math.floor(tx - (s - 1) / 2), Math.floor(ty - (s - 1) / 2)];
 }
 
+/** What is lacking for a cost, e.g. "Not enough wood (30 more) and stone (50 more)." */
+function missing(cost: Cost): string {
+  const p = players.get(me);
+  const short = RESOURCES.filter((r) => (cost[r] ?? 0) > (p?.res[r] ?? 0)).map((r) => `${r} (${(cost[r] ?? 0) - Math.floor(p?.res[r] ?? 0)} more)`);
+  if (short.length === 0) return 'Not enough resources.';
+  return `Not enough ${short.length > 1 ? `${short.slice(0, -1).join(', ')} and ${short[short.length - 1]}` : short[0]}.`;
+}
+
+let refuseTimer = 0;
+/** The error sound, with a short red line above the bottom bar saying why. */
+function refuse(why: string): void {
+  play('error', 250);
+  const line = $('err');
+  line.textContent = why;
+  line.style.bottom = `${$('bottom').offsetHeight + 12}px`;
+  line.hidden = false;
+  line.classList.remove('fade');
+  void line.offsetWidth;
+  line.classList.add('fade');
+  clearTimeout(refuseTimer);
+  refuseTimer = window.setTimeout(() => (line.hidden = true), 2600);
+}
+
 function canAfford(cost: Cost): boolean {
   const p = players.get(me);
   return !!p && RESOURCES.every((r) => p.res[r] >= (cost[r] ?? 0));
@@ -1485,7 +1528,8 @@ function placeAtCursor(keep: boolean): void {
   if (!placing || !map) return;
   const [x, y] = placementSpot();
   const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
-  if (!canPlace(map, placing, x, y) || !canAfford(DEFS[placing].cost)) return void play('error', 250);
+  if (!canAfford(DEFS[placing].cost)) return refuse(missing(DEFS[placing].cost));
+  if (!canPlace(map, placing, x, y)) return refuse(`A ${DEFS[placing].label.toLowerCase()} cannot be built there.`);
   // With Shift the site goes on the villagers' list instead of replacing what they are building.
   send({ type: 'place', ids, kind: placing, x, y, queue: keep });
   play(`order.place.${placing}`);
@@ -1914,9 +1958,9 @@ $('actions').addEventListener('click', (ev) => {
   focusButton(button);
   // A press-and-hold only showed the details; it does not also use the button.
   if (pressShown) return void (pressShown = false);
-  if (button.classList.contains('locked')) return void play('error', 250);
+  if (button.classList.contains('locked')) return refuse(button.dataset.why || 'Not available yet.');
   // Not enough resources: nothing is queued or placed.
-  if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return void play('error', 250);
+  if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return refuse(button.dataset.why || 'Not enough resources.');
   if (!button.dataset.train) play('click', 60);
   const { build, train, cancel, eject, sell, buy, stance, bell } = button.dataset;
   if (bell) {
@@ -2368,7 +2412,10 @@ function renderButtons(buttons: PanelButton[]): void {
     else last.append(...costChips(b.gain ?? b.cost ?? {}, b.gain ? '+' : ''));
     el.classList.toggle('locked', !!b.locked);
     el.classList.toggle('on', !!b.active);
-    el.classList.toggle('poor', !b.locked && !!b.cost && !canAfford(b.cost));
+    const poor = !b.locked && !!b.cost && !canAfford(b.cost);
+    el.classList.toggle('poor', poor);
+    // Why pressing it does nothing, said when it is pressed anyway.
+    el.dataset.why = b.locked ? b.detail.warn ?? (b.short ? `Needs the ${b.short} Age.` : 'Not available yet.') : poor ? missing(b.cost!) : '';
     el.classList.toggle('focus', el.dataset.key === focusKey);
   });
 }
@@ -2537,13 +2584,34 @@ function renderMinimap(): void {
     const [cx, cy] = centreOf(v);
     mctx.fillRect(cx - s / 2, cy - s / 2, s, s);
   }
-  // Relics lying where they have been seen, in gold.
-  mctx.fillStyle = '#ffe680';
-  for (const [x, y, carrier, monastery] of relics) {
-    if (carrier >= 0 || monastery >= 0 || (!revealAll && !explored[Math.floor(y) * map!.size + Math.floor(x)])) continue;
-    mctx.fillRect(x - 1, y - 1, 2, 2);
+  // The fog: soft-edged haze over ground out of sight, darkness where nobody has been.
+  if (miniFog && !revealAll) {
+    mctx.imageSmoothingEnabled = true;
+    mctx.drawImage(miniFog, 0, 0);
+    mctx.imageSmoothingEnabled = false;
   }
-  if (fogMini && !revealAll) mctx.drawImage(fogMini, 0, 0);
+  // The relic, over the fog and big enough to find at a glance: where it lies once that spot has
+  // been seen, with whoever carries it while they are in sight, or in a monastery that has been seen.
+  for (const [x, y, carrier, monastery] of relics) {
+    let at: [number, number] | undefined;
+    if (carrier >= 0) {
+      const monk = views.get(carrier);
+      if (monk && canSee(monk)) at = [monk.x, monk.y];
+    } else if (monastery >= 0) {
+      const home = views.get(monastery) ?? remembered.get(monastery);
+      if (home) at = centreOf(home);
+    } else if (revealAll || explored[Math.floor(y) * map!.size + Math.floor(x)]) at = [x, y];
+    if (!at) continue;
+    const pulse = 1 + 0.25 * Math.sin(t / 220);
+    mctx.fillStyle = 'rgba(255, 220, 90, 0.35)';
+    mctx.fillRect(at[0] - 3.5 * pulse, at[1] - 3.5 * pulse, 7 * pulse, 7 * pulse);
+    mctx.fillStyle = '#3a2a08';
+    mctx.fillRect(at[0] - 2.4, at[1] - 2.4, 4.8, 4.8);
+    mctx.fillStyle = '#ffe680';
+    mctx.fillRect(at[0] - 1.7, at[1] - 1.7, 3.4, 3.4);
+    mctx.fillStyle = '#fffbe0';
+    mctx.fillRect(at[0] - 0.8, at[1] - 0.8, 1.6, 1.6);
+  }
   if (minimapPing) {
     const k = (performance.now() - minimapPing.t) / 600;
     if (k > 1) minimapPing = undefined;
@@ -2715,7 +2783,11 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   const spot = workSpot(v, now);
   let work;
   if (spot && v.act === 2) {
-    const dir = v.task === 5 ? (Math.floor(now / 2600 + v.id) % 2 ? 1 : -1) : tileToScreen(spot[0], spot[1])[0] >= sx ? 1 : -1;
+    // Facing the work only turns when it is clearly to one side: on a corner, right above or below,
+    // the last way faced is kept instead of flipping back and forth.
+    const off = tileToScreen(spot[0], spot[1])[0] - sx;
+    if (Math.abs(off) > 6 || !v.workDir) v.workDir = off >= 0 ? 1 : -1;
+    const dir = v.task === 5 ? (Math.floor(now / 2600 + v.id) % 2 ? 1 : -1) : v.workDir;
     const period = v.task === 2 ? 900 : 700;
     work = { task: v.task, dir, phase: ((now + v.id * 137) % period) / period };
   }
@@ -2730,12 +2802,14 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
     const reach = Math.sin(swing * Math.PI) * (ranged ? -2 : v.kind === 'ram' ? 9 : 6);
     sx += ((fx - sx) / d) * reach;
     sy += ((fy - sy) / d) * reach;
-    if (!ranged && v.kind !== 'ram') slash = { dir: fx >= sx ? 1 : -1, k: swing };
+    if (!ranged && v.kind !== 'ram') slash = { dir: Math.abs(fx - sx) > 6 || !v.foeDir ? (fx >= sx ? 1 : -1) : v.foeDir, k: swing };
   }
   // Fighters keep facing whoever they are attacking.
   let foeDir = 0;
   if (foe && v.act === 3) {
-    foeDir = tileToScreen(...centreOf(foe))[0] >= sx ? 1 : -1;
+    const off = tileToScreen(...centreOf(foe))[0] - sx;
+    if (Math.abs(off) > 6 || !v.foeDir) v.foeDir = off >= 0 ? 1 : -1;
+    foeDir = v.foeDir;
   }
   const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) % 10 : -1;
   drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face);

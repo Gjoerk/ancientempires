@@ -211,6 +211,12 @@
 
     #banner { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 24px; font-size: 19px; pointer-events: none;
       text-align: center; max-width: calc(100vw - 32px); }
+    /* Why the error sound just played: a short red line above the bottom bar. */
+    #err { position: fixed; left: 50%; transform: translateX(-50%); z-index: 6; pointer-events: none; padding: 4px 12px; border-radius: 4px;
+      font-size: 15px; font-weight: 700; color: #ff6b57; background: rgba(10, 18, 14, .72); text-shadow: 0 1px 0 #000; white-space: nowrap; }
+    #err[hidden] { display: none; }
+    #err.fade { animation: err-fade 2.6s ease-in forwards; }
+    @keyframes err-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
     #toast { position: fixed; top: 52px; right: 10px; padding: 6px 12px; border-color: #b3261a; }
     #chat-log { position: fixed; top: 52px; left: 10px; display: grid; gap: 2px; pointer-events: none; max-width: 60vw; color: #fff;
       text-shadow: 0 1px 2px #000; font-variant: normal; }
@@ -482,6 +488,7 @@
     </div>
   </div>
   <div id="toast" class="frame" hidden></div>
+  <div id="err" hidden role="status" aria-live="polite"></div>
   <div id="chat-log"></div>
   <input id="chat-input" maxlength="140" placeholder="Message to everyone — Enter to send" enterkeyhint="send" hidden>
   <div id="help" class="frame" hidden>
