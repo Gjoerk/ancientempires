@@ -114,6 +114,13 @@ export function describeAction(id: string): Detail {
     return { title: 'Defensive', icon: id, stats: [], lines: ['Soldiers hold their ground and only fight back when they are attacked.',
       'Good for guards that should not be lured away. An attack-move (Ctrl + right-click) still fights its way through.'] };
   }
+  if (id === 'bell') {
+    return { title: 'Ring the town bell', icon: id, stats: [], lines: ['Every villager drops what they are doing and shelters in the nearest town centre or castle with room.',
+      'Ring it again to send them all back to work.'] };
+  }
+  if (id === 'allclear') {
+    return { title: 'Back to work', icon: id, stats: [], lines: ['The villagers come out and go back to the jobs they had when the bell rang.'] };
+  }
   if (id === 'eject') {
     return { title: 'Send everyone out', icon: id, stats: [], lines: ['Everyone sheltering inside comes out. Outside they can be attacked, the king too.'] };
   }

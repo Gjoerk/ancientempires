@@ -112,6 +112,30 @@ const GLYPHS: Record<string, string[]> = {
     '.y........',
     '..........',
   ],
+  bell: [
+    '....bb....',
+    '...byyb...',
+    '..byyyyb..',
+    '..byyyyb..',
+    '..byyyyb..',
+    '.byyyyyyb.',
+    '.byyyyyyb.',
+    'bggggggggb',
+    '.bbbbbbbb.',
+    '....bb....',
+  ],
+  relic: [
+    '....ww....',
+    '...wwww...',
+    '....ww....',
+    '.oooooooo.',
+    'oyyyyyyyyo',
+    'oyyyrryyyo',
+    'oyggyyggyo',
+    'oyggyyggyo',
+    'oggggggggo',
+    '.oooooooo.',
+  ],
   crown: [
     '....gg....',
     '...gggg...',
@@ -367,6 +391,12 @@ export function icon(id: string, owner = 0): string {
     c.restore();
   } else if (id === 'stance.defensive') {
     glyph(c, 'shield', team, 4, 4, 4);
+  } else if (id === 'allclear') {
+    // The bell with a little arrow: back to work.
+    glyph(c, 'bell', team, 4, 2, 4);
+    c.fillStyle = '#5f9a3a';
+    c.fillRect(30, 34, 14, 4);
+    c.fillRect(38, 30, 4, 12);
   } else if (id === 'eject') {
     thing(c, 'king', owner, SIZE, 0, 0);
   } else {

@@ -24,7 +24,21 @@ export type Order =
   /** Monks: restore a friendly unit's health. */
   | { t: 'heal'; id: number }
   /** Monks: win an enemy unit over; `progress` is in seconds. */
-  | { t: 'convert'; id: number; progress: number };
+  | { t: 'convert'; id: number; progress: number }
+  /** Monks: walk to a relic and pick it up. */
+  | { t: 'fetch'; relic: number }
+  /** Monks carrying a relic: take it into a monastery. */
+  | { t: 'deliver'; id: number };
+
+/** A relic: lying on the ground, carried by a monk, or kept in a monastery. */
+export interface Relic {
+  x: number;
+  y: number;
+  /** The monk carrying it, or -1. */
+  carrier: number;
+  /** The monastery keeping it, or -1. */
+  monastery: number;
+}
 
 export interface Entity {
   id: number;
@@ -58,6 +72,8 @@ export interface Entity {
   inside: number;
   /** Soldiers: 'defensive' ones only fight back when struck; otherwise they go for enemies they see. */
   stance?: Stance;
+  /** Villagers called in by the town bell: the job to go back to when it rings again. */
+  recall?: Order;
 }
 
 export type Stance = 'aggressive' | 'defensive';
@@ -107,6 +123,7 @@ export interface GameState {
   winner: number;
   /** Notes the computer opponents keep between their turns. */
   ai: Map<number, { lastAttack: number; waves: number }>;
+  relics: Relic[];
 }
 
 export type Command =
@@ -124,6 +141,10 @@ export type Command =
   | { type: 'amove'; ids: number[]; x: number; y: number }
   | { type: 'stop'; ids: number[] }
   | { type: 'stance'; ids: number[]; stance: Stance }
+  /** The town bell: villagers go into shelter, or, rung again, back to work. */
+  | { type: 'bell' }
+  /** Monks go and pick up a relic. */
+  | { type: 'fetch'; ids: number[]; relic: number }
   /** Destroys one of the player's own units or buildings. */
   | { type: 'delete'; id: number }
   | { type: 'cancel'; building: number }
@@ -143,7 +164,7 @@ export function createGame(seed: number, size?: number, popLimit = POP_MAX): Gam
   return {
     popLimit, blessings: [],
     tick: 0, seed, map: generateMap(seed, size), entities: new Map(), players: new Map(), nextId: 1,
-    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(), occupied: new Map(),
+    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(), occupied: new Map(), relics: [],
   };
 }
 
@@ -183,6 +204,14 @@ function setBlocked(map: GameMap, e: Entity, value: number): void {
 
 function kill(state: GameState, e: Entity): void {
   if (!state.entities.delete(e.id)) return;
+  // A relic falls where its monk dies, or out of a monastery that is destroyed.
+  for (const r of state.relics) {
+    if (r.carrier === e.id) r.carrier = -1;
+    if (r.monastery === e.id) {
+      r.monastery = -1;
+      [r.x, r.y] = [e.x + sizeOf(e) / 2, e.y + sizeOf(e)];
+    }
+  }
   if (e.inside < 0) state.deaths.push([KINDS.indexOf(e.kind), e.x, e.y, e.owner]);
   if (!isBuilding(e)) return;
   // Research that was under way is lost and can be ordered again.
@@ -547,6 +576,8 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
   const player = state.players.get(slot);
   if (!player || player.defeated || !cmd) return;
   const map = state.map;
+  // Villagers given a new job are no longer waiting for the bell to send them back.
+  if ('ids' in cmd && Array.isArray(cmd.ids) && cmd.type !== 'stance') for (const e of ownUnits(state, slot, cmd.ids, true)) delete e.recall;
 
   if (cmd.type === 'move') {
     if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.y)) return;
@@ -585,6 +616,9 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
       } else if (target.owner !== slot) {
         // An ally: just walk over.
         moveUnits(state, [e], target.x, target.y);
+      } else if (e.kind === 'monk' && target.kind === 'monastery' && carrying(state, e) && target.progress >= 1) {
+        // A monk carrying a relic takes it into the monastery.
+        e.order = { t: 'deliver', id: target.id };
       } else if (e.kind === 'monk' && !isBuilding(target)) {
         // Monks heal their own side.
         e.order = target.hp < maxHpOf(target.kind, hasTech(state, target.owner)) ? { t: 'heal', id: target.id } : { t: 'idle' };
@@ -696,6 +730,16 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
         e.order = { t: 'idle' };
       }
     }
+  } else if (cmd.type === 'bell') {
+    ringBell(state, slot);
+  } else if (cmd.type === 'fetch') {
+    const relic = state.relics[cmd.relic];
+    if (!relic || relic.monastery >= 0) return;
+    for (const e of ownUnits(state, slot, cmd.ids)) {
+      if (e.kind !== 'monk' || carrying(state, e)) continue;
+      e.path = [];
+      e.order = { t: 'fetch', relic: cmd.relic };
+    }
   } else if (cmd.type === 'copy') {
     const from = state.entities.get(cmd.from);
     if (!from || from.owner !== slot || from.kind !== 'villager') return;
@@ -740,7 +784,7 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
 function strike(state: GameState, e: Entity, target: Entity): void {
   const def = DEFS[e.kind];
   const has = hasTech(state, e.owner);
-  const dmg = Math.max(1, attackOf(e.kind, has) + bonusOf(e.kind, target.kind, has) - armorOf(target.kind, hasTech(state, target.owner)));
+  const dmg = Math.max(1, attackOf(e.kind, has) + bonusOf(e.kind, target.kind, has) + relicBonus(state, e) - armorOf(target.kind, hasTech(state, target.owner)));
   e.cooldown = Math.round(cooldownOf(e.kind, has) * TICK_RATE);
   if ((def.range ?? 0) > 2) state.shots.push([e.id, target.id]);
   else state.hits.push([e.id, target.id]);
@@ -953,6 +997,149 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
   }
 }
 
+/** Each relic kept in a player's monasteries adds this to the attack of their army, up to RELIC_MAX relics. */
+export const RELIC_ATTACK = 1;
+export const RELIC_MAX = 2;
+
+/** How many relics a player keeps, counted up to RELIC_MAX. */
+export function relicsKept(state: GameState, owner: number): number {
+  let n = 0;
+  for (const r of state.relics) if (r.monastery >= 0 && state.entities.get(r.monastery)?.owner === owner) n++;
+  return Math.min(RELIC_MAX, n);
+}
+
+/** Extra attack from relics: for soldiers, towers and castles, not for villagers. */
+function relicBonus(state: GameState, e: Entity): number {
+  return e.kind === 'villager' ? 0 : relicsKept(state, e.owner) * RELIC_ATTACK;
+}
+
+function carrying(state: GameState, e: Entity): Relic | undefined {
+  return state.relics.find((r) => r.carrier === e.id);
+}
+
+function nearestMonastery(state: GameState, e: Entity): Entity | undefined {
+  let best: Entity | undefined;
+  for (const b of state.entities.values()) {
+    if (b.owner !== e.owner || b.kind !== 'monastery' || b.progress < 1) continue;
+    if (!best || distance(e, b) < distance(e, best)) best = b;
+  }
+  return best;
+}
+
+function stepFetch(state: GameState, e: Entity, o: Extract<Order, { t: 'fetch' }>): void {
+  const relic = state.relics[o.relic];
+  if (!relic || relic.monastery >= 0 || (relic.carrier >= 0 && relic.carrier !== e.id)) return void (e.order = { t: 'idle' });
+  if (Math.hypot(e.x - relic.x, e.y - relic.y) <= 1.1) {
+    // Picked up: off to the nearest monastery, if there is one.
+    e.path = [];
+    relic.carrier = e.id;
+    const home = nearestMonastery(state, e);
+    e.order = home ? { t: 'deliver', id: home.id } : { t: 'idle' };
+    return;
+  }
+  if (e.path.length === 0 || (state.tick + e.id) % 10 === 0) {
+    e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(relic.x), Math.floor(relic.y), teamOf(state, e.owner));
+    if (e.path.length === 0 && Math.hypot(e.x - relic.x, e.y - relic.y) > 1.1) e.order = { t: 'idle' };
+  }
+}
+
+function stepDeliver(state: GameState, e: Entity, o: Extract<Order, { t: 'deliver' }>): void {
+  const relic = carrying(state, e);
+  const home = state.entities.get(o.id);
+  if (!relic || !home || home.owner !== e.owner || home.kind !== 'monastery' || home.progress < 1) return void (e.order = { t: 'idle' });
+  if (e.path.length > 0) return;
+  if (!isAdjacent(e, rectOf(home))) {
+    if (!goAdjacent(state, e, rectOf(home))) e.order = { t: 'idle' };
+    return;
+  }
+  relic.carrier = -1;
+  relic.monastery = home.id;
+  [relic.x, relic.y] = centre(home);
+  e.order = { t: 'idle' };
+}
+
+/** Carried relics go with their monks. */
+function moveRelics(state: GameState): void {
+  for (const r of state.relics) {
+    if (r.carrier < 0) continue;
+    const monk = state.entities.get(r.carrier);
+    if (!monk) {
+      r.carrier = -1;
+      continue;
+    }
+    r.x = monk.x;
+    r.y = monk.y;
+  }
+}
+
+/**
+ * The town bell. Rung once, every villager stops what they are doing and goes into the nearest
+ * town centre or castle that has room (or waits by the nearest one if none has); rung again,
+ * they come out and go back to the job they had.
+ */
+function ringBell(state: GameState, slot: number): void {
+  const villagers = [...state.entities.values()].filter((e) => e.owner === slot && e.kind === 'villager');
+  if (villagers.some((e) => e.recall)) {
+    for (const e of villagers) {
+      if (!e.recall) continue;
+      if (e.inside >= 0) {
+        const b = state.entities.get(e.inside);
+        if (b) ejectOne(state, b, e);
+      }
+      e.path = [];
+      e.order = e.recall;
+      delete e.recall;
+    }
+    return;
+  }
+  const shelters = [...state.entities.values()].filter((b) => b.owner === slot && DEFS[b.kind].garrison && b.progress >= 1);
+  if (shelters.length === 0) return;
+  const room = new Map(shelters.map((b) => [b.id, (DEFS[b.kind].garrison ?? 0) - countInside(state, b)]));
+  for (const e of villagers) {
+    if (e.inside >= 0) continue;
+    const byDistance = [...shelters].sort((a, b) => distance(e, a) - distance(e, b));
+    const b = byDistance.find((s) => (room.get(s.id) ?? 0) > 0) ?? byDistance[0];
+    room.set(b.id, (room.get(b.id) ?? 0) - 1);
+    e.recall = e.order.t === 'garrison' ? { t: 'idle' } : e.order;
+    e.path = [];
+    e.order = { t: 'garrison', id: b.id };
+  }
+}
+
+/** Lets one unit out of a building. */
+function ejectOne(state: GameState, b: Entity, e: Entity): void {
+  const s = sizeOf(b);
+  const [spot] = freeTilesNear(state.map, b.x + Math.floor(s / 2), b.y + s, 1);
+  e.inside = -1;
+  e.x = spot[0] + 0.5;
+  e.y = spot[1] + 0.5;
+}
+
+/**
+ * Puts relics on the map for a new game: on open ground, far from every starting town and from
+ * each other. Two on small maps, three on bigger ones.
+ */
+export function placeRelics(state: GameState): void {
+  const map = state.map;
+  const n = map.size;
+  const count = n <= 96 ? 2 : 3;
+  let seed = (state.seed ^ 0x9e3779b9) >>> 0;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const awayFromTowns = n * 0.22;
+  for (let tries = 0; tries < 4000 && state.relics.length < count; tries++) {
+    const x = 4 + Math.floor(random() * (n - 8));
+    const y = 4 + Math.floor(random() * (n - 8));
+    const i = y * n + x;
+    if (map.tiles[i] !== Tile.Grass || map.footprint[i] || map.blocked[i]) continue;
+    if (map.starts.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < awayFromTowns)) continue;
+    if (state.relics.some((r) => Math.hypot(r.x - x, r.y - y) < n * 0.2)) continue;
+    state.relics.push({ x: x + 0.5, y: y + 0.5, carrier: -1, monastery: -1 });
+  }
+}
+
 function stepGarrison(state: GameState, e: Entity, o: Extract<Order, { t: 'garrison' }>): void {
   const castle = state.entities.get(o.id);
   if (!castle || !canShelter(state, e, castle)) return void (e.order = { t: 'idle' });
@@ -1120,6 +1307,8 @@ export function step(state: GameState): void {
     else if (o.t === 'garrison') stepGarrison(state, e, o);
     else if (o.t === 'heal') stepHeal(state, e, o);
     else if (o.t === 'convert') stepConvert(state, e, o);
+    else if (o.t === 'fetch') stepFetch(state, e, o);
+    else if (o.t === 'deliver') stepDeliver(state, e, o);
     else if ((o.t === 'move' || o.t === 'amove') && e.path.length === 0) e.order = { t: 'idle' };
 
     // Soldiers and towers pick fights on their own; villagers and kings do not.
@@ -1143,6 +1332,7 @@ export function step(state: GameState): void {
     }
     if (!isBuilding(e)) moveAlongPath(e);
   }
+  moveRelics(state);
 
   // A player whose king is dead is out, and everything they own goes with them.
   const kings = new Set<number>();

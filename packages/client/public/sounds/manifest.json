@@ -1,7 +1,7 @@
 {
   "age": "age.ogg",
   "alarm": "alarm.ogg",
-  "built": "built.ogg",
+  "built": "built_house.ogg",
   "built.range": "built_archery.ogg",
   "built.barracks": "built_barracks.ogg",
   "built.monastery": "built_monastery.ogg",
@@ -31,7 +31,6 @@
   "trained": "trained.ogg",
   "victory": "victory.ogg",
   "built.blacksmith": "built_blacksmith.ogg",
-  "built.house": "built_house.ogg",
   "order.attack": "order_attack.ogg",
   "order.enter": "order_entering.ogg",
   "order.gather.gold": "order_goldstone.ogg",

@@ -31,7 +31,7 @@ export type EntitySnapshot = [number, number, number, number, number, number, nu
 /**
  * [slot, food, wood, gold, stone, population, housing, defeated (0/1), age,
  *  researched technologies as a bit mask over TECH_IDS, technologies being researched likewise,
- *  villagers gathering food, wood, gold, stone]
+ *  villagers gathering food, wood, gold, stone, town bell rung (0/1)]
  */
 export type PlayerSnapshot = number[];
 
@@ -68,6 +68,8 @@ export type ServerMessage =
       shots: [number, number][];
       /** Monks at work this tick: [monk id, target id, 1 heal / 2 convert]. */
       blessings: [number, number, number][];
+      /** Every relic: [x, y, carrying monk or -1, keeping monastery or -1]. */
+      relics: [number, number, number, number][];
       /** Melee blows this tick: [attacker id, target id]. */
       hits: [number, number][];
       /** Deaths this tick: [kind index, x, y, owner]. */

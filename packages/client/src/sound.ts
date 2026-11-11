@@ -151,14 +151,16 @@ export type SoundName = keyof typeof SOUNDS;
 const custom = new Map<string, { buffer: AudioBuffer; gain: number }[]>();
 let customLoading = false;
 /** Sounds that have no built-in version and stay silent unless a file is given. */
-const FILE_ONLY = new Set(['select', 'heal', 'convert', 'error', 'click', 'start']);
-type FileOnly = 'select' | 'heal' | 'convert' | 'error' | 'click' | 'start';
+const FILE_ONLY = new Set(['select', 'heal', 'convert', 'error', 'click', 'start', 'bell']);
+type FileOnly = 'select' | 'heal' | 'convert' | 'error' | 'click' | 'start' | 'bell';
 /**
  * Sounds that play quieter than the rest, as a share of the common loudness. Orders are heard
  * all the time, so they stay in the background; monks heal and convert for long stretches, so
  * theirs are only a murmur.
  */
 const QUIETER: Record<string, number> = { order: 0.45, click: 0.45, heal: 0.2, convert: 0.2 };
+/** Sounds that must not overlap: [name prefix, milliseconds between them]. */
+const SPACED: [string, number][] = [['order.move.', 1300]];
 /** How loud every file is made: the loudness of its sounding part, as an RMS level (about -18 dB). */
 const TARGET_RMS = 0.126;
 
@@ -228,6 +230,10 @@ export function play(name: SoundName | FileOnly | `${SoundName | FileOnly}.${str
   const base = name.split('.')[0];
   const now = performance.now();
   if (now - (lastPlayed.get(base) ?? -1e9) < gap) return;
+  // The troops' longer replies get room to finish before the next one starts.
+  const spaced = SPACED.find(([prefix]) => name.startsWith(prefix));
+  if (spaced && now - (lastPlayed.get(spaced[0]) ?? -1e9) < spaced[1]) return;
+  if (spaced) lastPlayed.set(spaced[0], now);
   lastPlayed.set(base, now);
   for (let key: string = name; ; key = key.slice(0, key.lastIndexOf('.'))) {
     if (playFile(key)) return;

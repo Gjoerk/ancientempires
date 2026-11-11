@@ -2,7 +2,7 @@ import { DEFS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS }
 import { MAP_SIZES, MAX_PLAYERS } from './map';
 import { runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
-import { activityOf, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, removePlayer, step, TICK_RATE } from './sim';
+import { activityOf, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
 
 /**
  * The authoritative game for one room. It knows nothing about networking:
@@ -47,6 +47,7 @@ export class GameHost {
   start(seed: number): void {
     this.state = createGame(seed, MAP_SIZES[this.settings.mapSize], this.settings.popLimit);
     for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot, this.players.get(slot)!.team, this.settings.quick);
+    placeRelics(this.state);
   }
 
   /** Ends the running game and sends everyone back to the lobby. */
@@ -115,8 +116,11 @@ export class GameHost {
       players: [...s.players.values()].map((p) => [
         p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
         p.age, mask(p.techs), mask(p.researching), ...RESOURCES.map((r) => workers.get(p.slot)?.[r] ?? 0),
+        // Whether the town bell has called the villagers in.
+        [...s.entities.values()].some((e) => e.owner === p.slot && e.recall) ? 1 : 0,
       ]),
       blessings: s.blessings,
+      relics: s.relics.map((r) => [round(r.x), round(r.y), r.carrier, r.monastery]),
       tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths, rallies, winner: s.winner,
     };
   }

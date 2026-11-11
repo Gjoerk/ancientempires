@@ -21,6 +21,8 @@ import {
   PlayerInfo,
   QUEUE_ITEMS,
   Res,
+  RELIC_ATTACK,
+  RELIC_MAX,
   Stance,
   RESOURCES,
   ServerMessage,
@@ -45,7 +47,7 @@ import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { effectsState, musicState, nextTrack, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
-import { drawProp, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
+import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
 
 interface View {
   id: number;
@@ -85,6 +87,32 @@ interface PlayerView {
   researching: number;
   /** Villagers gathering each resource. */
   workers: Record<string, number>;
+  /** The town bell has called the villagers in. */
+  bell: boolean;
+}
+
+/** Relics: [x, y, carrying monk or -1, keeping monastery or -1]. */
+let relics: [number, number, number, number][] = [];
+
+/** Relics kept by a player, as they count for the attack bonus. */
+function relicsKept(owner: number): number {
+  return Math.min(RELIC_MAX, relics.filter((r) => r[3] >= 0 && views.get(r[3])?.owner === owner).length);
+}
+
+/** The relic lying on the ground near a point on screen, if any. */
+function relicAt(sx: number, sy: number): number {
+  let best = -1;
+  let bestD = 16;
+  relics.forEach(([x, y, carrier, monastery], i) => {
+    if (carrier >= 0 || monastery >= 0 || !map || !explored[Math.floor(y) * map.size + Math.floor(x)]) return;
+    const [rx, ry] = tileToScreen(x, y);
+    const d = Math.hypot(rx - sx, ry - 6 - sy);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  });
+  return best;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -114,6 +142,8 @@ let winner = -1;
 let popLimit = 100;
 /** Villagers that were given orders, most recent last, for copying a job with T. */
 const orderedVillagers: number[] = [];
+/** The building a villager was last told to put up, by villager id, while that is their latest order. */
+const placedBy = new Map<number, Kind>();
 let gameTick = 0;
 let snapTime = 0;
 let centred = false;
@@ -716,6 +746,8 @@ function send(cmd: Command): void {
   if ('ids' in cmd && cmd.type !== 'copy') {
     const v = cmd.ids.map((id) => views.get(id)).find((u) => u?.kind === 'villager');
     if (v) {
+      if (cmd.type === 'place') placedBy.set(v.id, cmd.kind);
+      else placedBy.delete(v.id);
       const at = orderedVillagers.indexOf(v.id);
       if (at >= 0) orderedVillagers.splice(at, 1);
       orderedVillagers.push(v.id);
@@ -729,10 +761,18 @@ function copyLastJob(): void {
   const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
   if (ids.length === 0) return;
   const from = [...orderedVillagers].reverse().find((id) => !ids.includes(id) && views.get(id)?.owner === me);
-  if (from !== undefined) {
-    send({ type: 'copy', ids, from });
+  if (from === undefined) return;
+  // The last villager was sent to put up a new building: the next one gets to place one of those too.
+  const kind = placedBy.get(from);
+  if (kind) {
+    const full = !!DEFS[kind].housing && housingNow() >= popLimit;
+    if (!ageAllows(kind) || !canAfford(DEFS[kind].cost) || full) return void play('error', 250);
+    placing = kind;
     play('order.copy');
+    return;
   }
+  send({ type: 'copy', ids, from });
+  play('order.copy');
 }
 
 function renderPlayers(): void {
@@ -850,7 +890,8 @@ function onMessage(msg: ServerMessage): void {
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
     let defeatChanged = false;
     gameTick = msg.tick;
-    for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching, w0, w1, w2, w3] of msg.players) {
+    relics = msg.relics;
+    for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching, w0, w1, w2, w3, bell] of msg.players) {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
       if (old && age > old.age) {
@@ -875,7 +916,7 @@ function onMessage(msg: ServerMessage): void {
       }
       players.set(slot, {
         res: { food, wood, gold, stone }, pop, cap, defeated: defeated === 1, age, techs, researching,
-        workers: { food: w0, wood: w1, gold: w2, stone: w3 },
+        workers: { food: w0, wood: w1, gold: w2, stone: w3 }, bell: bell === 1,
       });
     }
     if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
@@ -954,6 +995,9 @@ function resetGame(): void {
   document.body.append($('music'));
   $('bottom').hidden = true;
   $('banner').hidden = true;
+  $('end').hidden = true;
+  endShown = false;
+  relics = [];
 }
 
 function showLobby(message: string): void {
@@ -1060,6 +1104,14 @@ $('size-select').addEventListener('change', (ev) => session?.host?.setMapSize((e
 $('quick-box').addEventListener('change', (ev) => session?.host?.setQuickStart((ev.target as HTMLInputElement).checked));
 $('leave-btn').addEventListener('click', () => session?.close());
 $('switch-btn').addEventListener('click', () => switchTeam());
+$('rematch-btn').addEventListener('click', () => {
+  // The same players and settings on a new map, at once.
+  session?.host?.backToLobby();
+  session?.host?.start();
+});
+$('newgame-btn').addEventListener('click', () => session?.host?.backToLobby());
+$('exit-btn').addEventListener('click', () => session?.close());
+$('end-look').addEventListener('click', () => ($('end').hidden = true));
 $('end-btn').addEventListener('click', () => {
   if (confirm('End this game for everyone and go back to the lobby?')) session?.host?.backToLobby();
 });
@@ -1203,6 +1255,17 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
     return;
   }
   const ids = units.map((v) => v.id);
+  // Monks sent to a relic pick it up; the others just go there.
+  const relic = relicAt(sx, sy);
+  const monks = units.filter((v) => v.kind === 'monk');
+  if (relic >= 0 && monks.length > 0 && !attackMove) {
+    send({ type: 'fetch', ids: monks.map((v) => v.id), relic });
+    const rest = units.filter((v) => v.kind !== 'monk');
+    if (rest.length) send({ type: 'move', ids: rest.map((v) => v.id), x: relics[relic][0], y: relics[relic][1] });
+    marker = { x: relics[relic][0], y: relics[relic][1], t: performance.now() };
+    play('order');
+    return;
+  }
   marker = { x: tx, y: ty, t: performance.now() };
   if (attackMove) {
     send({ type: 'amove', ids, x: tx, y: ty });
@@ -1674,7 +1737,11 @@ $('actions').addEventListener('click', (ev) => {
   // Not enough resources: nothing is queued or placed.
   if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return void play('error', 250);
   if (!button.dataset.train) play('click', 60);
-  const { build, train, cancel, eject, sell, buy, stance } = button.dataset;
+  const { build, train, cancel, eject, sell, buy, stance, bell } = button.dataset;
+  if (bell) {
+    send({ type: 'bell' });
+    play('bell', 300);
+  }
   if (stance) send({ type: 'stance', ids: ownSelectedUnits().map((v) => v.id), stance: stance as Stance });
   if (sell) send({ type: 'trade', building: Number(button.dataset.at), res: sell as Res, buy: false });
   if (buy) send({ type: 'trade', building: Number(button.dataset.at), res: buy as Res, buy: true });
@@ -1895,7 +1962,10 @@ function renderPanel(): void {
       card.building = true;
       card.sub = `Under construction · ${v.extra}%`;
     } else card.bar = [v.hp, maxHp(v)];
-    if (def.attack) card.stats.push(['sword', String(attackOf(v.kind, theirs))]);
+    if (def.attack) {
+      const extra = v.kind === 'villager' ? 0 : relicsKept(v.owner) * RELIC_ATTACK;
+      card.stats.push(['sword', extra ? `${attackOf(v.kind, theirs) + extra} (+${extra} relics)` : String(attackOf(v.kind, theirs))]);
+    }
     if ((def.range ?? 0) > 2) card.stats.push(['bow', String(rangeOf(v.kind, theirs))]);
     if (!isBuilding(v.kind) || def.attack) card.stats.push(['shield', String(armorOf(v.kind, theirs))]);
     if (!isBuilding(v.kind) && v.extra % 100 > 0) card.stats.push([RESOURCES[Math.floor(v.extra / 100) % 10], `carrying ${v.extra % 100}`]);
@@ -1905,6 +1975,14 @@ function renderPanel(): void {
     if (DEFS[v.kind].garrison && v.extra >= 100) {
       if (v.task === 1) card.sub = `${v.target} sheltering inside`;
       if (v.task && v.owner === me) buttons.push({ label: 'Send everyone out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
+    }
+    if (v.kind === 'towncenter' && v.owner === me && v.extra >= 100) {
+      const rung = players.get(me)?.bell === true;
+      buttons.push({ label: rung ? 'Back to work' : 'Ring the bell', icon: rung ? 'allclear' : 'bell', detail: describeAction(rung ? 'allclear' : 'bell'), data: { bell: '1' } });
+    }
+    if (v.kind === 'monastery' && v.extra >= 100) {
+      const kept = relics.filter((r) => r[3] === v.id).length;
+      card.sub = kept ? `Keeps ${kept} relic${kept > 1 ? 's' : ''}: +${relicsKept(v.owner) * RELIC_ATTACK} attack for the whole army` : v.owner === me ? 'Bring relics here with monks for extra attack' : card.sub;
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
     if (queue) {
@@ -2217,6 +2295,8 @@ function renderHud(): void {
   // Housing is full: nothing more can be trained until a house is built.
   const pop = stat('house', `${p.pop}/${p.cap}`, `Population / housing — at most ${popLimit} in this game`, `max ${popLimit}`);
   if (p.pop >= p.cap && p.cap < popLimit) pop.classList.add('warn');
+  const kept = relicsKept(me);
+  if (kept) stat('relic', `+${kept * RELIC_ATTACK}`, `${kept} relic${kept > 1 ? 's' : ''} in your monasteries: +${kept * RELIC_ATTACK} attack for your army`);
   stat('', AGE_NAMES[p.age] ?? '', 'Your age').classList.add('age');
   stat('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Game time');
 
@@ -2230,6 +2310,23 @@ function renderHud(): void {
   if (winner >= 0 && winner !== myTeam) text += ` ${roster.filter((q) => q.team === winner).map((q) => q.name).join(' and ') || 'Another team'} won.`;
   banner.textContent = text.trim();
   banner.hidden = !text;
+  if (winner >= 0 && !endShown) showEnd(winner === myTeam);
+}
+
+/** Whether the end-of-game dialog has been shown for this game (it can be closed to look around). */
+let endShown = false;
+
+function showEnd(won: boolean): void {
+  endShown = true;
+  const names = roster.filter((q) => q.team === winner).map((q) => q.name).join(' and ');
+  $('end-title').textContent = won ? 'Victory!' : 'Defeat';
+  $('end-text').textContent = won ? 'Yours is the last king standing.' : `${names || 'Another team'} won this time.`;
+  // Only the host can start the next game; everyone can leave.
+  const host = !!session?.host;
+  $('rematch-btn').hidden = !host;
+  $('newgame-btn').hidden = !host;
+  $('end-wait').hidden = host;
+  $('end').hidden = false;
 }
 
 let minimapTime = 0;
@@ -2252,6 +2349,12 @@ function renderMinimap(): void {
     const s = isBuilding(v.kind) ? sizeOf(v.kind) + 0.5 : v.kind === 'king' ? 2.2 : 1.6;
     const [cx, cy] = centreOf(v);
     mctx.fillRect(cx - s / 2, cy - s / 2, s, s);
+  }
+  // Relics lying where they have been seen, in gold.
+  mctx.fillStyle = '#ffe680';
+  for (const [x, y, carrier, monastery] of relics) {
+    if (carrier >= 0 || monastery >= 0 || (!revealAll && !explored[Math.floor(y) * map!.size + Math.floor(x)])) continue;
+    mctx.fillRect(x - 1, y - 1, 2, 2);
   }
   if (fogMini && !revealAll) mctx.drawImage(fogMini, 0, 0);
   if (minimapPing) {
@@ -2644,6 +2747,24 @@ function frame(now: number): void {
     // Trees sway a little all the time, and lean with a passing gust.
     const lean = tile === Tile.Forest ? breeze.lean(sx + cam.x - viewW() / 2, sy + cam.y - viewH() / 2, now) : 0;
     drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now, lean) });
+  }
+  // Relics: on the ground where seen, or held up by the monk carrying them.
+  for (const [x, y, carrier, monastery] of relics) {
+    if (monastery >= 0) continue;
+    if (carrier >= 0) {
+      const monk = views.get(carrier);
+      if (!monk || !canSee(monk)) continue;
+      const [mx, my] = viewPos(monk, alpha);
+      drawables.push({ depth: mx + monk.ox + my + monk.oy + 0.01, draw: () => {
+        const [sx, sy] = tileToScreen(mx + monk.ox, my + monk.oy);
+        drawRelic(ctx, sx + 6, sy - 24, now, true);
+      } });
+      continue;
+    }
+    if (!revealAll && !explored[Math.floor(y) * map.size + Math.floor(x)]) continue;
+    const [sx, sy] = tileToScreen(x, y);
+    if (sx < -30 || sy < -30 || sx > viewW() + 30 || sy > viewH() + 30) continue;
+    drawables.push({ depth: x + y, draw: () => drawRelic(ctx, sx, sy, now, false) });
   }
   const onScreen = (tx: number, ty: number, margin: number) => {
     const [x, y] = tileToScreen(tx, ty);

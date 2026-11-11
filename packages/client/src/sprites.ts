@@ -258,3 +258,31 @@ export function shade(color: string, f: number): string {
   const n = parseInt(color.slice(1), 16);
   return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
 }
+
+// A relic: a small golden shrine with a cross and a red gem, glinting now and then.
+const RELIC = [
+  '.....w.....',
+  '....www....',
+  '.....w.....',
+  '..ooooooo..',
+  '.oyyyyyyyo.',
+  'oyyyyryyyyo',
+  'oyYyyyyyYyo',
+  'oyYyyyyyYyo',
+  'oYYYYYYYYYo',
+  '.ooooooooo.',
+];
+const RELIC_PALETTE: Record<string, string> = { o: '#6b4a1a', y: '#f2c93a', Y: '#c99a20', r: '#c8302f', w: '#fff4c2' };
+
+/** Draws a relic with its foot at (x, y); `carried` draws it smaller, held up by a monk. */
+export function drawRelic(ctx: Ctx, x: number, y: number, now: number, carried: boolean): void {
+  if (!carried) shadow(ctx, x, y, 7, 3);
+  blit(ctx, RELIC, RELIC_PALETTE, x, y + (carried ? 0 : Math.sin(now / 600) * 1.2 - 1), carried ? 1 : 2);
+  // A glint that sweeps across now and then.
+  const k = (now % 2600) / 2600;
+  if (k < 0.25) {
+    ctx.fillStyle = `rgba(255,255,230,${(Math.sin((k / 0.25) * Math.PI) * 0.9).toFixed(3)})`;
+    const s = carried ? 1 : 2;
+    ctx.fillRect(Math.round(x - 4 * s + k * 32 * s), Math.round(y - 8 * s), s, 3 * s);
+  }
+}

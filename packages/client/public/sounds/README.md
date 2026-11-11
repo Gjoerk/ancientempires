@@ -37,6 +37,7 @@ folder and list it in `manifest.json`; anything not listed keeps its built-in so
 | `start` | A game starts | (none: silent without a file) | 1–3 s |
 | `click` | An interface button is pressed (menus, music, top bar; build buttons in the bottom bar) | (none) | 0.05–0.2 s |
 | `error` | Something cannot be done: not enough resources, houses full, a locked button, a building where it does not fit | (none) | 0.2–0.5 s |
+| `bell` | You ring the town bell (calling villagers in, or sending them back) | (none) | 1–2 s |
 | `heal` | A monk heals someone in sight (at most every 1.5 s) | (none) | 0.3–1 s |
 | `convert` | A monk tries to convert someone in sight (at most every 2.5 s) | (none) | 0.5–1.5 s |
 

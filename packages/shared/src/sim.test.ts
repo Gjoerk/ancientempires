@@ -649,3 +649,48 @@ test('a building deleted between ticks is reported in the next snapshot, once', 
   const after = host.tick();
   assert.ok(after && after.t === 'snap' && after.deaths.length === 0);
 });
+
+test('the town bell calls villagers in, and rung again sends them back to their work', () => {
+  const s = createGame(85);
+  addPlayer(s, 0);
+  const villagers = owned(s, 0, 'villager');
+  const [a] = villagers;
+  const tree = findTile(s, Tile.Forest, s.map.starts[0]);
+  applyCommand(s, 0, { type: 'gather', ids: [a.id], tile: tree });
+  run(s, 5);
+  applyCommand(s, 0, { type: 'bell' });
+  run(s, 200);
+  assert.ok(villagers.every((v) => v.inside >= 0), 'everyone inside');
+  applyCommand(s, 0, { type: 'bell' });
+  assert.ok(villagers.every((v) => v.inside < 0 && v.recall === undefined), 'everyone out');
+  assert.ok(a.order.t === 'gather' && a.order.tile === tree, 'back to the tree');
+});
+
+test('a monk carries a relic to the monastery, which gives the army extra attack', () => {
+  const host = new GameHost('TEST');
+  host.join('Me');
+  host.start(9);
+  const s = host.state!;
+  assert.ok(s.relics.length >= 2, 'relics on the map');
+  for (const r of s.relics) for (const [sx, sy] of s.map.starts) assert.ok(Math.hypot(r.x - sx, r.y - sy) > s.map.size * 0.2, 'away from towns');
+  const relic = s.relics[0];
+  const tc = owned(s, 0, 'towncenter')[0];
+  const monastery = spawn(s, 0, 'monastery', tc.x + 5, tc.y + 5);
+  const monk = spawn(s, 0, 'monk', relic.x + 1, relic.y);
+  // Brought within a few steps of home, so that the walk is short.
+  const swordsman = spawn(s, 0, 'swordsman', tc.x - 3, tc.y);
+  const target = spawn(s, 1, 'villager', tc.x - 3, tc.y + 1);
+  host.command(0, { type: 'fetch', ids: [monk.id], relic: 0 });
+  for (let i = 0; i < 20 && relic.carrier < 0; i++) host.tick();
+  assert.equal(relic.carrier, monk.id);
+  [monk.x, monk.y] = [monastery.x - 0.5, monastery.y + 1.5];
+  monk.path = [];
+  for (let i = 0; i < 40 && relic.monastery < 0; i++) host.tick();
+  assert.equal(relic.monastery, monastery.id);
+  // A blow now does one more damage than before.
+  const before = target.hp;
+  swordsman.order = { t: 'attack', id: target.id, auto: false };
+  swordsman.cooldown = 0;
+  for (let i = 0; i < 5 && target.hp === before; i++) host.tick();
+  assert.equal(before - target.hp, attackOf('swordsman', () => false) - armorOf('villager', () => false) + 1);
+});
