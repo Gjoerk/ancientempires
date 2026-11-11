@@ -760,6 +760,7 @@ function onMessage(msg: ServerMessage): void {
     $('waiting').style.display = '';
   } else if (msg.t === 'start') {
     resetGame();
+    play('start');
     me = myOwnSlot = msg.you;
     map = generateMap(msg.seed, msg.size);
     popLimit = msg.popLimit;
@@ -828,7 +829,12 @@ function onMessage(msg: ServerMessage): void {
     for (const [from, to, kind] of msg.blessings) {
       const a = views.get(from);
       const b = views.get(to);
-      if (a && b && (canSee(a) || canSee(b))) blessings.push({ from, to, kind, t: now });
+      if (a && b && (canSee(a) || canSee(b))) {
+        blessings.push({ from, to, kind, t: now });
+        // Healing and converting go on for a while: the sound comes now and then, not with every pulse.
+        if (kind === 1) play('heal', 1500);
+        else play('convert', 2500);
+      }
     }
     for (const [kindIdx, x, y, owner] of msg.deaths) {
       const kind = KINDS[kindIdx];
@@ -1225,7 +1231,7 @@ function placeAtCursor(keep: boolean): void {
   if (!placing || !map) return;
   const [x, y] = placementSpot();
   const ids = ownSelectedUnits().filter((v) => v.kind === 'villager').map((v) => v.id);
-  if (!canPlace(map, placing, x, y) || !canAfford(DEFS[placing].cost)) return;
+  if (!canPlace(map, placing, x, y) || !canAfford(DEFS[placing].cost)) return void play('error', 250);
   // With Shift the site goes on the villagers' list instead of replacing what they are building.
   send({ type: 'place', ids, kind: placing, x, y, queue: keep });
   play(`order.place.${placing}`);
@@ -1559,6 +1565,11 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+// Interface buttons click when pressed; the action buttons in the bottom bar have their own sounds.
+document.addEventListener('click', (ev) => {
+  const button = (ev.target as HTMLElement).closest?.('button');
+  if (button && !button.closest('#actions')) play('click', 60);
+});
 // Music and sound effects: each has a button to switch it on and off and a slider for how loud it is.
 function showAudio(): void {
   const music = musicState();
@@ -1643,7 +1654,10 @@ $('actions').addEventListener('click', (ev) => {
   focusButton(button);
   // A press-and-hold only showed the details; it does not also use the button.
   if (pressShown) return void (pressShown = false);
-  if (button.classList.contains('locked')) return;
+  if (button.classList.contains('locked')) return void play('error', 250);
+  // Not enough resources: nothing is queued or placed.
+  if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return void play('error', 250);
+  if (!button.dataset.train) play('click', 60);
   const { build, train, cancel, eject, sell, buy, stance } = button.dataset;
   if (stance) send({ type: 'stance', ids: ownSelectedUnits().map((v) => v.id), stance: stance as Stance });
   if (sell) send({ type: 'trade', building: Number(button.dataset.at), res: sell as Res, buy: false });

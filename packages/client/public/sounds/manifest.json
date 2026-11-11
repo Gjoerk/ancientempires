@@ -36,5 +36,10 @@
   "order.enter": "order_entering.ogg",
   "order.gather.gold": "order_goldstone.ogg",
   "order.gather.stone": "order_goldstone.ogg",
-  "order.gather.wood": "order_wood.ogg"
+  "order.gather.wood": "order_wood.ogg",
+  "heal": "healconvert.ogg",
+  "convert": "healconvert.ogg",
+  "error": "error.ogg",
+  "click": "click.ogg",
+  "start": "victory.ogg"
 }

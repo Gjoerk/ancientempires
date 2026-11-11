@@ -151,7 +151,8 @@ export type SoundName = keyof typeof SOUNDS;
 const custom = new Map<string, { buffer: AudioBuffer; gain: number }[]>();
 let customLoading = false;
 /** Sounds that have no built-in version and stay silent unless a file is given. */
-const FILE_ONLY = new Set(['select']);
+const FILE_ONLY = new Set(['select', 'heal', 'convert', 'error', 'click', 'start']);
+type FileOnly = 'select' | 'heal' | 'convert' | 'error' | 'click' | 'start';
 /**
  * Sounds that play quieter than the rest, as a share of the common loudness. Orders are heard
  * all the time, so they stay in the background.
@@ -221,7 +222,7 @@ function loadCustomSounds(): void {
  * into noise. `name` may carry details after dots, like "built.farm": the most detailed sound
  * file there is gets played, else the general one, else the built-in sound.
  */
-export function play(name: SoundName | `${SoundName | 'select'}.${string}` | 'select', gap = 90): void {
+export function play(name: SoundName | FileOnly | `${SoundName | FileOnly}.${string}`, gap = 90): void {
   if (muted || !ctx) return;
   const base = name.split('.')[0];
   const now = performance.now();
