@@ -141,13 +141,14 @@ const SOUNDS = {
 export type SoundName = keyof typeof SOUNDS;
 
 /**
- * Your own sound files, listed in public/sounds/manifest.json as { "<sound name>": "file.ogg" }.
+ * Your own sound files, listed in public/sounds/manifest.json as { "<sound name>": "file.ogg" },
+ * or with a list of files to pick one at random each time: { "built.mill": ["a.ogg", "b.ogg"] }.
  * A name can be general ("built") or more detailed ("built.farm", "order.gather.wood"); the most
  * detailed one there is gets played, so detailed files are optional. Anything without a file keeps
  * its built-in sound. Each file is measured when it loads and turned up or down so that all of them
  * sound about equally loud.
  */
-const custom = new Map<string, { buffer: AudioBuffer; gain: number }>();
+const custom = new Map<string, { buffer: AudioBuffer; gain: number }[]>();
 let customLoading = false;
 /** Sounds that have no built-in version and stay silent unless a file is given. */
 const FILE_ONLY = new Set(['select']);
@@ -182,15 +183,29 @@ function loadCustomSounds(): void {
   const audio = ctx;
   void fetch('sounds/manifest.json', { cache: 'no-cache' })
     .then((res) => (res.ok ? res.json() : {}))
-    .then((list: Record<string, string>) => {
-      for (const [name, file] of Object.entries(list)) {
+    .then((list: Record<string, string | string[]>) => {
+      // The same file may be listed for several sounds: it is fetched and decoded once.
+      const decoded = new Map<string, Promise<{ buffer: AudioBuffer; gain: number }>>();
+      const load = (file: string) => {
+        let job = decoded.get(file);
+        if (!job) {
+          job = fetch('sounds/' + file)
+            .then((res) => res.arrayBuffer())
+            .then((data) => audio.decodeAudioData(data))
+            .then((buffer) => ({ buffer, gain: levelOf(buffer) }));
+          decoded.set(file, job);
+        }
+        return job;
+      };
+      for (const [name, files] of Object.entries(list)) {
         const base = name.split('.')[0];
-        if ((!(base in SOUNDS) && !FILE_ONLY.has(base)) || typeof file !== 'string') continue;
-        void fetch('sounds/' + file)
-          .then((res) => res.arrayBuffer())
-          .then((data) => audio.decodeAudioData(data))
-          .then((buffer) => custom.set(name, { buffer, gain: levelOf(buffer) }))
-          .catch(() => console.warn(`Sound "${name}" (${file}) could not be loaded; the built-in one is used.`));
+        if (!(base in SOUNDS) && !FILE_ONLY.has(base)) continue;
+        for (const file of Array.isArray(files) ? files : [files]) {
+          if (typeof file !== 'string') continue;
+          void load(file)
+            .then((sound) => custom.set(name, [...(custom.get(name) ?? []), sound]))
+            .catch(() => console.warn(`Sound "${name}" (${file}) could not be loaded; the built-in one is used.`));
+        }
       }
     })
     .catch(() => undefined);
@@ -208,19 +223,40 @@ export function play(name: SoundName | `${SoundName | 'select'}.${string}` | 'se
   if (now - (lastPlayed.get(base) ?? -1e9) < gap) return;
   lastPlayed.set(base, now);
   for (let key: string = name; ; key = key.slice(0, key.lastIndexOf('.'))) {
-    const sound = custom.get(key);
-    if (sound) {
-      const src = ctx.createBufferSource();
-      src.buffer = sound.buffer;
-      const gain = ctx.createGain();
-      gain.gain.value = sound.gain;
-      src.connect(gain).connect(output());
-      src.start();
-      return;
-    }
+    if (playFile(key)) return;
     if (!key.includes('.')) break;
   }
   if (base in SOUNDS) SOUNDS[base as SoundName]();
+}
+
+/** Plays one of the files given for exactly this name, if there are any. */
+function playFile(name: string): boolean {
+  const takes = custom.get(name);
+  if (!ctx || !takes?.length) return false;
+  const sound = takes[Math.floor(Math.random() * takes.length)];
+  const src = ctx.createBufferSource();
+  src.buffer = sound.buffer;
+  const gain = ctx.createGain();
+  gain.gain.value = sound.gain;
+  src.connect(gain).connect(output());
+  src.start();
+  return true;
+}
+
+/**
+ * Plays the first of these names that has a sound file, and nothing if none has: for sounds
+ * that are only heard when they were made, like clicking a building.
+ */
+export function playFirstFile(names: string[], gap = 150): void {
+  if (muted || !ctx) return;
+  const now = performance.now();
+  if (now - (lastPlayed.get('select') ?? -1e9) < gap) return;
+  for (const name of names) {
+    if (playFile(name)) {
+      lastPlayed.set('select', now);
+      return;
+    }
+  }
 }
 
 // --- background music ------------------------------------------------------------------------

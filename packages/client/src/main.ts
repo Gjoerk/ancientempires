@@ -44,7 +44,7 @@ import { paintGround } from './ground';
 import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
-import { effectsState, musicState, play, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
+import { effectsState, musicState, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
 
 interface View {
@@ -1184,7 +1184,8 @@ function clickSelect(sx: number, sy: number): void {
     return;
   }
   selected.add(v.id);
-  if (v.owner === me) play(`select.${v.kind}`, 150);
+  // Clicking your own building plays its sound: its own select sound if there is one, else the one for finishing it.
+  if (v.owner === me) playFirstFile(isBuilding(v.kind) ? [`select.${v.kind}`, `built.${v.kind}`, 'select', 'built'] : [`select.${v.kind}`, 'select']);
   // Selecting something of a test opponent hands control to that side.
   if (v.owner !== me && controllable().includes(v.owner)) {
     selected.clear();

@@ -35,6 +35,11 @@ folder and list it in `manifest.json`; anything not listed keeps its built-in so
 | `victory` | Your team wins | victory fanfare | 1–3 s |
 | `defeat` | You are defeated | falling notes | 1–3 s |
 
+## Several takes
+
+List several files for one name and one is picked at random each time, so a sound heard often
+does not repeat: `"built.mill": ["mill-a.ogg", "mill-b.ogg"]`. One file can serve several names.
+
 ## Detailed sounds (optional)
 
 Any sound can be made more specific by adding details after a dot. The most detailed file that
@@ -43,7 +48,7 @@ ones you want. `select` sounds are new: they stay silent unless you give a file.
 
 | Name | When it plays |
 | --- | --- |
-| `select`, `select.<kind>` | You click one of your own units or buildings, e.g. `select.house`, `select.villager`, `select.king` |
+| `select`, `select.<kind>` | You click one of your own units or buildings, e.g. `select.house`, `select.villager`, `select.king`. A building without its own select sound plays its `built.<kind>` sound (or `built`) |
 | `order.move` | Units sent somewhere |
 | `order.attack` | Attack order or attack-move |
 | `order.gather.wood` / `.berries` / `.gold` / `.stone` | Villagers sent to gather |
