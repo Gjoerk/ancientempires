@@ -632,3 +632,20 @@ test('defensive soldiers wait until struck, then fight back', () => {
   applyCommand(s, 0, { type: 'stance', ids: [guard.id], stance: 'aggressive' });
   assert.equal(guard.stance, undefined);
 });
+
+test('a building deleted between ticks is reported in the next snapshot, once', () => {
+  const host = new GameHost('TEST');
+  host.join('Me');
+  host.start(5);
+  const s = host.state!;
+  host.tick();
+  const tc = owned(s, 0, 'towncenter')[0];
+  const house = spawn(s, 0, 'house', tc.x + 5, tc.y + 5);
+  host.tick();
+  host.command(0, { type: 'delete', id: house.id });
+  const snap = host.tick();
+  assert.ok(snap && snap.t === 'snap');
+  assert.equal(snap.deaths.filter((d) => d[0] === 8).length, 1);
+  const after = host.tick();
+  assert.ok(after && after.t === 'snap' && after.deaths.length === 0);
+});

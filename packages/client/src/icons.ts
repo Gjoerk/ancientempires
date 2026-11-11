@@ -274,6 +274,14 @@ export function clearIcons(): void {
   cache.clear();
 }
 
+/** The age building pictures on buttons are shown in: the player's own. */
+let iconAge = 1;
+export function setIconAge(age: number): void {
+  if (age === iconAge) return;
+  iconAge = age;
+  cache.clear();
+}
+
 function glyph(c: CanvasRenderingContext2D, name: string, team: string, x: number, y: number, px: number): void {
   const rows = GLYPHS[name];
   if (!rows) return;
@@ -295,7 +303,7 @@ function thing(c: CanvasRenderingContext2D, kind: Kind, owner: number, box: numb
     const scale = Math.min(1, (box - 4) / (s * 64 + 6), (box - 2) / (s * 32 + (kind === 'tower' ? 66 : kind === 'castle' ? 60 : 44)));
     c.translate(left + box / 2, top + box - 3 - s * 32 * scale);
     c.scale(scale, scale);
-    drawBuilding(c, kind, owner, 1, 0, 0, { built: 1, kingInside: false, now: 0 });
+    drawBuilding(c, kind, owner, 1, 0, 0, { built: 1, kingInside: false, now: 0, age: iconAge });
   } else {
     // As large as fits, in whole steps of a half so the pixels stay even.
     const fit = Math.min((box - 6) / unitHeight(kind), (box - 2) / unitWidth(kind));

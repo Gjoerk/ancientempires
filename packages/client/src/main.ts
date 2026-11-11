@@ -38,7 +38,7 @@ import {
 import { hostGame, joinGame, normaliseCode, Session } from './net';
 import { loadSprites } from './assets';
 import { drawBuilding } from './buildings';
-import { clearIcons, icon } from './icons';
+import { clearIcons, icon, setIconAge } from './icons';
 import { installMenuArt } from './menu-art';
 import { paintGround } from './ground';
 import { Breeze } from './breeze';
@@ -787,6 +787,16 @@ function onMessage(msg: ServerMessage): void {
     for (const [slot, food, wood, gold, stone, pop, cap, defeated, age, techs, researching, w0, w1, w2, w3] of msg.players) {
       const old = players.get(slot);
       if (old?.defeated !== (defeated === 1)) defeatChanged = true;
+      if (old && age > old.age) {
+        // A new age: the player's buildings change to its style, each in a puff of dust.
+        for (const b of views.values()) {
+          if (b.owner !== slot || !isBuilding(b.kind) || !canSee(b)) continue;
+          const half = sizeOf(b.kind) / 2;
+          puffs.push({ x: b.x + half, y: b.y + half, t: now, big: true });
+        }
+        if (slot === me) setIconAge(age);
+      }
+      if (slot === me && !old) setIconAge(age);
       if (slot === me && old) {
         if (age > old.age) play(`age.${age}`);
         else if (techs !== old.techs) {
@@ -847,6 +857,7 @@ function underAttack(v: View, now: number): void {
 
 /** Clears everything that belongs to a running game. */
 function resetGame(): void {
+  setIconAge(1);
   me = -1;
   revealAll = false;
   centred = false;
@@ -2209,7 +2220,7 @@ function drawBuildingView(v: View): void {
     ctx.stroke();
   }
   const sheltering = !!DEFS[v.kind].garrison;
-  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: sheltering && (v.task & 1) !== 0, now: performance.now() });
+  drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: sheltering && (v.task & 1) !== 0, now: performance.now(), age: players.get(v.owner)?.age ?? 1 });
   if ((v.kind === 'farm' || v.kind === 'wall') && v.extra >= 100 && v.hp >= def.hp && !selected.has(v.id)) return;
   // Bars sit above the roof line of tall buildings.
   const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);

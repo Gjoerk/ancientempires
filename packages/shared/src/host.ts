@@ -107,6 +107,9 @@ export class GameHost {
       }
       if (e.rally) rallies.push([e.id, e.rally[0], e.rally[1]]);
     }
+    // The deaths go out with this snapshot; whatever dies from now on goes in the next one.
+    const deaths = s.deaths;
+    s.deaths = [];
     return {
       t: 'snap', tick: s.tick, ents, queues,
       players: [...s.players.values()].map((p) => [
@@ -114,7 +117,7 @@ export class GameHost {
         p.age, mask(p.techs), mask(p.researching), ...RESOURCES.map((r) => workers.get(p.slot)?.[r] ?? 0),
       ]),
       blessings: s.blessings,
-      tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths: s.deaths, rallies, winner: s.winner,
+      tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths, rallies, winner: s.winner,
     };
   }
 }

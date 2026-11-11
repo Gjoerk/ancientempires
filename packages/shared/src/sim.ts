@@ -1089,7 +1089,10 @@ export function step(state: GameState): void {
   state.amountEvents = new Map();
   state.shots = [];
   state.hits = [];
-  state.deaths = [];
+  // Deaths are kept until they have been sent (GameHost starts a fresh list after each snapshot):
+  // units and buildings also go between ticks, when a player deletes one, and those must not be
+  // lost. Without a host the list is only kept from growing without end.
+  if (state.deaths.length > 500) state.deaths.splice(0, state.deaths.length - 500);
   state.blessings = [];
   updateOccupied(state);
   if (state.tick % 10 === 0) spreadIdleUnits(state);

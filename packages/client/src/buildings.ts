@@ -431,6 +431,8 @@ export interface BuildingState {
   occupied?: boolean;
   /** Time for animations; -1 while drawing the still picture that is kept and reused. */
   now: number;
+  /** The owner's age, 1 to 3: buildings are built of timber, then stone and plaster, then brick. */
+  age?: number;
 }
 
 type Design = (pen: Pen, team: string, state: BuildingState) => void;
@@ -1078,10 +1080,15 @@ const AGE_DESIGNS: Record<1 | 3, Partial<Record<Kind, Design>>> = {
   },
 };
 
+/** The design of a building in an age; buildings without a look of their own for it use the Town Age one. */
+function designFor(kind: Kind, age = 2): Design {
+  return (age === 1 || age === 3 ? AGE_DESIGNS[age][kind] : undefined) ?? DESIGNS[kind] ?? DESIGNS.house!;
+}
+
 /** Preview: draws one building as it looks in an age, with shadow and textures, at (sx, sy). */
 export function drawBuildingAge(ctx: Ctx, kind: Kind, age: number, owner: number, sx: number, sy: number): void {
   const team = PLAYER_COLORS[owner % PLAYER_COLORS.length];
-  const design = (age === 1 || age === 3 ? AGE_DESIGNS[age][kind] : undefined) ?? DESIGNS[kind] ?? DESIGNS.house!;
+  const design = designFor(kind, age);
   const state: BuildingState = { built: 1, kingInside: false, now: -1 };
   const shadowPen = new Pen(ctx, sx, sy, true);
   design(shadowPen, team, state);
@@ -1205,13 +1212,14 @@ export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, 
   }
   if (done) {
     // Finished buildings are drawn once into a picture and then copied; only moving parts are drawn live.
-    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}`;
+    const age = state.age ?? 2;
+    const key = `${kind}|${owner}|${kind === 'farm' ? seed : 0}|${age}`;
     let img = buildingCache.get(key);
     if (!img) {
       img = document.createElement('canvas');
       img.width = s * HW * 2 + CACHE_LEFT + CACHE_RIGHT;
       img.height = s * HH * 2 + CACHE_TOP + CACHE_BOTTOM;
-      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, now: -1 });
+      paintBuilding(img.getContext('2d')!, kind, team, seed, s * HW + CACHE_LEFT, CACHE_TOP, { built: 1, kingInside: false, now: -1, age });
       buildingCache.set(key, img);
     }
     ctx.drawImage(img, Math.round(sx) - s * HW - CACHE_LEFT, Math.round(sy) - CACHE_TOP);
@@ -1241,7 +1249,7 @@ function paintBuilding(ctx: Ctx, kind: Kind, team: string, seed: number, sx: num
     drawFarm(new Pen(ctx, sx, sy, false), team, state, seed);
     return;
   }
-  const design = DESIGNS[kind] ?? DESIGNS.house!;
+  const design = designFor(kind, state.age);
   if (state.built < 1) {
     // Building site: bare earth, a growing shell and scaffolding poles.
     const pen = new Pen(ctx, sx, sy, false);
