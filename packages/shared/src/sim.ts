@@ -22,7 +22,9 @@ export type Order =
   /** Walk to a town centre or castle and go inside (villagers and the king). */
   | { t: 'garrison'; id: number }
   /** Monks: restore a friendly unit's health. */
-  | { t: 'heal'; id: number }
+  | { t: 'heal'; id: number; back?: number }
+  /** A monk keeps close to an attack on `id` and heals whoever gets hurt there. */
+  | { t: 'escort'; id: number }
   /** Monks: win an enemy unit over; `progress` is in seconds. */
   | { t: 'convert'; id: number; progress: number }
   /** Monks: walk to a relic and pick it up. */
@@ -193,7 +195,10 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
     carry: 0, carryRes: 'food', work: 0, progress: built ? 1 : 0, queue: [], trainTicks: 0, inside: -1,
   };
   state.entities.set(e.id, e);
-  if (def.building) setBlocked(state.map, e, 1);
+  // A building site that nobody has started on yet is only a blueprint on the ground: it cannot be
+  // built over, but anyone can walk across it. It closes once the first builder sets to work.
+  if (def.building && (built || def.walkable)) setBlocked(state.map, e, 1);
+  else if (def.building) markBuilding(state.map, tx, ty, sizeOf(e), true, 1);
   // A farm's `carry` is the food left before it must be sown again.
   if (kind === 'farm') e.carry = FARM_FOOD;
   if (kind === 'gate') {
@@ -640,6 +645,8 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
         if (DEFS[e.kind].attack) e.order = { t: 'attack', id: target.id, auto: false };
         // Monks try to win enemy units over; kings and buildings cannot be converted.
         else if (DEFS[e.kind].converts && !isBuilding(target) && target.kind !== 'king') e.order = { t: 'convert', id: target.id, progress: 0 };
+        // A building (or a king) cannot be won over: monks follow the attack and heal the wounded.
+        else if (DEFS[e.kind].heal) e.order = { t: 'escort', id: target.id };
       } else if (target.owner !== slot) {
         // An ally: just walk over.
         moveUnits(state, [e], target.x, target.y);
@@ -683,15 +690,13 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     if (builders.length === 0 || !canPlace(map, cmd.kind, cmd.x, cmd.y) || !canAfford(player, def.cost)) return;
     pay(player, def.cost);
     const site = spawn(state, slot, cmd.kind, cmd.x, cmd.y, false);
-    if (!def.walkable) clearFootprint(state, rectOf(site));
     for (const e of builders) {
       if (cmd.queue && e.order.t === 'build') {
         // Already building: this site comes next on the list.
         (e.tasks ??= []).push(site.id);
       } else {
         e.order = { t: 'build', id: site.id };
-        // A builder standing on the site first walks off it; anyone else goes from where they are.
-        e.path = isInside(e, rectOf(site)) && e.path.length > 0 ? e.path.slice(0, 2) : [];
+        e.path = [];
       }
     }
   } else if (cmd.type === 'train') {
@@ -971,6 +976,12 @@ function stepBuild(state: GameState, e: Entity, o: Extract<Order, { t: 'build' }
     return;
   }
   const def = DEFS[site.kind];
+  if (site.progress === 0 && !def.walkable && state.map.blocked[site.y * state.map.size + site.x] === 0) {
+    // Work begins: the blueprint becomes a building site, and whoever stands on it walks off.
+    setBlocked(state.map, site, 1);
+    clearFootprint(state, rectOf(site));
+    if (e.path.length > 0) return;
+  }
   const perTick = 1 / (def.time * TICK_RATE);
   // Repairing a finished building goes at half the speed of building it.
   if (site.progress >= 1) site.hp = Math.min(def.hp, site.hp + def.hp * perTick * 0.5);
@@ -1214,9 +1225,11 @@ function stepGarrison(state: GameState, e: Entity, o: Extract<Order, { t: 'garri
 
 function stepHeal(state: GameState, e: Entity, o: Extract<Order, { t: 'heal' }>): void {
   const target = state.entities.get(o.id);
-  if (!target || isEnemy(state, target.owner, e.owner) || target.inside >= 0) return void (e.order = { t: 'idle' });
+  // Done: back to the attack being followed, if there is one.
+  const done = () => void (e.order = o.back !== undefined ? { t: 'escort', id: o.back } : { t: 'idle' });
+  if (!target || isEnemy(state, target.owner, e.owner) || target.inside >= 0) return done();
   const max = maxHpOf(target.kind, hasTech(state, target.owner));
-  if (target.hp >= max) return void (e.order = { t: 'idle' });
+  if (target.hp >= max) return done();
   if (distance(e, target) > 4) {
     if (e.path.length === 0 || (state.tick + e.id) % 5 === 0) {
       e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(target.x), Math.floor(target.y), teamOf(state, e.owner));
@@ -1226,6 +1239,47 @@ function stepHeal(state: GameState, e: Entity, o: Extract<Order, { t: 'heal' }>)
   e.path = [];
   target.hp = Math.min(max, target.hp + (DEFS[e.kind].heal ?? 1) / TICK_RATE);
   if (state.tick % 5 === 0) state.blessings.push([e.id, target.id, 1]);
+}
+
+/** How many tiles lie between a unit and a rectangle: 0 on it, 1 right next to it. */
+function gapTo(e: Entity, r: Rect): number {
+  const tx = Math.floor(e.x);
+  const ty = Math.floor(e.y);
+  return Math.max(r.x - tx, 0, tx - (r.x + r.s - 1), r.y - ty, ty - (r.y + r.s - 1));
+}
+
+const ESCORT_GAP = 5;
+
+function stepEscort(state: GameState, e: Entity, o: Extract<Order, { t: 'escort' }>): void {
+  const target = state.entities.get(o.id);
+  if (!target || !isEnemy(state, target.owner, e.owner) || target.inside >= 0) return void (e.order = { t: 'idle' });
+  const def = DEFS[e.kind];
+  // Heal whoever on our side is hurt worst nearby.
+  if ((state.tick + e.id) % 5 === 0) {
+    let best: Entity | undefined;
+    let worst = 0;
+    for (const f of state.entities.values()) {
+      if (f === e || isBuilding(f) || f.inside >= 0 || isEnemy(state, f.owner, e.owner) || distance(e, f) > (def.sight ?? 6)) continue;
+      const lack = maxHpOf(f.kind, hasTech(state, f.owner)) - f.hp;
+      if (lack > worst) {
+        worst = lack;
+        best = f;
+      }
+    }
+    if (best) {
+      e.order = { t: 'heal', id: best.id, back: o.id };
+      e.path = [];
+      return;
+    }
+  }
+  // Otherwise keep a few steps behind the fighting.
+  const r = isBuilding(target) ? rectOf(target) : { x: Math.floor(target.x), y: Math.floor(target.y), s: 1 };
+  if (gapTo(e, r) <= ESCORT_GAP || (e.path.length > 0 && (state.tick + e.id) % 10 !== 0)) return;
+  const ex = Math.floor(e.x);
+  const ey = Math.floor(e.y);
+  const team = teamOf(state, e.owner);
+  if (!canReach(state.map, ex, ey, r.x, r.y, team, r.s)) return void (e.order = { t: 'idle' });
+  e.path = findPathToArea(state.map, ex, ey, r.x, r.y, r.s, team, false, ESCORT_GAP - 1).path;
 }
 
 function stepConvert(state: GameState, e: Entity, o: Extract<Order, { t: 'convert' }>): void {
@@ -1368,6 +1422,7 @@ export function step(state: GameState): void {
     else if (o.t === 'garrison') stepGarrison(state, e, o);
     else if (o.t === 'heal') stepHeal(state, e, o);
     else if (o.t === 'convert') stepConvert(state, e, o);
+    else if (o.t === 'escort') stepEscort(state, e, o);
     else if (o.t === 'fetch') stepFetch(state, e, o);
     else if (o.t === 'deliver') stepDeliver(state, e, o);
     else if ((o.t === 'move' || o.t === 'amove') && e.path.length === 0) e.order = { t: 'idle' };
@@ -1433,6 +1488,7 @@ export function taskOf(e: Entity): [number, number] {
   if (o.t === 'convert') return [12, o.id];
   if (o.t === 'fetch') return [13, o.relic];
   if (o.t === 'deliver') return [14, o.id];
+  if (o.t === 'escort') return [15, o.id];
   if (o.t === 'build') return [6, o.id];
   if (o.t === 'garrison') return [9, o.id];
   if (o.t === 'gather') {

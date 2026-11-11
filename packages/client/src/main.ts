@@ -2064,6 +2064,7 @@ function statusOf(v: View): string {
     case 12: return other ? `Converting ${name}` : 'Converting';
     case 13: return 'Going for the relic';
     case 14: return 'Carrying the relic to the monastery';
+    case 15: return 'Following the attack to heal';
     default: return relics.some((r) => r[2] === v.id) ? 'Carrying the relic' : 'Idle';
   }
 }

@@ -482,19 +482,27 @@ test('every training click counts, up to fifteen in a queue', () => {
   assert.equal(p.res.food, 5000 - 15 * 50);
 });
 
-test('a unit standing where a building is placed walks out of the way', () => {
+test('blueprints can be walked over until work starts, then whoever stands there walks off', () => {
   const s = createGame(71);
   addPlayer(s, 0);
   const [sx, sy] = s.map.starts[0];
   const [builder, bystander] = owned(s, 0, 'villager');
   bystander.x = sx - 0.5;
   bystander.y = sy + 3.5;
+  builder.x = sx + 8.5;
+  builder.y = sy + 8.5;
   applyCommand(s, 0, { type: 'place', ids: [builder.id], kind: 'house', x: sx - 1, y: sy + 3 });
-  assert.equal(owned(s, 0, 'house').length, 1);
-  // Walks off rather than jumping: still on the site at first, off it a moment later.
-  assert.ok(!isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'still on the footprint');
-  run(s, 20);
-  assert.ok(isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'walked off the footprint');
+  const [house] = owned(s, 0, 'house');
+  assert.ok(house);
+  // Only a blueprint: walkable, but nothing else can be built there.
+  assert.ok(isWalkable(s.map, sx - 1, sy + 3), 'a blueprint can be walked over');
+  assert.ok(!canPlace(s.map, 'house', sx - 1, sy + 3), 'but not built over');
+  const across = findPath(s.map, sx - 2, sy + 4, sx + 1, sy + 4);
+  assert.ok(across.length <= 6, 'the way across leads straight over it');
+  run(s, 400);
+  assert.ok(house.progress > 0, 'work has started');
+  assert.ok(!isWalkable(s.map, sx - 1, sy + 3), 'now a building site');
+  assert.ok(isWalkable(s.map, Math.floor(bystander.x), Math.floor(bystander.y)), 'walked off the site');
 });
 
 test('a mixed crowd of nine melee fighters never shares a tile around its target', () => {
@@ -791,4 +799,29 @@ test('a crowd stopped by a wall never walks through it, and does not slow the ga
   // They went up to the wall and stopped there.
   assert.ok(ids.every((id) => s.entities.get(id)!.path.length === 0), 'everyone has stopped');
   assert.ok(ids.filter((id) => s.entities.get(id)!.x > 44).length >= 10, 'they came up to the wall');
+});
+
+test('monks sent with an attack on a building follow it and heal the wounded', () => {
+  const s = createGame(3, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+  s.map.blocked.fill(0);
+  s.map.footprint.fill(0);
+  s.map.tiles.fill(Tile.Grass);
+  spawn(s, 0, 'king', 2, 2);
+  spawn(s, 1, 'king', 93, 93);
+  const house = spawn(s, 1, 'house', 60, 40);
+  const army = [0, 1, 2].map((i) => spawn(s, 0, 'swordsman', 30 + i, 40));
+  const monk = spawn(s, 0, 'monk', 28, 41);
+  applyCommand(s, 0, { type: 'interact', ids: [...army, monk].map((e) => e.id), target: house.id });
+  assert.equal(monk.order.t, 'escort');
+  run(s, 200);
+  assert.ok(Math.hypot(monk.x - 61, monk.y - 41) < 8, `the monk came along: ${monk.x.toFixed(1)},${monk.y.toFixed(1)}`);
+  army[0].hp -= 30;
+  const hurt = army[0].hp;
+  run(s, 60);
+  assert.ok(army[0].hp > hurt, 'and heals the wounded');
+  run(s, 300);
+  assert.ok(['escort', 'heal'].includes((monk.order as { t: string }).t) || !s.entities.has(house.id), `still with the attack: ${monk.order.t}`);
 });
