@@ -167,17 +167,24 @@ const store = (key: string, value: string) => {
   }
 };
 
+/** The background songs. They play one after the other; which one comes first is left to chance. */
+const TRACKS = ['sounds/music.mp3', 'sounds/music2.mp3'];
 let music: HTMLAudioElement | undefined;
+let current = Math.floor(Math.random() * TRACKS.length);
 let musicVolume = Math.max(0, Math.min(1, Number(read('kingsfall-music-volume', '0.5'))));
 let musicMuted = read('kingsfall-music-muted', '0') === '1';
 
 function track(): HTMLAudioElement {
   if (!music) {
-    // Streamed rather than loaded up front, and looped for as long as the page is open.
-    music = new Audio('sounds/music.mp3');
-    music.loop = true;
+    // Streamed rather than loaded up front; when a song ends the next one starts.
+    music = new Audio(TRACKS[current]);
     music.preload = 'none';
     music.volume = musicVolume;
+    music.addEventListener('ended', () => {
+      current = (current + 1) % TRACKS.length;
+      music!.src = TRACKS[current];
+      if (!musicMuted) void music!.play().catch(() => undefined);
+    });
   }
   return music;
 }
