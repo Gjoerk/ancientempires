@@ -2,15 +2,15 @@
   "unit.villager": {
     "src": "villager.png",
     "anchor": [
-      8,
-      22
+      12,
+      26
     ],
     "teamMask": "villager_mask.png"
   },
   "unit.king": {
     "src": "king.png",
     "anchor": [
-      10,
+      12,
       26
     ],
     "teamMask": "king_mask.png"
@@ -18,57 +18,57 @@
   "unit.swordsman": {
     "src": "swordsman.png",
     "anchor": [
-      10,
-      22
+      12,
+      26
     ],
     "teamMask": "swordsman_mask.png"
   },
   "unit.spearman": {
     "src": "spearman.png",
     "anchor": [
-      10,
-      24
+      12,
+      30
     ],
     "teamMask": "spearman_mask.png"
   },
   "unit.archer": {
     "src": "archer.png",
     "anchor": [
-      10,
-      22
+      12,
+      26
     ],
     "teamMask": "archer_mask.png"
-  },
-  "unit.ram": {
-    "src": "ram.png",
-    "anchor": [
-      16,
-      16
-    ],
-    "teamMask": "ram_mask.png"
   },
   "unit.monk": {
     "src": "monk.png",
     "anchor": [
-      10,
-      24
+      12,
+      26
     ],
     "teamMask": "monk_mask.png"
   },
   "unit.scout": {
     "src": "scout.png",
     "anchor": [
-      14,
-      24
+      16,
+      28
     ],
     "teamMask": "scout_mask.png"
   },
   "unit.rider": {
     "src": "rider.png",
     "anchor": [
-      14,
-      24
+      18,
+      30
     ],
     "teamMask": "rider_mask.png"
+  },
+  "unit.ram": {
+    "src": "ram.png",
+    "anchor": [
+      18,
+      22
+    ],
+    "teamMask": "ram_mask.png"
   }
 }

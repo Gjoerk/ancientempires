@@ -1,7 +1,7 @@
 import { DEFS, isTech, Kind, KINDS, TechId } from '@kingsfall/shared';
 import { findSprite } from './assets';
 import { drawBuilding } from './buildings';
-import { drawUnit, PLAYER_COLORS } from './sprites';
+import { drawUnit, PLAYER_COLORS, unitHeight, unitWidth } from './sprites';
 
 // Icons for buttons, resources and upgrades. Every icon is drawn by code into a small
 // canvas, and each one can be replaced by an image through the sprite pack (`icon.<id>`).
@@ -297,8 +297,9 @@ function thing(c: CanvasRenderingContext2D, kind: Kind, owner: number, box: numb
     c.scale(scale, scale);
     drawBuilding(c, kind, owner, 1, 0, 0, { built: 1, kingInside: false, now: 0 });
   } else {
-    const wide = kind === 'rider' || kind === 'scout' || kind === 'ram';
-    const scale = (box / 48) * (wide ? 1.3 : 1.55);
+    // As large as fits, in whole steps of a half so the pixels stay even.
+    const fit = Math.min((box - 6) / unitHeight(kind), (box - 2) / unitWidth(kind));
+    const scale = Math.max(0.5, Math.floor(fit * 2) / 2);
     c.translate(left + box / 2, top + box - 5);
     c.scale(scale, scale);
     drawUnit(c, kind, owner, 0, 0, 0);

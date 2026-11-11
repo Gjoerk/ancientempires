@@ -9,15 +9,15 @@ For every unit there is:
 
 | Unit | Key | Size (px) | Feet / anchor |
 | --- | --- | --- | --- |
-| Villager | `unit.villager` | 16 × 22 | [8, 22] |
-| King | `unit.king` | 20 × 26 | [10, 26] |
-| Swordsman | `unit.swordsman` | 20 × 22 | [10, 22] |
-| Spearman | `unit.spearman` | 20 × 24 | [10, 24] |
-| Archer | `unit.archer` | 20 × 22 | [10, 22] |
-| Monk | `unit.monk` | 20 × 24 | [10, 24] |
-| Scout | `unit.scout` | 28 × 24 | [14, 24] |
-| Rider (knight) | `unit.rider` | 28 × 24 | [14, 24] |
-| Battering ram | `unit.ram` | 32 × 16 | [16, 16] |
+| Villager | `unit.villager` | 24 × 26 | [12, 26] |
+| King | `unit.king` | 24 × 26 | [12, 26] |
+| Swordsman | `unit.swordsman` | 24 × 26 | [12, 26] |
+| Spearman | `unit.spearman` | 24 × 30 | [12, 30] |
+| Archer | `unit.archer` | 24 × 26 | [12, 26] |
+| Monk | `unit.monk` | 24 × 26 | [12, 26] |
+| Scout | `unit.scout` | 32 × 28 | [16, 28] |
+| Rider (knight) | `unit.rider` | 36 × 30 | [18, 30] |
+| Battering ram | `unit.ram` | 36 × 22 | [18, 22] |
 
 ## Format
 

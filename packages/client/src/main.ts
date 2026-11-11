@@ -43,7 +43,7 @@ import { installMenuArt } from './menu-art';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { isMuted, play, toggleMute, unlockSound } from './sound';
-import { drawProp, drawUnit, HH, HW, PLAYER_COLORS } from './sprites';
+import { drawProp, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
 
 interface View {
   id: number;
@@ -2120,7 +2120,7 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   }
   if (now >= v.hurt && now - v.hurt < 160) drawImpact(sx, sy - 13, (now - v.hurt) / 160);
   const full = maxHp(v);
-  if (v.hp < full || selected.has(v.id)) bar(sx, sy - (v.kind === 'king' ? 34 : 30), 22, v.hp / full, '#4ad04a');
+  if (v.hp < full || selected.has(v.id)) bar(sx, sy - Math.max(30, unitHeight(v.kind) + 6), 22, v.hp / full, '#4ad04a');
 }
 
 /** A map generated for the background of the start menu and waiting room, with a small town on it. */
