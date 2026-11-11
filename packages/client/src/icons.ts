@@ -324,7 +324,7 @@ function thing(c: CanvasRenderingContext2D, kind: Kind, owner: number, box: numb
   c.save();
   if (DEFS[kind].building) {
     const s = DEFS[kind].size ?? 1;
-    const scale = Math.min(1, (box - 4) / (s * 64 + 6), (box - 2) / (s * 32 + (kind === 'tower' ? 66 : kind === 'castle' ? 60 : 44)));
+    const scale = Math.min(1, (box - 4) / (s * 64 + 6), (box - 2) / (s * 32 + (kind === 'tower' ? 66 : kind === 'castle' ? 60 : kind === 'catapulttower' ? 66 : 44)));
     c.translate(left + box / 2, top + box - 3 - s * 32 * scale);
     c.scale(scale, scale);
     drawBuilding(c, kind, owner, 1, 0, 0, { built: 1, kingInside: false, now: 0, age: iconAge });

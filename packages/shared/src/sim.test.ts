@@ -825,3 +825,60 @@ test('monks sent with an attack on a building follow it and heal the wounded', (
   run(s, 300);
   assert.ok(['escort', 'heal'].includes((monk.order as { t: string }).t) || !s.entities.has(house.id), `still with the attack: ${monk.order.t}`);
 });
+
+const openField = () => {
+  const s = createGame(3, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+  s.map.blocked.fill(0);
+  s.map.footprint.fill(0);
+  s.map.tiles.fill(Tile.Grass);
+  spawn(s, 0, 'king', 2, 2);
+  spawn(s, 1, 'king', 93, 93);
+  return s;
+};
+
+test('walls shrug off soldiers but fall to rams', () => {
+  const ticksToBreak = (kind: 'swordsman' | 'ram', n: number) => {
+    const s = openField();
+    const wall = spawn(s, 1, 'wall', 50, 40);
+    const ids = Array.from({ length: n }, (_, i) => spawn(s, 0, kind, 45 + (i % 4), 38 + Math.floor(i / 4)).id);
+    applyCommand(s, 0, { type: 'interact', ids, target: wall.id });
+    let t = 0;
+    for (; t < 3000 && s.entities.has(wall.id); t++) step(s);
+    return t;
+  };
+  const swords = ticksToBreak('swordsman', 10);
+  const ram = ticksToBreak('ram', 1);
+  assert.ok(swords > 400, `ten swordsmen took only ${swords / 10} s`);
+  assert.ok(ram < swords * 0.7, `one ram (${ram / 10} s) should beat ten swordsmen (${swords / 10} s)`);
+});
+
+test('a catapult tower crushes a group, cannot aim at its foot, and falls to rams', () => {
+  const s = openField();
+  const tower = spawn(s, 1, 'catapulttower', 50, 40);
+  // A tight group well in range: one boulder hurts several of them.
+  const group = [0, 1, 2, 3].map((i) => spawn(s, 0, 'archer', 44 + (i % 2), 40 + Math.floor(i / 2)));
+  for (const a of group) a.stance = 'defensive';
+  let t = 0;
+  for (; t < 100 && group.every((a) => a.hp >= 30); t++) step(s);
+  step(s);
+  assert.ok(group.filter((a) => !s.entities.has(a.id) || a.hp < 30).length >= 3, 'one shot hurt most of the group');
+  // Someone right beside its wall is too close to be aimed at.
+  const s2 = openField();
+  const t2 = spawn(s2, 1, 'catapulttower', 50, 40);
+  const close = spawn(s2, 0, 'swordsman', 52, 40);
+  close.stance = 'defensive';
+  run(s2, 100);
+  assert.equal(close.hp, 60, 'safe at its foot');
+  assert.ok(t2.hp > 0);
+  // Two rams knock it down unharmed.
+  const s3 = openField();
+  const t3 = spawn(s3, 1, 'catapulttower', 50, 40);
+  const rams = [0, 1].map((i) => spawn(s3, 0, 'ram', 46, 40 + i));
+  applyCommand(s3, 0, { type: 'interact', ids: rams.map((r) => r.id), target: t3.id });
+  run(s3, 600);
+  assert.ok(!s3.entities.has(t3.id), 'the rams brought it down');
+  assert.ok(rams.every((r) => s3.entities.has(r.id)), 'and both rams survive');
+});

@@ -121,6 +121,10 @@ const SOUNDS = {
   order: () => tone(520, 0, 0.07, 0.05, 'square'),
   hit: () => noise(0, 0.08, 0.12, 1800),
   arrow: () => tone(900, 0, 0.12, 0.04, 'sine', 300),
+  catapult: () => {
+    tone(140, 0, 0.18, 0.08, 'triangle', 60);
+    noise(0, 0.25, 0.1, 350);
+  },
   death: () => tone(180, 0, 0.25, 0.08, 'sawtooth', 70),
   collapse: () => noise(0, 0.6, 0.25, 500),
   built: () => {

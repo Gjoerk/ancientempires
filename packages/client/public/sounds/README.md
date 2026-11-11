@@ -24,6 +24,7 @@ folder and list it in `manifest.json`; anything not listed keeps its built-in so
 | `order` | You give an order: move, gather, build, attack, place a building | short click | 0.05–0.15 s |
 | `hit` | A melee blow lands on something you can see | thud | 0.1–0.2 s |
 | `arrow` | An arrow is shot where you can see it | falling whistle | 0.1–0.3 s |
+| `catapult` | A catapult tower hurls a boulder where you can see it | creak and heavy thump | 0.3–0.6 s |
 | `death` | A unit dies | low falling groan | 0.2–0.5 s |
 | `collapse` | A building is destroyed | rumble | 0.5–1 s |
 | `built` | One of your buildings is finished | two rising notes | 0.3–0.6 s |

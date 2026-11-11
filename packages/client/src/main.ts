@@ -137,7 +137,8 @@ const queues = new Map<number, number[]>();
 const selected = new Set<number>();
 /** Monks at work: green sparkles for healing, rings for converting. */
 let blessings: { from: number; to: number; kind: number; t: number }[] = [];
-let shots: { from: [number, number]; to: [number, number]; t: number }[] = [];
+let shots: { from: [number, number]; to: [number, number]; t: number; boulder?: boolean; landed?: boolean }[] = [];
+const BOULDER_MS = 750;
 let winner = -1;
 /** Highest population anyone may reach in this game. */
 let popLimit = 100;
@@ -935,8 +936,9 @@ function onMessage(msg: ServerMessage): void {
       if (!a || !b) continue;
       a.struck = now;
       b.hurt = now + 200;
-      if (canSee(a) || canSee(b)) play('arrow', 120);
-      if (canSee(a) || canSee(b)) shots.push({ from: centreOf(a), to: centreOf(b), t: now });
+      const boulder = !!DEFS[a.kind].splash;
+      if (canSee(a) || canSee(b)) play(boulder ? 'catapult' : 'arrow', 120);
+      if (canSee(a) || canSee(b)) shots.push({ from: centreOf(a), to: centreOf(b), t: now, boulder });
     }
     for (const [from, to] of msg.hits) {
       const a = views.get(from);
@@ -2613,7 +2615,7 @@ function drawBuildingView(v: View): void {
   drawBuilding(ctx, v.kind, v.owner, v.id, sx, sy, { built: v.extra / 100, kingInside: sheltering && (v.task & 2) !== 0, occupied: (sheltering || v.kind === 'farm') && (v.task & 1) !== 0, now: performance.now(), age: players.get(v.owner)?.age ?? 1 });
   if ((v.kind === 'farm' || v.kind === 'wall') && v.extra >= 100 && v.hp >= def.hp && !selected.has(v.id)) return;
   // Bars sit above the roof line of tall buildings.
-  const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);
+  const top = sy - (v.kind === 'tower' ? 52 : v.kind === 'catapulttower' ? 58 : v.kind === 'castle' || v.kind === 'towncenter' ? 32 : 14);
   if (v.extra < 100) bar(sx, top, 14 + s * 12, v.extra / 100, '#e0c12f');
   else if (v.hp < def.hp || selected.has(v.id)) bar(sx, top, 14 + s * 12, v.hp / def.hp, '#4ad04a');
   const queue = queues.get(v.id);
@@ -3009,10 +3011,33 @@ function frame(now: number): void {
   }
 
   // Arrows in flight.
-  shots = shots.filter((s) => now - s.t < 220);
+  shots = shots.filter((s) => now - s.t < (s.boulder ? BOULDER_MS : 220));
   ctx.strokeStyle = '#f1ead9';
   ctx.lineWidth = 2;
   for (const s of shots) {
+    if (s.boulder) {
+      // A boulder on a high, slow arc, with dust where it comes down.
+      const k = Math.min(1, (now - s.t) / BOULDER_MS);
+      const [ax, ay] = tileToScreen(...s.from);
+      const [bx, by] = tileToScreen(...s.to);
+      const x = ax + (bx - ax) * k;
+      const y = ay - 60 + (by + 60 - ay) * k - Math.sin(k * Math.PI) * 70;
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(ax + (bx - ax) * k, ay + (by - ay) * k, 4, 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#6e6e76';
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#9a9aa2';
+      ctx.fillRect(Math.round(x - 2), Math.round(y - 3), 2, 2);
+      if (k > 0.9 && !s.landed) {
+        s.landed = true;
+        puffs.push({ x: s.to[0], y: s.to[1], t: now, big: true });
+      }
+      continue;
+    }
     const k = (now - s.t) / 220;
     const [ax, ay] = tileToScreen(...s.from);
     const [bx, by] = tileToScreen(...s.to);

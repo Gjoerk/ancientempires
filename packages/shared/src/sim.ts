@@ -815,7 +815,7 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
     // Only units are picked on sight; buildings are attacked when a player orders it.
     if (isBuilding(other) || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
     const d = distance(e, other);
-    if (d > reach || d >= bestScore) continue;
+    if (d > reach || d >= bestScore || d < (DEFS[e.kind].minRange ?? 0)) continue;
     // Never pick a fight with someone who cannot be got at (behind a wall, across water), unless
     // they can be shot from here: chasing them would go nowhere.
     if (!isBuilding(e) && d > rangeOf(e.kind, hasTech(state, e.owner)) && !canReach(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(other.x), Math.floor(other.y), teamOf(state, e.owner))) continue;
@@ -827,6 +827,8 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
   return best;
 }
 
+const SPLASH_SHARE = 0.75;
+
 function strike(state: GameState, e: Entity, target: Entity): void {
   const def = DEFS[e.kind];
   const has = hasTech(state, e.owner);
@@ -835,6 +837,16 @@ function strike(state: GameState, e: Entity, target: Entity): void {
   if ((def.range ?? 0) > 2) state.shots.push([e.id, target.id]);
   else state.hits.push([e.id, target.id]);
   target.hp -= dmg;
+  // A boulder crashes down among the target's neighbours too, at three quarters of its strength.
+  if (def.splash) {
+    const [cx, cy] = isBuilding(target) ? centre(target) : [target.x, target.y];
+    for (const other of [...state.entities.values()]) {
+      if (other === target || isBuilding(other) || other.inside >= 0 || !isEnemy(state, other.owner, e.owner)) continue;
+      if (Math.hypot(other.x - cx, other.y - cy) > def.splash) continue;
+      other.hp -= Math.max(1, Math.round((attackOf(e.kind, has) + relicBonus(state, e)) * SPLASH_SHARE) - armorOf(other.kind, hasTech(state, other.owner)));
+      if (other.hp <= 0) kill(state, other);
+    }
+  }
   if (target.hp <= 0) return kill(state, target);
   // Soldiers standing around fight back, even against something beyond their sight.
   if (target.order.t === 'idle' && DEFS[target.kind].attack && !isBuilding(target) && !isBuilding(e) && target.kind !== 'villager') {
@@ -1016,6 +1028,8 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
   const target = state.entities.get(o.id);
   if (!target || !isEnemy(state, target.owner, e.owner) || target.inside >= 0) return endAttack(state, e, o);
   const d = distance(e, target);
+  // Too close to aim at: a catapult tower drops it and looks for someone further off.
+  if (d < (def.minRange ?? 0)) return isBuilding(e) ? endAttack(state, e, o) : undefined;
   if (d <= rangeOf(e.kind, hasTech(state, e.owner))) {
     // In reach. A melee fighter stops here only if nobody else stands on this tile; otherwise it carries on
     // to its own spot, swinging as it goes, so that fighters never pile up on one another.

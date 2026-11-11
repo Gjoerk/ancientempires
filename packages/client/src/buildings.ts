@@ -578,6 +578,34 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
     pen.pyramid(0.26, 0.26, 0.74, 0.74, 46, 15, team);
   },
 
+  // A squat brick bastion on a dressed-stone plinth, with a timber catapult on its battlements,
+  // its arm cocked back, and a pile of boulders at the foot.
+  catapulttower(pen, team) {
+    pen.box(0.12, 0.12, 1.88, 1.88, 0, 6, DRESSED);
+    pen.box(0.22, 0.22, 1.78, 1.78, 6, 30, BRICK);
+    quoins(pen, 0.22, 0.22, 1.78, 1.78, 6, 30);
+    pen.onV(1.78, 0.8, 1.2, 6, 19, '#3a2a1a');
+    pen.onV(1.78, 0.75, 1.25, 19, 21, DRESSED);
+    pen.onU(1.78, 0.55, 0.7, 16, 22, '#2a2a30');
+    pen.onU(1.78, 1.3, 1.45, 16, 22, '#2a2a30');
+    pen.onU(1.78, 0.9, 1.1, 22, 29, team);
+    pen.box(0.12, 0.12, 1.88, 1.88, 30, 34, DRESSED);
+    // The catapult: a timber frame, the throwing arm leaning back with a loaded sling, and its counterweight.
+    pen.box(0.6, 0.7, 1.4, 1.3, 34, 37, TIMBER);
+    pen.box(0.9, 0.72, 1.02, 0.84, 37, 50, TIMBER);
+    pen.box(0.9, 1.16, 1.02, 1.28, 37, 50, TIMBER);
+    pen.line(pen.p(0.96, 0.84, 48), pen.p(0.96, 1.16, 48), TIMBER, 2);
+    // The arm pivots on the axle: the heavy end low at the back, the sling high at the front.
+    pen.box(1.3, 0.88, 1.52, 1.12, 36, 45, '#5a5a62');
+    pen.line(pen.p(1.42, 1.0, 44), pen.p(0.32, 1.0, 62), shade(TIMBER, 1.2), 3);
+    pen.disc(pen.p(0.3, 1.0, 63), 3.5, '#77777f');
+    pen.crenels(0.12, 0.12, 1.88, 1.88, 34, DRESSED);
+    // Boulders stacked ready by the door.
+    pen.disc(pen.p(1.95, 0.35, 2), 2.5, '#8a8a92');
+    pen.disc(pen.p(1.95, 0.55, 2), 2.5, '#7a7a82');
+    pen.disc(pen.p(1.95, 0.45, 5), 2.5, '#9a9aa2');
+  },
+
   // Dark cobblestone forge with a slate roof, a glowing hearth and an anvil outside.
   blacksmith(pen, team) {
     pen.box(0.25, 0.25, 1.75, 1.75, 0, 16, COBBLE);

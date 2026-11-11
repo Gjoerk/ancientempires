@@ -6,7 +6,7 @@ export type Cost = Partial<Record<Res, number>>;
 export const KINDS = [
   'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider', 'scout',
   'towncenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
-  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery',
+  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery', 'catapulttower',
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
@@ -33,6 +33,10 @@ export interface KindDef {
   bonus?: Partial<Record<Kind, number>>;
   /** Extra damage against every building. */
   vsBuildings?: number;
+  /** Shots land with a crash that also hurts enemy units within this many tiles of the target. */
+  splash?: number;
+  /** Cannot aim at anyone closer than this many tiles. */
+  minRange?: number;
   /** How far it sees, and for soldiers how far they look for enemies on their own. */
   sight?: number;
   /** Population room this building provides. */
@@ -82,7 +86,7 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   ram: {
     label: 'Battering Ram', hp: 180, cost: { wood: 160, gold: 60 }, time: 25, age: 3, speed: 1.4,
-    attack: 3, range: MELEE, cooldown: 2.5, armor: 4, sight: 4, vsBuildings: 45,
+    attack: 3, range: MELEE, cooldown: 2.5, armor: 4, sight: 4, vsBuildings: 45, bonus: { wall: 20, gate: 20 },
   },
   towncenter: {
     label: 'Town Centre', building: true, hp: 800, cost: { wood: 275, stone: 100 }, time: 60, age: 2, size: 3,
@@ -110,8 +114,9 @@ export const DEFS: Record<Kind, KindDef> = {
   workshop: {
     label: 'Siege Workshop', building: true, hp: 400, cost: { wood: 180 }, time: 25, age: 3, size: 3, armor: 3, trains: ['ram'],
   },
-  wall: { label: 'Wall', building: true, hp: 450, cost: { stone: 6 }, time: 5, size: 1, armor: 4, sight: 2 },
-  gate: { label: 'Gate', building: true, hp: 500, cost: { stone: 20, wood: 20 }, time: 10, size: 1, armor: 4, sight: 3 },
+  // Thick armour: blades and arrows barely scratch walls, so breaking through takes rams.
+  wall: { label: 'Wall', building: true, hp: 700, cost: { stone: 6 }, time: 5, size: 1, armor: 8, sight: 2 },
+  gate: { label: 'Gate', building: true, hp: 800, cost: { stone: 20, wood: 20 }, time: 10, size: 1, armor: 8, sight: 3 },
   tower: {
     label: 'Watchtower', building: true, hp: 400, cost: { stone: 100, wood: 25 }, time: 25, age: 2, size: 1, armor: 3,
     attack: 6, range: 7, cooldown: 2, sight: 9,
@@ -119,6 +124,11 @@ export const DEFS: Record<Kind, KindDef> = {
   castle: {
     label: 'Castle', building: true, hp: 1500, cost: { stone: 450, wood: 200 }, time: 90, age: 3, size: 4, armor: 4,
     attack: 7, range: 7, cooldown: 2, sight: 9, garrison: 15,
+  },
+  // Slow, heavy shots that crush a whole group, but it cannot aim at anyone right at its foot.
+  catapulttower: {
+    label: 'Catapult Tower', building: true, hp: 800, cost: { stone: 175, wood: 150, gold: 75 }, time: 45, age: 3, size: 2, armor: 7,
+    attack: 22, range: 8, minRange: 1.6, cooldown: 4, sight: 10, splash: 1.5,
   },
   monastery: {
     label: 'Monastery', building: true, hp: 450, cost: { wood: 175 }, time: 30, age: 3, size: 3, armor: 3, trains: ['monk'],
@@ -132,7 +142,7 @@ export const DEFAULT_SIGHT = 6;
 export const BUILDABLE: Kind[] = [
   'house', 'farm', 'mill', 'lumbercamp', 'miningcamp', 'barracks', 'wall', 'gate',
   'range', 'stable', 'blacksmith', 'market', 'monastery', 'tower', 'towncenter',
-  'workshop', 'castle',
+  'workshop', 'catapulttower', 'castle',
 ];
 
 export const AGE_NAMES = ['', 'Village Age', 'Town Age', 'Kingdom Age'];

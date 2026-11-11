@@ -41,9 +41,10 @@ const ROLE: Record<Kind, string> = {
   blacksmith: 'Researches better weapons and armour, for the whole army or for single kinds of soldier.',
   market: 'Trade food, wood and stone for gold, and back again.',
   workshop: 'Builds siege engines.',
-  wall: 'Blocks the way for everyone, your own units too. Drag out a line to build many at once.',
+  wall: 'Blocks the way for everyone, your own units too. Thick enough that soldiers barely dent it: bring battering rams. Drag out a line to build many at once.',
   gate: 'A piece of wall that you and your allies can walk through, but enemies cannot.',
   tower: 'Shoots arrows at enemies in range. Keeps raiders away from your villagers.',
+  catapulttower: 'A defence that hurls boulders: each one hurts every enemy where it lands. Slow to reload, and it cannot aim at anyone right at its foot, so soldiers who reach it are safe from it.',
   castle: 'The strongest building. Shoots arrows, and your king and up to 15 villagers can shelter inside where they cannot be hurt.',
   monk: 'Heals friendly units nearby, and can win an enemy unit over to your side. Kings and buildings cannot be converted.',
   monastery: 'Trains monks.',
@@ -60,7 +61,8 @@ export function describeKind(kind: Kind, has: Has, age: number): Detail {
   const def = DEFS[kind];
   const stats: [string, string][] = [['heart', `${maxHpOf(kind, has)} HP`]];
   if (def.attack) stats.push(['sword', `${attackOf(kind, has)} attack`]);
-  if ((def.range ?? 0) > 2) stats.push(['bow', `range ${rangeOf(kind, has)}`]);
+  if ((def.range ?? 0) > 2) stats.push(['bow', `range ${def.minRange ? `${def.minRange}–` : ''}${rangeOf(kind, has)}`]);
+  if (def.splash) stats.push(['sword', `hits everyone within ${def.splash} tiles`]);
   if (!def.building || def.attack || (def.armor ?? 0) > 0) stats.push(['shield', `${armorOf(kind, has)} armour`]);
   if (def.speed) stats.push(['boot', `speed ${def.speed}`]);
   if (def.time) stats.push(['hourglass', `${def.time} s to ${def.building ? 'build' : 'train'}`]);
