@@ -14,9 +14,11 @@ export function unlockSound(): void {
   try {
     ctx ??= new AudioContext();
     if (ctx.state === 'suspended') void ctx.resume();
+    loadCustomSounds();
   } catch {
     ctx = undefined;
   }
+  startMusic();
 }
 
 export function isMuted(): boolean {
@@ -77,6 +79,10 @@ const SOUNDS = {
     tone(784, 0.1, 0.2, 0.08);
   },
   trained: () => tone(660, 0, 0.1, 0.06),
+  chat: () => {
+    tone(784, 0, 0.07, 0.04, 'sine');
+    tone(1047, 0.07, 0.1, 0.04, 'sine');
+  },
   research: () => {
     tone(440, 0, 0.1, 0.07);
     tone(554, 0.09, 0.1, 0.07);
@@ -99,11 +105,105 @@ const SOUNDS = {
 };
 export type SoundName = keyof typeof SOUNDS;
 
+/**
+ * Your own sound files, listed in public/sounds/manifest.json as { "<sound name>": "file.ogg" }.
+ * A listed sound replaces the built-in one; anything not listed keeps its synthesised sound.
+ */
+const custom = new Map<string, AudioBuffer>();
+let customLoading = false;
+
+function loadCustomSounds(): void {
+  if (customLoading || !ctx) return;
+  customLoading = true;
+  const audio = ctx;
+  void fetch('sounds/manifest.json', { cache: 'no-cache' })
+    .then((res) => (res.ok ? res.json() : {}))
+    .then((list: Record<string, string>) => {
+      for (const [name, file] of Object.entries(list)) {
+        if (!(name in SOUNDS) || typeof file !== 'string') continue;
+        void fetch('sounds/' + file)
+          .then((res) => res.arrayBuffer())
+          .then((data) => audio.decodeAudioData(data))
+          .then((buffer) => custom.set(name, buffer))
+          .catch(() => console.warn(`Sound "${name}" (${file}) could not be loaded; the built-in one is used.`));
+      }
+    })
+    .catch(() => undefined);
+}
+
 /** Plays a sound, at most once per `gap` milliseconds so that big fights do not turn into noise. */
 export function play(name: SoundName, gap = 90): void {
   if (muted || !ctx) return;
   const now = performance.now();
   if (now - (lastPlayed.get(name) ?? -1e9) < gap) return;
   lastPlayed.set(name, now);
+  const buffer = custom.get(name);
+  if (buffer) {
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.6;
+    src.connect(gain).connect(ctx.destination);
+    src.start();
+    return;
+  }
   SOUNDS[name]();
+}
+
+// --- background music ------------------------------------------------------------------------
+
+const read = (key: string, fallback: string) => {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+const store = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not remembered, but still applied.
+  }
+};
+
+let music: HTMLAudioElement | undefined;
+let musicVolume = Math.max(0, Math.min(1, Number(read('kingsfall-music-volume', '0.5'))));
+let musicMuted = read('kingsfall-music-muted', '0') === '1';
+
+function track(): HTMLAudioElement {
+  if (!music) {
+    // Streamed rather than loaded up front, and looped for as long as the page is open.
+    music = new Audio('sounds/music.mp3');
+    music.loop = true;
+    music.preload = 'none';
+    music.volume = musicVolume;
+  }
+  return music;
+}
+
+/** Starts the music if it is on; browsers only allow this after a click or key press. */
+export function startMusic(): void {
+  if (musicMuted) return;
+  const m = track();
+  if (m.paused) void m.play().catch(() => undefined);
+}
+
+export function musicState(): { volume: number; muted: boolean } {
+  return { volume: musicVolume, muted: musicMuted };
+}
+
+/** Volume from 0 to 1. */
+export function setMusicVolume(volume: number): void {
+  musicVolume = Math.max(0, Math.min(1, volume));
+  track().volume = musicVolume;
+  store('kingsfall-music-volume', String(musicVolume));
+}
+
+export function toggleMusic(): boolean {
+  musicMuted = !musicMuted;
+  store('kingsfall-music-muted', musicMuted ? '1' : '0');
+  if (musicMuted) music?.pause();
+  else startMusic();
+  return musicMuted;
 }

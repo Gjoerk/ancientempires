@@ -41,9 +41,10 @@ import { drawBuilding } from './buildings';
 import { clearIcons, icon } from './icons';
 import { installMenuArt } from './menu-art';
 import { paintGround } from './ground';
+import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
-import { isMuted, play, toggleMute, unlockSound } from './sound';
+import { isMuted, musicState, play, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
 import { drawProp, drawUnit, HH, HW, PLAYER_COLORS, unitHeight } from './sprites';
 
 interface View {
@@ -548,6 +549,30 @@ function paintFarSquare(row: number, col: number, scale: number, img: HTMLCanvas
 /** Zoomed out far enough that trees and rocks are part of the ground blocks. */
 const farView = () => !drawingTarget && zoom < FAR_ZOOM;
 
+/** Gusts of wind with flying leaves now and then. */
+const breeze = new Breeze();
+
+/** Crowns of the trees on screen that are in sight, in world pixels; a sample when there are very many. */
+function treesOnScreen(): [number, number][] {
+  if (!map) return [];
+  const out: [number, number][] = [];
+  const n = map.size;
+  const left = cam.x - viewW() / 2 - 40;
+  const right = cam.x + viewW() / 2 + 40;
+  const top = cam.y - viewH() / 2;
+  const bottom = cam.y + viewH() / 2 + 60;
+  for (const [index, tile] of props) {
+    if (tile !== Tile.Forest || !visible[index]) continue;
+    const [wx, wy] = tileToWorld((index % n) + 0.5, Math.floor(index / n) + 0.5);
+    if (wx < left || wx > right || wy < top || wy > bottom) continue;
+    out.push([wx, wy - 52]);
+  }
+  // Plenty for a gust; more would only cost time, so a spread-out sample is kept.
+  if (out.length <= 260) return out;
+  const step = out.length / 260;
+  return Array.from({ length: 260 }, (_, i) => out[Math.floor(i * step + Math.random() * step)]);
+}
+
 /** The zoomed-out view from far squares; squares not painted yet are filled in over the next frames. */
 function drawFar(scale: number, target: CanvasRenderingContext2D): void {
   const [r0, c0] = farSquareAt(cam.x - viewW() / 2, cam.y - viewH() / 2);
@@ -685,6 +710,8 @@ function onMessage(msg: ServerMessage): void {
     $('lobby').style.display = 'none';
     $('waiting').style.display = 'none';
     $('top').hidden = false;
+    // In a game the music controls sit in the top bar, next to the menu.
+    $('top').insertBefore($('music'), $('menu-btn'));
     $('bottom').hidden = false;
     $('host-tools').hidden = !session?.host;
     $('switch-btn').hidden = !roster.some((p) => p.test);
@@ -796,7 +823,7 @@ function showChat(from: number, text: string): void {
   line.append(who, text);
   $('chat-log').append(line);
   setTimeout(() => line.remove(), 12000);
-  play('trained', 0);
+  play('chat', 0);
 }
 
 /** Tells the player when something of theirs is attacked where they are not looking. */
@@ -842,6 +869,7 @@ function resetGame(): void {
   $('chat-input').hidden = true;
   hudSignature = panelSignature = detailSignature = idleSignature = lastButtons = '';
   $('top').hidden = true;
+  document.body.append($('music'));
   $('bottom').hidden = true;
   $('banner').hidden = true;
 }
@@ -1447,6 +1475,28 @@ function toggleFullscreen(): void {
   else void document.documentElement.requestFullscreen().catch(() => undefined);
 }
 $('full-btn').addEventListener('click', toggleFullscreen);
+// Background music: the note turns it on and off, the slider sets how loud it is.
+{
+  const box = $('music');
+  const slider = $<HTMLInputElement>('music-vol');
+  const show = () => {
+    const { volume, muted } = musicState();
+    box.classList.toggle('off', muted);
+    slider.value = String(Math.round(volume * 100));
+    $('music-btn').title = muted ? 'Music off: click to play' : 'Music on: click to mute';
+  };
+  $('music-btn').addEventListener('click', () => {
+    toggleMusic();
+    show();
+  });
+  slider.addEventListener('input', () => {
+    setMusicVolume(Number(slider.value) / 100);
+    // Turning the volume up switches muted music back on.
+    if (musicState().muted && Number(slider.value) > 0) toggleMusic();
+    show();
+  });
+  show();
+}
 // In fullscreen the pointer is kept on this screen while playing, so edge scrolling cannot lose it to another monitor.
 installCursorLock(canvas, () => !$('bottom').hidden);
 $('resign-btn').addEventListener('click', () => {
@@ -2361,6 +2411,7 @@ function frame(now: number): void {
   if (explored.length !== map.size * map.size) explored = new Uint8Array(map.size * map.size);
   updateWorkOffsets(now, dt);
   updateFog(now);
+  breeze.update(now, dt, { left: cam.x - viewW() / 2, right: cam.x + viewW() / 2, top: cam.y - viewH() / 2, bottom: cam.y + viewH() / 2 }, treesOnScreen);
 
   drawGround();
 
@@ -2449,7 +2500,17 @@ function frame(now: number): void {
     const ty = Math.floor(index / map.size);
     const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
     if (far || sx < -40 || sy < -10 || sx > viewW() + 40 || sy > viewH() + 60 || !explored[index]) continue;
-    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now) });
+    const lean = tile === Tile.Forest && breeze.active ? breeze.sway(sx + cam.x - viewW() / 2, now) : 0;
+    drawables.push({ depth: tx + ty + 1, draw: () => {
+      if (Math.abs(lean) < 0.004) return drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now);
+      // Leaning in the wind: the tree is skewed about its foot, so the crown moves and the trunk stays put.
+      ctx.save();
+      ctx.translate(sx, sy + 5);
+      ctx.transform(1, 0, -lean, 1, 0, 0);
+      ctx.translate(-sx, -(sy + 5));
+      drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now);
+      ctx.restore();
+    } });
   }
   const onScreen = (tx: number, ty: number, margin: number) => {
     const [x, y] = tileToScreen(tx, ty);
@@ -2530,6 +2591,7 @@ function frame(now: number): void {
     }
   }
 
+  if (breeze.active) breeze.draw(ctx, now, worldToScreen);
   drawFog();
 
   // The marker where units were sent is drawn over the fog, so it shows on unexplored ground too.
@@ -2568,5 +2630,5 @@ requestAnimationFrame(frame);
 
 // Handles for automated tests in development builds.
 if (import.meta.env.DEV) {
-  Object.assign(window, { __spawn: spawn, __game: { setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
+  Object.assign(window, { __spawn: spawn, __game: { breeze, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }

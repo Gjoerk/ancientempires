@@ -228,8 +228,13 @@ const PROP_PALETTE: Record<string, string> = (() => {
   return palette;
 })();
 
-export function shade(hex: string, f: number): string {
-  const n = parseInt(hex.slice(1), 16);
+/** A colour made lighter (f > 1) or darker (f < 1); takes '#rrggbb' or 'rgb(r,g,b)'. */
+export function shade(color: string, f: number): string {
   const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
+  if (color.startsWith('rgb')) {
+    const [r, g, b] = color.slice(color.indexOf('(') + 1).split(',').map((v) => parseFloat(v));
+    return `rgb(${c(r)},${c(g)},${c(b)})`;
+  }
+  const n = parseInt(color.slice(1), 16);
   return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
 }
