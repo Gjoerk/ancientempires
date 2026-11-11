@@ -43,5 +43,7 @@
   "start": "victory.ogg",
   "order.move.soldier": "order_soldier.ogg",
   "order.move.horse": "order_horse.ogg",
-  "order.move.army": "order_army.ogg"
+  "order.move.army": "order_army.ogg",
+  "relic": "relic.ogg",
+  "bell": "bell.ogg"
 }
