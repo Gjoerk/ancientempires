@@ -290,7 +290,7 @@ const store = (key: string, value: string) => {
 };
 
 /** The background songs. They play one after the other; which one comes first is left to chance. */
-const TRACKS = ['sounds/music.mp3', 'sounds/music2.mp3'];
+const TRACKS = ['sounds/music.mp3', 'sounds/music2.mp3', 'sounds/music3.mp3'];
 let music: HTMLAudioElement | undefined;
 let current = Math.floor(Math.random() * TRACKS.length);
 let musicVolume = Math.max(0, Math.min(1, Number(read('kingsfall-music-volume', '0.5'))));
@@ -329,7 +329,7 @@ export function setMusicVolume(volume: number): void {
   store('kingsfall-music-volume', String(musicVolume));
 }
 
-/** Skips to the other song; switches the music on if it was off. */
+/** Skips to the next song; switches the music on if it was off. */
 export function nextTrack(): void {
   const m = track();
   current = (current + 1) % TRACKS.length;

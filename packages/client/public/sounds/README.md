@@ -2,8 +2,8 @@
 
 ## Background music
 
-`music.mp3` and `music2.mp3` play in the background on the menus and in games, one after the
-other, starting with a random one. Replace the files to change the songs (MP3 or OGG at
+`music.mp3`, `music2.mp3` and `music3.mp3` play in the background on the menus and in games, one
+after the other, starting with a random one. Replace the files to change the songs (MP3 or OGG at
 128–192 kbps keeps them light). Players set its volume with the slider at the
 top right (50 % by default) and switch it off with the note button; both are remembered.
 
