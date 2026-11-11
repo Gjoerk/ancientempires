@@ -190,8 +190,12 @@ export function drawUnit(
 
 const PROP_NAMES: Record<number, string> = { [Tile.Forest]: 'tree', [Tile.Berries]: 'berries', [Tile.Gold]: 'gold', [Tile.Stone]: 'stone' };
 
-/** Draws the thing standing on a resource tile, with (x, y) at the tile centre. */
-export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: number, now = 0): void {
+/**
+ * Draws the thing standing on a resource tile, with (x, y) at the tile centre. `lean` moves the top
+ * of a tree sideways by that many pixels, for the wind: the picture is cut into bands that shift by
+ * whole pixels, more towards the top, so the pixel art stays sharp.
+ */
+export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: number, now = 0, lean = 0): void {
   const name = PROP_NAMES[tile];
   const custom = findSprite([`resource.${name}.${variant % 3}`, `resource.${name}`]);
   if (custom) {
@@ -217,7 +221,23 @@ export function drawProp(ctx: Ctx, tile: number, x: number, y: number, variant: 
     propCache.set(key, img);
   }
   // The base sits a little in front of the tile centre.
-  ctx.drawImage(img, Math.round(x - (img.width - 16) / 2), Math.round(y + PROP_BASE[name] - (img.height - 8)));
+  const left = Math.round(x - (img.width - 16) / 2);
+  const top = Math.round(y + PROP_BASE[name] - (img.height - 8));
+  if (Math.abs(lean) < 0.5) {
+    ctx.drawImage(img, left, top);
+    return;
+  }
+  // The trunk and shadow stay put; the crown above moves in up to three steps.
+  const keep = Math.round(img.height * 0.42);
+  ctx.drawImage(img, 0, img.height - keep, img.width, keep, left, top + img.height - keep, img.width, keep);
+  const bands = Math.abs(lean) >= 2 ? 3 : 2;
+  const rest = img.height - keep;
+  for (let i = 0; i < bands; i++) {
+    const y0 = Math.round((rest * (bands - 1 - i)) / bands);
+    const y1 = Math.round((rest * (bands - i)) / bands);
+    const dx = Math.round((lean * (i + 1)) / bands);
+    ctx.drawImage(img, 0, y0, img.width, y1 - y0, left + dx, top + y0, img.width, y1 - y0);
+  }
 }
 
 const PROP_BASE: Record<string, number> = { tree: 5, berries: 6, gold: 7, stone: 7 };

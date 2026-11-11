@@ -67,7 +67,8 @@
     .stat:not(:has(img)) { padding: 0 10px; }
     .stat b { line-height: 1; }
     #players { margin-left: auto; display: flex; gap: 10px; align-items: center; }
-    .chip { display: inline-block; width: 11px; height: 11px; margin-right: 5px; border: 1px solid var(--edge); }
+    /* Each player's gem from the menu, in their colour. */
+    .chip { display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; background: var(--gem) center / 14px 14px no-repeat; }
     #menu-btn { flex: none; position: sticky; right: 0; }
     #menu { position: fixed; top: 44px; right: 8px; padding: 10px; display: grid; gap: 6px; z-index: 5; min-width: 190px; }
     #menu[hidden], #host-tools[hidden] { display: none; }
@@ -341,7 +342,8 @@
     #music { position: fixed; top: 10px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 6px;
       padding: 3px 8px 3px 3px; border-radius: 6px; background: rgba(10, 24, 17, .72); border: 1px solid rgba(214, 180, 90, .45); }
     #top #music { position: static; background: none; border: 0; padding: 0 4px 0 0; }
-    #music-btn { width: 28px; height: 26px; padding: 0; display: grid; place-items: center; color: var(--accent); }
+    #music #music-btn { width: 28px; height: 26px; min-width: 0; padding: 0; display: grid; place-items: center; line-height: 0; color: var(--accent); }
+    #music-btn svg { display: block; }
     #music-btn .cross { display: none; }
     #music.off #music-btn .cross { display: inline; }
     #music.off #music-btn { color: #8c8c80; }
@@ -353,7 +355,7 @@
 <body data-bar="a" data-skin="3" data-menu="1">
   <canvas id="game"></canvas>
   <div id="music" title="Music">
-    <button id="music-btn" type="button" aria-label="Music on or off"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 2.5v8.1A2.3 2.3 0 1 0 7.5 13V5.6l6-1.5v5.5a2.3 2.3 0 1 0 1.5 2.1V1z" fill="currentColor"/><path class="cross" d="M2 2l12 12" stroke="currentColor" stroke-width="1.8"/></svg></button>
+    <button id="music-btn" type="button" aria-label="Music on or off"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><ellipse cx="4.6" cy="12.2" rx="2.4" ry="1.9" fill="currentColor"/><ellipse cx="11.6" cy="10.8" rx="2.4" ry="1.9" fill="currentColor"/><path d="M6.2 12V3.6L13.2 2v8.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.2 3.6L13.2 2v2.2L6.2 5.8z" fill="currentColor"/><path class="cross" d="M2.5 2.5l11 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
     <input id="music-vol" type="range" min="0" max="100" value="50" aria-label="Music volume">
   </div>
   <div id="top" class="bar" hidden>

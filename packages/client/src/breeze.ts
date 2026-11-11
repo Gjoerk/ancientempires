@@ -1,7 +1,8 @@
 /**
- * Now and then a gust of wind runs across the view: the trees it passes lean with it for a moment
- * and shed a few leaves that flutter away. Between gusts this costs nothing; during one, only the
- * trees on screen are looked at and the number of leaves is capped.
+ * Wind in the forests. Trees sway a little all the time; now and then a slow gust runs across the
+ * view, the trees it passes lean with it, a few leaves tumble away and soft wisps of wind drift
+ * along. Between gusts only the sway is worked out; during one, only the trees on screen are
+ * looked at and the number of leaves is capped.
  */
 
 interface Leaf {
@@ -12,14 +13,18 @@ interface Leaf {
   born: number;
   life: number;
   spin: number;
-  color: string;
+  turn: number;
+  look: number;
 }
 
-/** A faint curl of wind drawn along with a gust. */
-interface Curl {
+/** A wisp of wind: its head runs along a wavy path that makes one loose loop; a fading tail follows. */
+interface Wisp {
   x: number;
   y: number;
   born: number;
+  life: number;
+  phase: number;
+  loopAt: number;
   size: number;
 }
 
@@ -29,35 +34,64 @@ interface Gust {
   from: number;
   to: number;
   speed: number;
-  /** Trees on screen when the gust began, as world points at the top of their crowns, with a spare chance each. */
+  /** Crowns of the trees on screen when the gust began, in world pixels, with a spare chance each. */
   trees: [number, number, number][];
 }
 
-const LEAF_COLORS = ['#b4e07a', '#9fd16a', '#d7ec8a', '#f2d66b', '#f0a858'];
-const MAX_LEAVES = 70;
-/** Half the width of the band of trees the gust is bending at any moment, in world pixels. */
-const BAND = 170;
+const MAX_LEAVES = 50;
+/** Width of the band of trees the gust is bending at any moment, in world pixels. */
+const BAND = 160;
+
+// Little leaves, a few shapes and colours: drawn once, then turned and flipped as they fly.
+const LEAF_SHAPES = [
+  ['..ggg..', '.ggGgg.', 'gggGggg', '.ggGgg.', '..gGg..', '...s...'],
+  ['...gg..', '..ggGg.', '.ggGgg.', 'ggGgg..', '.gGg...', 's......'],
+  ['..g.g..', '.ggGgg.', 'gggGggg', '.gGGGg.', '..gsg..'],
+];
+const LEAF_COLORS = [['#a9d96c', '#6f9e3d'], ['#c8e27a', '#86a745'], ['#f0d266', '#b89a3a'], ['#eea458', '#b56e2c'], ['#8fcb5e', '#5a8a33']];
+let leafPictures: HTMLCanvasElement[] | undefined;
+
+function leaves(): HTMLCanvasElement[] {
+  if (leafPictures) return leafPictures;
+  leafPictures = [];
+  for (const shape of LEAF_SHAPES) {
+    for (const [light, dark] of LEAF_COLORS) {
+      const c = document.createElement('canvas');
+      c.width = shape[0].length;
+      c.height = shape.length;
+      const g = c.getContext('2d')!;
+      shape.forEach((row, y) => [...row].forEach((ch, x) => {
+        if (ch === '.') return;
+        g.fillStyle = ch === 'g' ? light : ch === 'G' ? dark : '#6b4a2b';
+        g.fillRect(x, y, 1, 1);
+      }));
+      leafPictures.push(c);
+    }
+  }
+  return leafPictures;
+}
 
 export class Breeze {
   private gust: Gust | undefined;
   next = performance.now() + 9000 + Math.random() * 12000;
   private leaves: Leaf[] = [];
-  private curls: Curl[] = [];
-  private nextCurl = 0;
+  private wisps: Wisp[] = [];
+  private nextWisp = 0;
 
-  /** Starts gusts and moves leaves; `trees` lists the crowns on screen, asked for only when a gust begins. */
+  /** Starts gusts and moves leaves and wisps; `trees` lists the crowns on screen, asked for only when a gust begins. */
   update(now: number, dt: number, view: { left: number; right: number; top: number; bottom: number }, trees: () => [number, number][]): void {
     if (!this.gust && now >= this.next) {
       const list = trees();
-      this.next = now + 22000 + Math.random() * 26000;
+      this.next = now + 24000 + Math.random() * 26000;
       if (list.length > 0) {
         this.gust = {
           start: now,
           from: view.left - BAND * 2,
           to: view.right + BAND * 2,
-          speed: 260 + Math.random() * 90,
+          speed: 110 + Math.random() * 40,
           trees: list.map(([x, y]) => [x, y, Math.random()]),
         };
+        this.nextWisp = now;
       }
     }
     const g = this.gust;
@@ -65,44 +99,46 @@ export class Breeze {
       const front = this.front(now)!;
       if (front > g.to) this.gust = undefined;
       else {
-        // Now and then a little curl of wind rides along with the front.
-        if (now >= this.nextCurl && g.trees.length > 0) {
-          this.nextCurl = now + 450 + Math.random() * 500;
+        if (now >= this.nextWisp && g.trees.length > 0) {
+          this.nextWisp = now + 900 + Math.random() * 900;
           const t = g.trees[Math.floor(Math.random() * g.trees.length)];
-          this.curls.push({ x: front - 40, y: t[1] + 10 + Math.random() * 30, born: now, size: 7 + Math.random() * 5 });
+          this.wisps.push({
+            x: front - 30, y: t[1] + Math.random() * 40, born: now, life: 3200 + Math.random() * 1200,
+            phase: Math.random() * 6, loopAt: 0.35 + Math.random() * 0.3, size: 7 + Math.random() * 4,
+          });
         }
         // Trees just reached by the front let go of a leaf or two.
         for (const t of g.trees) {
           const d = front - t[0];
           if (d < 0 || d > g.speed * dt * 1.5) continue;
-          if (t[2] > 0.55 || this.leaves.length >= MAX_LEAVES) continue;
-          const n = t[2] < 0.15 ? 2 : 1;
+          if (t[2] > 0.5 || this.leaves.length >= MAX_LEAVES) continue;
+          const n = t[2] < 0.12 ? 2 : 1;
           for (let i = 0; i < n; i++) {
             this.leaves.push({
               x: t[0] + (Math.random() - 0.5) * 26,
               y: t[1] + Math.random() * 22,
-              vx: 50 + Math.random() * 40,
-              vy: -8 - Math.random() * 10,
+              vx: 22 + Math.random() * 18,
+              vy: -5 - Math.random() * 6,
               born: now,
-              life: 2600 + Math.random() * 1800,
+              life: 3800 + Math.random() * 2400,
               spin: Math.random() * 6,
-              color: LEAF_COLORS[Math.floor(Math.random() * LEAF_COLORS.length)],
+              turn: (Math.random() < 0.5 ? -1 : 1) * (1.2 + Math.random() * 1.6),
+              look: Math.floor(Math.random() * LEAF_SHAPES.length * LEAF_COLORS.length),
             });
           }
         }
       }
     }
-    if (this.curls.length) this.curls = this.curls.filter((c) => now - c.born < 1400);
-    for (const c of this.curls) c.x += (g?.speed ?? 300) * 0.8 * dt;
+    if (this.wisps.length) this.wisps = this.wisps.filter((w) => now - w.born < w.life);
     if (this.leaves.length === 0) return;
     this.leaves = this.leaves.filter((l) => now - l.born < l.life);
     for (const l of this.leaves) {
       const age = (now - l.born) / 1000;
-      // Carried by the wind, slowing down, and drifting slowly down while swinging from side to side.
-      l.vx *= 1 - 0.35 * dt;
-      l.vy = Math.min(16, l.vy + 14 * dt);
-      l.x += (l.vx + Math.sin(age * 3.1 + l.spin) * 12) * dt;
-      l.y += (l.vy + Math.cos(age * 4.3 + l.spin) * 9) * dt;
+      // Carried by the wind, slowing down, drifting down and swinging gently from side to side.
+      l.vx *= 1 - 0.25 * dt;
+      l.vy = Math.min(9, l.vy + 7 * dt);
+      l.x += (l.vx + Math.sin(age * 2.1 + l.spin) * 8) * dt;
+      l.y += (l.vy + Math.cos(age * 2.7 + l.spin) * 6) * dt;
     }
   }
 
@@ -111,51 +147,78 @@ export class Breeze {
     return g ? g.from + ((now - g.start) / 1000) * g.speed : undefined;
   }
 
-  /** How far a tree at world x leans right now: a skew factor, 0 when still. */
-  sway(wx: number, now: number): number {
+  /** How many pixels the top of a tree at world (x, y) leans right now. */
+  lean(wx: number, wy: number, now: number): number {
+    // A light breeze that never stops, rolling across the forest in slow waves.
+    let px = Math.sin(now / 1500 + wx * 0.011 + wy * 0.017) * 0.55 + Math.sin(now / 2300 + wx * 0.004) * 0.45;
     const front = this.front(now);
-    if (front === undefined) return 0;
-    const d = (front - wx) / BAND;
-    if (d < -1.2 || d > 2.5) return 0;
-    // Bends as the front arrives, springs back a little past upright, and settles.
-    const lean = d < 0 ? Math.exp(-d * d * 4) : Math.exp(-d * 1.6) * Math.cos(d * 2.4);
-    return lean * 0.07;
+    if (front !== undefined) {
+      const d = (front - wx) / BAND;
+      // Bends as the front arrives, springs back a little past upright, and settles.
+      if (d > -1.2 && d < 2.5) px += (d < 0 ? Math.exp(-d * d * 4) : Math.exp(-d * 1.4) * Math.cos(d * 2.2)) * 3.6;
+    }
+    return px;
   }
 
   get active(): boolean {
-    return this.gust !== undefined || this.leaves.length > 0 || this.curls.length > 0;
+    return this.gust !== undefined || this.leaves.length > 0 || this.wisps.length > 0;
   }
 
-  /** Draws the leaves; `toScreen` turns a world point into a screen point. */
+  /** Draws leaves and wisps; `toScreen` turns a world point into a screen point. */
   draw(ctx: CanvasRenderingContext2D, now: number, toScreen: (x: number, y: number) => [number, number]): void {
-    // Wind curls: a stroke that sweeps along and ends in a small loop, fading in and out.
-    ctx.lineWidth = 1.5;
     ctx.lineCap = 'round';
-    for (const c of this.curls) {
-      const k = (now - c.born) / 1400;
-      const [x, y] = toScreen(c.x, c.y);
-      ctx.strokeStyle = `rgba(255,255,245,${(Math.sin(k * Math.PI) * 0.38).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.moveTo(x - c.size * 3, y + 1);
-      ctx.quadraticCurveTo(x - c.size, y + 2, x, y);
-      ctx.arc(x, y - c.size / 2, c.size / 2, Math.PI / 2, Math.PI / 2 - Math.PI * 1.6 * Math.min(1, k * 2), true);
-      ctx.stroke();
-    }
+    for (const w of this.wisps) this.drawWisp(ctx, w, now, toScreen);
+    const pictures = leaves();
     for (const l of this.leaves) {
       const age = now - l.born;
       const k = age / l.life;
-      // A leaf turning over: it looks narrower as it shows its edge.
-      const flip = Math.abs(Math.cos(age / 170 + l.spin));
       const [x, y] = toScreen(l.x, l.y);
-      ctx.globalAlpha = k > 0.75 ? (1 - k) / 0.25 : Math.min(1, age / 200);
-      ctx.fillStyle = l.color;
-      const w = Math.max(1, Math.round(4 * flip));
-      ctx.fillRect(Math.round(x), Math.round(y), w, 3);
-      // A darker edge and stem, so the leaf reads against the trees.
-      ctx.fillStyle = 'rgba(50,70,25,.6)';
-      ctx.fillRect(Math.round(x), Math.round(y) + 2, w, 1);
-      if (flip > 0.5) ctx.fillRect(Math.round(x) + w, Math.round(y) + 1, 1, 1);
+      ctx.globalAlpha = k > 0.8 ? (1 - k) / 0.2 : Math.min(1, age / 250);
+      // Tumbling: the leaf turns round and, flipping over, looks narrower when edge-on.
+      const angle = l.spin + (age / 1000) * l.turn;
+      const flip = Math.cos(age / 420 + l.spin);
+      ctx.save();
+      ctx.translate(Math.round(x), Math.round(y));
+      ctx.rotate(angle);
+      ctx.scale(Math.abs(flip) < 0.2 ? 0.2 * Math.sign(flip || 1) : flip, 1);
+      const pic = pictures[l.look % pictures.length];
+      ctx.drawImage(pic, -pic.width / 2, -pic.height / 2);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * A wisp: the head moves along a gently waving path that winds once into a soft loop; the path
+   * behind it is drawn as a thin stroke that fades towards its tail, and the whole wisp fades in
+   * and out over its life.
+   */
+  private drawWisp(ctx: CanvasRenderingContext2D, w: Wisp, now: number, toScreen: (x: number, y: number) => [number, number]): void {
+    const life = (now - w.born) / w.life;
+    const head = life * 1.25;
+    const point = (u: number): [number, number] => {
+      // One loop, centred on `loopAt` along the path, eased in and out.
+      const t = Math.min(1, Math.max(0, (u - w.loopAt) / 0.22));
+      const turn = t * t * (3 - 2 * t) * Math.PI * 2;
+      const x = w.x + u * 150 + Math.sin(turn) * w.size;
+      const y = w.y + Math.sin(u * 5 + w.phase) * 4 - (1 - Math.cos(turn)) * w.size * 0.9;
+      return toScreen(x, y);
+    };
+    const tail = 0.42;
+    const steps = 16;
+    const fade = Math.sin(Math.min(1, life) * Math.PI);
+    let prev = point(Math.max(0, head - tail));
+    for (let i = 1; i <= steps; i++) {
+      const u = Math.max(0, head - tail + (tail * i) / steps);
+      const p = point(u);
+      const along = i / steps;
+      ctx.strokeStyle = `rgba(250,252,240,${(fade * along * 0.42).toFixed(3)})`;
+      ctx.lineWidth = 0.6 + along * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(prev[0], prev[1]);
+      ctx.lineTo(p[0], p[1]);
+      ctx.stroke();
+      prev = p;
+    }
   }
 }

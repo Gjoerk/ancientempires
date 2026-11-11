@@ -681,7 +681,7 @@ function renderPlayers(): void {
   for (const p of roster) {
     const chip = document.createElement('span');
     chip.className = 'chip';
-    chip.style.background = PLAYER_COLORS[p.slot];
+    chip.style.setProperty('--gem', `var(--gem-${p.slot})`);
     const label = document.createElement('span');
     label.textContent = p.name + (p.slot === me ? (p.slot === myOwnSlot ? ' (you)' : ' (playing)') : '');
     label.style.marginRight = '14px';
@@ -2500,17 +2500,9 @@ function frame(now: number): void {
     const ty = Math.floor(index / map.size);
     const [sx, sy] = tileToScreen(tx + 0.5, ty + 0.5);
     if (far || sx < -40 || sy < -10 || sx > viewW() + 40 || sy > viewH() + 60 || !explored[index]) continue;
-    const lean = tile === Tile.Forest && breeze.active ? breeze.sway(sx + cam.x - viewW() / 2, now) : 0;
-    drawables.push({ depth: tx + ty + 1, draw: () => {
-      if (Math.abs(lean) < 0.004) return drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now);
-      // Leaning in the wind: the tree is skewed about its foot, so the crown moves and the trunk stays put.
-      ctx.save();
-      ctx.translate(sx, sy + 5);
-      ctx.transform(1, 0, -lean, 1, 0, 0);
-      ctx.translate(-sx, -(sy + 5));
-      drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now);
-      ctx.restore();
-    } });
+    // Trees sway a little all the time, and lean with a passing gust.
+    const lean = tile === Tile.Forest ? breeze.lean(sx + cam.x - viewW() / 2, sy + cam.y - viewH() / 2, now) : 0;
+    drawables.push({ depth: tx + ty + 1, draw: () => drawProp(ctx, tile, sx, sy, Math.floor(hash(tx, ty) * 6), now, lean) });
   }
   const onScreen = (tx: number, ty: number, margin: number) => {
     const [x, y] = tileToScreen(tx, ty);

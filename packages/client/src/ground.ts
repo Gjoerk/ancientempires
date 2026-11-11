@@ -2,7 +2,7 @@ import { Tile } from '@kingsfall/shared';
 
 /**
  * Paints detailed ground into a block picture, in 2 × 2 pixel cells like chunky pixel art:
- * grass in soft patches with blades and the odd flower, a darker forest floor with fallen leaves,
+ * grass in soft patches with blades, a darker forest floor with fallen leaves,
  * sandy banks and foam where land meets water, and water that deepens away from the shore.
  * Every cell is worked out from its position in the world, so blocks join without seams and the
  * coastline wanders a little instead of following the tile grid.
@@ -25,7 +25,6 @@ const WATER = ['#2a5f97', '#2f6aa3', '#3474ad', '#3c80b8'].map(rgb);
 const SHALLOW = ['#4a92c4', '#57a0cf'].map(rgb);
 const FOAM = rgb('#d8edf3');
 const WAVE = rgb('#6fb0dc');
-const FLOWERS = ['#f4f1e4', '#f2d64b', '#d9a0e0', '#f08a8a'].map(rgb);
 const BLADE_DARK = rgb('#356a2a');
 const BLADE_LIGHT = rgb('#78b456');
 
@@ -72,7 +71,7 @@ function distanceTo(mask: number, fx: number, fy: number): number {
 const pack = (c: [number, number, number]) => (255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
 const P = {
   grass: GRASS.map(pack), forest: FOREST.map(pack), litter: LITTER.map(pack), sand: SAND.map(pack), water: WATER.map(pack),
-  shallow: SHALLOW.map(pack), foam: pack(FOAM), wave: pack(WAVE), flowers: FLOWERS.map(pack), bladeDark: pack(BLADE_DARK), bladeLight: pack(BLADE_LIGHT),
+  shallow: SHALLOW.map(pack), foam: pack(FOAM), wave: pack(WAVE), bladeDark: pack(BLADE_DARK), bladeLight: pack(BLADE_LIGHT),
 };
 
 let buffer: ImageData | undefined;
@@ -182,8 +181,6 @@ export function paintGround(c: CanvasRenderingContext2D, src: GroundSource, x0: 
           color = P.bladeDark;
         } else if (hash(cellX, cellY + 1) < 0.025) {
           color = P.bladeLight;
-        } else if (grain > 0.999 && soft > 0.45) {
-          color = P.flowers[Math.floor(hash(cellY, cellX) * P.flowers.length)];
         } else {
           color = P.grass[Math.min(5, Math.floor(soft * 6))];
         }
