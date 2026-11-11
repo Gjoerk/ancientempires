@@ -38,6 +38,8 @@ export interface Relic {
   carrier: number;
   /** The monastery keeping it, or -1. */
   monastery: number;
+  /** Bit mask of the players who have seen it so far. */
+  foundBy: number;
 }
 
 export interface Entity {
@@ -1058,6 +1060,19 @@ function stepDeliver(state: GameState, e: Entity, o: Extract<Order, { t: 'delive
   e.order = { t: 'idle' };
 }
 
+/** Notes which players have seen each relic: anything of theirs within sight of it. */
+function spotRelics(state: GameState): void {
+  if (state.tick % 5 !== 0) return;
+  for (const r of state.relics) {
+    for (const e of state.entities.values()) {
+      if (e.inside >= 0 || (r.foundBy >> e.owner) & 1) continue;
+      const half = isBuilding(e) ? sizeOf(e) / 2 : 0;
+      const sight = (DEFS[e.kind].sight ?? DEFAULT_SIGHT) + half;
+      if (Math.hypot(e.x + half - r.x, e.y + half - r.y) <= sight) r.foundBy |= 1 << e.owner;
+    }
+  }
+}
+
 /** Carried relics go with their monks. */
 function moveRelics(state: GameState): void {
   for (const r of state.relics) {
@@ -1133,7 +1148,7 @@ export function placeRelics(state: GameState): void {
     if (map.tiles[i] !== Tile.Grass || map.footprint[i] || map.blocked[i]) continue;
     if (map.starts.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < awayFromTowns)) continue;
     if (state.relics.some((r) => Math.hypot(r.x - x, r.y - y) < n * 0.2)) continue;
-    state.relics.push({ x: x + 0.5, y: y + 0.5, carrier: -1, monastery: -1 });
+    state.relics.push({ x: x + 0.5, y: y + 0.5, carrier: -1, monastery: -1, foundBy: 0 });
   }
 }
 
@@ -1330,6 +1345,7 @@ export function step(state: GameState): void {
     if (!isBuilding(e)) moveAlongPath(e);
   }
   moveRelics(state);
+  spotRelics(state);
 
   // A player whose king is dead is out, and everything they own goes with them.
   const kings = new Set<number>();

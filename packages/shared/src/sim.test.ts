@@ -709,3 +709,17 @@ test('towns start in a different spot of their corner from game to game', () => 
   }
   assert.ok(spots.size >= 8, `only ${spots.size} different first towns`);
 });
+
+test('the relic notes who has seen it', () => {
+  const host = new GameHost('TEST');
+  host.join('Me');
+  host.join('Them');
+  host.start(9);
+  const s = host.state!;
+  const relic = s.relics[0];
+  for (let i = 0; i < 6; i++) host.tick();
+  assert.equal(relic.foundBy, 0, 'nobody starts next to it');
+  spawn(s, 1, 'scout', relic.x + 3, relic.y);
+  for (let i = 0; i < 6; i++) host.tick();
+  assert.equal(relic.foundBy, 1 << 1, 'only the scout\'s player has seen it');
+});

@@ -120,7 +120,7 @@ export class GameHost {
         [...s.entities.values()].some((e) => e.owner === p.slot && e.recall) ? 1 : 0,
       ]),
       blessings: s.blessings,
-      relics: s.relics.map((r) => [round(r.x), round(r.y), r.carrier, r.monastery]),
+      relics: s.relics.map((r) => [round(r.x), round(r.y), r.carrier, r.monastery, r.foundBy]),
       tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths, rallies, winner: s.winner,
     };
   }

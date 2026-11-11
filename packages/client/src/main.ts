@@ -92,8 +92,8 @@ interface PlayerView {
   bell: boolean;
 }
 
-/** Relics: [x, y, carrying monk or -1, keeping monastery or -1]. */
-let relics: [number, number, number, number][] = [];
+/** Relics: [x, y, carrying monk or -1, keeping monastery or -1, bit mask of the players who have seen it]. */
+let relics: [number, number, number, number, number][] = [];
 
 /** Relics kept by a player, as they count for the attack bonus. */
 function relicsKept(owner: number): number {
@@ -967,14 +967,20 @@ function onMessage(msg: ServerMessage): void {
     for (const [id, ...rest] of msg.queues) queues.set(id, rest);
     let defeatChanged = false;
     gameTick = msg.tick;
-    // Everyone hears when a monk picks up the relic, and when it is brought home.
-    msg.relics.forEach(([, , carrier, monastery], i) => {
+    // Everyone hears when a player first sets eyes on the relic, when a monk picks it up, and when it is brought home.
+    msg.relics.forEach(([, , carrier, monastery, foundBy], i) => {
       const before = relics[i];
       if (!before) return;
+      const fresh = foundBy & ~before[4];
+      for (const p of roster) {
+        if (!((fresh >> p.slot) & 1)) continue;
+        showNotice(p.slot, 'found the relic!');
+        play('relic', 500);
+      }
       if (carrier >= 0 && before[2] < 0) {
         const monk = views.get(carrier);
         if (monk) {
-          showNotice(monk.owner, 'found the relic!');
+          showNotice(monk.owner, 'picked up the relic.');
           play('relic', 500);
         }
       }
@@ -2080,11 +2086,14 @@ function renderPanel(): void {
     if (v.kind === 'castle' && v.extra >= 100) {
       card.sub = v.task & 2 ? `The king is inside${v.target > 1 ? ` with ${v.target - 1} more` : ''}` : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
     }
-    // Buttons that come and go are added after all the others, so that nothing moves.
-    const later: PanelButton[] = [];
+    // The bell comes first, so that buttons coming and going never move it.
+    if (v.kind === 'towncenter' && v.owner === me && v.extra >= 100) {
+      const rung = players.get(me)?.bell === true;
+      buttons.push({ label: rung ? 'Back to work' : 'Ring the bell', icon: rung ? 'allclear' : 'bell', detail: describeAction(rung ? 'allclear' : 'bell'), data: { bell: '1' } });
+    }
     if (DEFS[v.kind].garrison && v.extra >= 100) {
       if (v.task === 1) card.sub = `${v.target} sheltering inside`;
-      if (v.task && v.owner === me) later.push({ label: 'Send everyone out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
+      if (v.task && v.owner === me) buttons.push({ label: 'Send everyone out', icon: 'eject', detail: describeAction('eject'), data: { eject: String(v.id) } });
     }
     if (v.kind === 'monastery' && v.extra >= 100) {
       const kept = relics.filter((r) => r[3] === v.id).length;
@@ -2103,29 +2112,19 @@ function renderPanel(): void {
       }
       for (const id of TECH_IDS) {
         const tech = TECHS[id];
-        if (tech.at !== v.kind) continue;
-        // Every upgrade keeps its place: once done or queued it stays, greyed out.
-        const done = has(id);
-        const queued = (((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) === 1;
+        if (tech.at !== v.kind || has(id) || ((my?.researching ?? 0) >> TECH_IDS.indexOf(id)) & 1) continue;
+        if (id === 'age3' && age < 2) continue;
         const d = describeTech(id, has, age);
-        if (done) d.warn = 'Already researched.';
-        else if (queued) d.warn = 'Being researched.';
-        else if (id === 'age3' && age < 2) d.warn = d.warn ?? 'Needs the Town Age first.';
-        const short = done ? 'done' : queued ? 'queued' : tech.age > age ? AGE_NAMES[tech.age].replace(' Age', '') : id === 'age3' && age < 2 ? 'Town' : d.warn ? 'locked' : undefined;
-        buttons.push({ label: tech.label, icon: id, cost: done || queued ? undefined : tech.cost, locked: done || queued || !!d.warn, short, detail: d, data: { train: id, at } });
-      }
-      if (v.kind === 'towncenter') {
-        const rung = players.get(me)?.bell === true;
-        buttons.push({ label: rung ? 'Back to work' : 'Ring the bell', icon: rung ? 'allclear' : 'bell', detail: describeAction(rung ? 'allclear' : 'bell'), data: { bell: '1' } });
+        const short = tech.age > age ? AGE_NAMES[tech.age].replace(' Age', '') : d.warn ? 'locked' : undefined;
+        buttons.push({ label: tech.label, icon: id, cost: tech.cost, locked: !!d.warn, short, detail: d, data: { train: id, at } });
       }
       if (v.kind === 'market') {
         for (const r of TRADE_GOODS) buttons.push({ label: `Sell ${r}`, icon: `sell.${r}`, gain: { gold: TRADE_SELL }, locked: (my?.res[r] ?? 0) < 100, short: `100 ${r}`, detail: describeAction(`sell.${r}`), data: { sell: r, at } });
         for (const r of TRADE_GOODS) buttons.push({ label: `Buy ${r}`, icon: `buy.${r}`, cost: { gold: TRADE_BUY }, detail: describeAction(`buy.${r}`), data: { buy: r, at } });
       }
-      if (queue) later.push({ label: 'Cancel last', icon: 'cancel', detail: describeAction('cancel'), data: { cancel: at } });
+      if (queue) buttons.push({ label: 'Cancel last', icon: 'cancel', detail: describeAction('cancel'), data: { cancel: at } });
       if (def.trains) detail.lines.push('Right-click the map to set a gathering point.');
     }
-    buttons.push(...later);
   } else if (chosen.length > 1) {
     const counts = new Map<Kind, number>();
     for (const v of chosen) counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);

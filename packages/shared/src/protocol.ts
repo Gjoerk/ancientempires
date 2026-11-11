@@ -68,8 +68,8 @@ export type ServerMessage =
       shots: [number, number][];
       /** Monks at work this tick: [monk id, target id, 1 heal / 2 convert]. */
       blessings: [number, number, number][];
-      /** Every relic: [x, y, carrying monk or -1, keeping monastery or -1]. */
-      relics: [number, number, number, number][];
+      /** Every relic: [x, y, carrying monk or -1, keeping monastery or -1, bit mask of the players who have seen it]. */
+      relics: [number, number, number, number, number][];
       /** Melee blows this tick: [attacker id, target id]. */
       hits: [number, number][];
       /** Deaths this tick: [kind index, x, y, owner]. */
