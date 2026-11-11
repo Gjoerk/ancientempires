@@ -199,25 +199,53 @@ function villager(p: Pen, frame: number): void {
   p.rect(f.left, f.hip - 1, 2, 2, 'o');
 }
 
-function king(p: Pen, frame: number): void {
-  // The cape hangs behind him, down to the heels.
-  const top = GY - Math.round(LEGS * 1.1) + 1 - Math.round(TORSO * 1.1);
-  p.rect(CX - Math.floor((WIDTH + 2) / 2) - 2, top, 4, GY - top, 'c');
-  const f = person(p, frame, 't', { scale: 1.1 });
-  // Ermine collar.
-  p.rect(f.left, f.top, f.right - f.left + 1, 2, 'b');
-  for (let x = f.left + 1; x < f.right; x += 3) p.dot(x, f.top + 1, 'e');
-  hair(p, f, 'u');
-  p.rect(Math.round(f.headX), Math.round(f.headY + HEAD - 1), HEAD, 2, 'u');
-  // Crown with three points and a jewel.
+/** A tall crown with points, a band and jewels, sitting on the head of a figure. */
+function bigCrown(p: Pen, f: Figure): void {
   const cy = Math.round(f.headY - HEAD);
-  const cx0 = Math.round(f.headX - HEAD);
-  p.rect(cx0, cy - 1, HEAD * 2 + 1, 2, 'y');
-  for (let i = 0; i <= 2; i++) p.dot(cx0 + i * HEAD, cy - 2, 'y');
-  p.dot(Math.round(f.headX), cy - 1, 'r');
-  // Sceptre.
-  p.line(f.handX + 1, f.handY + 2, f.handX + 1, f.handY - 6, 'y');
-  p.ellipse(f.handX + 1, f.handY - 7, 1, 1, 'r');
+  const cx0 = Math.round(f.headX - HEAD) - 1;
+  const w = HEAD * 2 + 3;
+  p.rect(cx0, cy - 1, w, 2, 'y');
+  // Four points, the middle two taller.
+  for (const [dx, h] of [[0, 2], [Math.floor(w / 3), 3], [w - 1 - Math.floor(w / 3), 3], [w - 1, 2]] as const) p.rect(cx0 + dx, cy - 1 - h, 1, h, 'y');
+  p.dot(cx0 + Math.floor(w / 2), cy - 3, 'y');
+  p.dot(cx0 + 2, cy, 'r');
+  p.dot(cx0 + Math.floor(w / 2), cy, 'f');
+  p.dot(cx0 + w - 3, cy, 'r');
+}
+
+/** A white beard on the lower half of the face. */
+function beard(p: Pen, f: Figure): void {
+  p.rect(Math.round(f.headX), Math.round(f.headY + 2), HEAD, 1, 'w');
+  p.dot(Math.round(f.headX) + 1, Math.round(f.headY + 3), 'w');
+}
+
+/**
+ * The king in his royal robe: a long red mantle that spreads out over the ground behind him,
+ * edged with ermine, a tall crown and a sceptre with an orb.
+ */
+function king(p: Pen, frame: number): void {
+  const top = GY - Math.round(LEGS * 1.1) + 1 - Math.round(TORSO * 1.1);
+  // The mantle: from the shoulders, widening towards the ground and trailing behind.
+  for (let y = top; y <= GY; y++) {
+    const k = (y - top) / (GY - top);
+    const w = Math.round(6 + k * 7);
+    p.rect(CX - 3 - Math.round(k * 6), y, w, 1, 'r');
+  }
+  p.rect(CX - 9, GY, 9, 1, 'b');
+  p.rect(CX - 9, GY - 1, 9, 1, 'b');
+  for (let x = CX - 8; x < CX; x += 3) p.dot(x, GY - 1, 'e');
+  const f = person(p, frame, 't', { scale: 1.1 });
+  p.rect(f.left - 1, f.top, f.right - f.left + 3, 2, 'b');
+  for (let x = f.left; x <= f.right; x += 2) p.dot(x, f.top + 1, 'e');
+  p.rect(CX - 1, f.top + 2, 2, f.hip - f.top - 2, 'y');
+  hair(p, f, 'm');
+  beard(p, f);
+  bigCrown(p, f);
+  // Sceptre with an orb and a cross.
+  p.line(f.handX + 1, f.handY + 2, f.handX + 1, f.handY - 8, 'y');
+  p.ellipse(f.handX + 1, f.handY - 9, 1.4, 1.4, 'y');
+  p.dot(f.handX + 1, f.handY - 9, 'r');
+  p.rect(f.handX + 1, f.handY - 12, 1, 2, 'y');
 }
 
 function swordsman(p: Pen, frame: number): void {

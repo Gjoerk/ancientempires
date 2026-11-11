@@ -10,7 +10,7 @@ For every unit there is:
 | Unit | Key | Size (px) | Feet / anchor |
 | --- | --- | --- | --- |
 | Villager | `unit.villager` | 16 × 28 | [8, 28] |
-| King | `unit.king` | 18 × 31 | [9, 31] |
+| King | `unit.king` | 20 × 33 | [10, 33] |
 | Swordsman | `unit.swordsman` | 14 × 28 | [7, 28] |
 | Spearman | `unit.spearman` | 22 × 38 | [11, 38] |
 | Archer | `unit.archer` | 22 × 28 | [11, 28] |

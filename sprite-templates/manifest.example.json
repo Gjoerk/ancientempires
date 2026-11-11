@@ -10,8 +10,8 @@
   "unit.king": {
     "src": "king.png",
     "anchor": [
-      9,
-      31
+      10,
+      33
     ],
     "teamMask": "king_mask.png"
   },
