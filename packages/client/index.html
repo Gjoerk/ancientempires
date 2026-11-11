@@ -58,6 +58,8 @@
     #top { top: 0; border-width: 0 0 2px; border-color: var(--trim); box-shadow: 0 3px 12px rgba(0, 0, 0, .5); padding: 4px 8px; display: flex; gap: 10px; align-items: center; white-space: nowrap;
       overflow-x: auto; scrollbar-width: none; }
     #top::-webkit-scrollbar { display: none; }
+    /* Both bars wear the fleur-de-lis pattern of the menu card. */
+    #top { background: var(--pat-fleur) 0 0 / 48px 48px, linear-gradient(180deg, #0b2016, #11301f); }
     #resources { display: flex; gap: 6px; align-items: center; }
     /* Every chip in the top bar is the same height, so text-only ones (age, clock) are centred like the rest. */
     .stat { display: inline-flex; align-items: center; gap: 4px; height: 28px; box-sizing: border-box; padding: 0 8px 0 3px; background: var(--slot); border-radius: 4px;
@@ -105,7 +107,7 @@
        Command tiles (#actions), the selection card (#sel), a details box (#details) and the minimap. */
     #bottom { bottom: 0; height: var(--bar-h, 236px); display: grid; gap: 10px; padding: 8px 10px; box-sizing: border-box;
       border: 0; border-top: 2px solid var(--trim);
-      background: linear-gradient(180deg, #153225, var(--plain) 40%);
+      background: var(--pat-fleur) 0 0 / 48px 48px, linear-gradient(180deg, #11301f, #0b2016);
       box-shadow: inset 0 1px 0 rgba(0, 0, 0, .6), 0 -4px 14px rgba(0, 0, 0, .5); }
     /* A recessed area inside the bar. */
     .well { background: rgba(0, 0, 0, .26); border: 1px solid #050d09; border-radius: 4px;
@@ -175,11 +177,24 @@
     /* The minimap takes the full height of the bar on wide screens (canvas 420 × 210 inside the 236px bar). */
     body[data-bar="a"] #bottom { --bar-h: 236px; --map-w: 420px;
       grid-template-columns: auto minmax(230px, 290px) minmax(220px, 1fr) auto auto; grid-template-areas: "actions sel details idle map"; }
-    body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(6, 58px); grid-auto-rows: 58px; gap: 4px; }
-    /* Icon-only tiles as in classic strategy games; name, cost and effect are in the details box. */
-    body[data-bar="a"] #actions button { width: 58px; height: 58px; padding: 0; justify-content: center; }
-    body[data-bar="a"] #actions button img.pic { width: 46px; height: 46px; }
-    body[data-bar="a"] #actions button .lbl, body[data-bar="a"] #actions button .cost { display: none; }
+    /* Wide screens: three rows of big tiles, each with its picture and name; cost and effect are in the details box. */
+    body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(var(--cols, 8), var(--tile-w, 80px)); grid-auto-rows: var(--tile-h, 64px); gap: 4px; }
+    body[data-bar="a"] #actions button { width: var(--tile-w, 80px); height: var(--tile-h, 64px); padding: 2px 2px 3px; justify-content: center; gap: 1px; }
+    body[data-bar="a"] #actions button img.pic { width: 44px; height: 44px; }
+    body[data-bar="a"] #actions button .lbl { font-size: 11px; line-height: 13px; height: 13px; color: var(--ink); opacity: .9; }
+    body[data-bar="a"] #actions button .cost { display: none; }
+    body[data-bar="a"] #bottom #actions button.locked::before { top: 3px; bottom: auto; right: 3px; }
+    /* Less room: six columns of smaller, picture-only tiles. */
+    @media (max-width: 1700px) {
+      body[data-bar="a"] #bottom { --cols: 6; }
+    }
+    @media (max-width: 1450px) {
+      body[data-bar="a"] #bottom { --tile-w: 58px; --tile-h: 58px; }
+      body[data-bar="a"] #actions button { padding: 0; }
+      body[data-bar="a"] #actions button img.pic { width: 46px; height: 46px; }
+      body[data-bar="a"] #actions button .lbl { display: none; }
+      body[data-bar="a"] #bottom #actions button.locked::before { top: auto; bottom: 2px; }
+    }
     body[data-bar="a"] #actions button.poor::after { content: ""; position: absolute; inset: 0; background: rgba(200, 40, 20, .28); }
     body[data-bar="a"] #actions button.locked::before { content: ""; position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px;
       background: var(--lock-icon) center / contain no-repeat; }
@@ -366,14 +381,19 @@
     #pause .end-buttons button { min-width: 108px; padding: 8px 14px; font-size: 15px; }
     #pause .end-buttons button[hidden] { display: none; }
     body.paused #game { filter: saturate(.45) brightness(.8); }
-    #end { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 40; width: min(420px, calc(100vw - 32px));
-      padding: 22px 24px 16px; text-align: center; }
-    #end h2 { margin: 0 0 6px; font-family: var(--title-font, var(--font)); font-size: 30px; color: var(--accent); }
-    #end p { margin: 0 0 16px; }
-    #end .end-buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-    #end .end-buttons button { min-width: 108px; padding: 8px 14px; font-size: 15px; }
-    #end #end-wait { margin: 12px 0 0; font-size: 13px; }
-    #end .link { margin-top: 12px; background: none; border: 0; box-shadow: none; color: var(--accent); text-decoration: underline; font-size: 13px; cursor: pointer; }
+    #end { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 40; text-align: center; }
+    #end[hidden] { display: none; }
+    #end .card-wrap { margin: 0; }
+    #end .card { justify-items: center; }
+    #end .emblem { margin: 0 auto -4px; }
+    body[data-menu="1"] #end .card h1 { font-size: 44px; }
+    #end p { margin: 0; }
+    #end .end-buttons { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 6px; }
+    body[data-menu="1"] #end .end-buttons button { padding: 11px 24px; }
+    #end #end-wait { font-size: 13px; }
+    body[data-menu="1"] #end .card button.link { clip-path: none; margin-top: 2px; padding: 2px 6px; background: none; color: var(--accent); text-decoration: underline;
+      text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 13px; }
+    body[data-menu="1"] #end .card button.link::after { display: none; }
 </style>
 </head>
 <body data-bar="a" data-skin="3" data-menu="1">
@@ -439,16 +459,20 @@
     <button id="deselect-btn" type="button">Deselect</button>
   </div>
   <div id="banner" class="frame" hidden></div>
-  <div id="end" class="frame" hidden role="dialog" aria-labelledby="end-title">
-    <h2 id="end-title"></h2>
-    <p id="end-text"></p>
-    <div class="end-buttons">
-      <button id="rematch-btn" type="button" title="Play again at once with the same players and settings, on a new map">Rematch</button>
-      <button id="newgame-btn" type="button" title="Back to the waiting room to change the settings">New game</button>
-      <button id="exit-btn" type="button" title="Leave to the main menu">Exit</button>
-    </div>
-    <p id="end-wait" class="dim" hidden>The host chooses a rematch or a new game.</p>
-    <button id="end-look" type="button" class="link">Look at the map</button>
+  <div id="end" hidden role="dialog" aria-labelledby="end-title">
+    <div class="card-wrap"><div class="card">
+      <img class="emblem" alt="">
+      <h1 id="end-title"></h1>
+      <div class="rule"></div>
+      <p id="end-text"></p>
+      <div class="end-buttons">
+        <button id="rematch-btn" type="button" class="primary" title="Play again at once with the same players and settings, on a new map">Rematch</button>
+        <button id="newgame-btn" type="button" title="Back to the waiting room to change the settings">New game</button>
+        <button id="exit-btn" type="button" title="Leave to the main menu">Exit</button>
+      </div>
+      <p id="end-wait" class="dim" hidden>The host chooses a rematch or a new game.</p>
+      <button id="end-look" type="button" class="link">Look at the map</button>
+    </div></div>
   </div>
   <div id="pause" class="frame" hidden role="dialog" aria-labelledby="pause-title">
     <h2 id="pause-title"></h2>
