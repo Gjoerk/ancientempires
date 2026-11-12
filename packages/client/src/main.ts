@@ -1660,13 +1660,15 @@ function drawFormationPreview(): void {
   const ranks = units.map((v) => formationRank(v.kind)).sort((a, b) => a - b);
   const [tx, ty] = screenToTile(rdrag.x, rdrag.y);
   const tiles = formationLayout(kind === 'none' ? 'line' : kind, ranks, tx, ty, snapFacing(face[0], face[1]));
-  // Each spot is a quarter of a tile: up to four units stand on one.
+  // Each spot as the ring a unit stands on: they nearly touch.
   tiles.forEach(([x, y], i) => {
-    diamond(x - 0.22, y - 0.22, 0.44);
-    ctx.fillStyle = ranks[i] === 0 ? 'rgba(255,240,180,.32)' : 'rgba(150,210,255,.3)';
+    const [px, py] = tileToScreen(x, y);
+    ctx.beginPath();
+    ctx.ellipse(px, py, 12, 6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = ranks[i] === 0 ? 'rgba(255,240,180,.28)' : 'rgba(150,210,255,.28)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,240,180,.7)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,240,180,.75)';
+    ctx.lineWidth = 1.5;
     ctx.stroke();
   });
   // The arrow along the drag.

@@ -552,26 +552,69 @@ export function snapFacing(dx: number, dy: number): [number, number] {
   return [Math.round(Math.cos(angle)), Math.round(Math.sin(angle))];
 }
 
-/** Units in a formation stand this far apart (in tiles): four to a tile, so big armies stay compact. */
-export const FORMATION_SPACING = 0.5;
+/**
+ * How far apart two units stand, measured in selection rings: the ring under a unit is an ellipse
+ * 26 by 13 pixels on screen, and a tile is 64 by 32. At 2 the rings just touch.
+ */
+export function ringGap(dx: number, dy: number): number {
+  return Math.hypot(((dx - dy) * 32) / 13, ((dx + dy) * 16) / 6.5);
+}
+
+/** Units stand this many rings apart: their rings nearly touch. */
+export const RING_SPACING = 2.1;
+
+/** The step between neighbours in a formation, in tiles: rows along the tiles, or along a diagonal. */
+export const formationStep = (face: [number, number]): number => RING_SPACING / (face[0] && face[1] ? ringGap(1, 1) : ringGap(1, 0));
 
 /**
  * Where the units of a formation stand, with its front at the tile (x, y), facing (fx, fy) in whole
- * steps, for units of the given ranks sorted soldiers first: exact points, a half tile apart. Rows run
- * along the tiles; on a diagonal they make a neat chequer.
+ * steps, for units of the given ranks sorted soldiers first: exact points, so close that their
+ * selection rings nearly touch. Rows run along the tiles, or along a diagonal.
  */
 export function formationLayout(kind: Formation, ranks: number[], x: number, y: number, face: [number, number]): [number, number][] {
   const [fx, fy] = face;
-  const k = FORMATION_SPACING;
+  const k = formationStep(face);
   const ox = Math.floor(x) + 0.5;
   const oy = Math.floor(y) + 0.5;
   return formationSlots(kind, ranks).map(([r, c]) => {
     const row = Math.round(r);
     const col = Math.round(c);
-    // Snapped to the quarter points, the centres of the four spots on each tile.
-    const snap = (v: number) => Math.floor(v * 2) / 2 + 0.25;
-    return [snap(ox - (fx * row + fy * col) * k), snap(oy - (fy * row - fx * col) * k)] as [number, number];
+    return [ox - (fx * row + fy * col) * k, oy - (fy * row - fx * col) * k] as [number, number];
   });
+}
+
+/** Spots already given out, by tile, to keep everyone a ring apart. */
+class Spots {
+  private byTile = new Map<number, [number, number][]>();
+  constructor(private size: number) {}
+  free(px: number, py: number, gap = RING_SPACING - 0.1): boolean {
+    const tx = Math.floor(px);
+    const ty = Math.floor(py);
+    for (let y = ty - 1; y <= ty + 1; y++) for (let x = tx - 1; x <= tx + 1; x++) {
+      for (const [qx, qy] of this.byTile.get(y * this.size + x) ?? []) if (ringGap(qx - px, qy - py) < gap) return false;
+    }
+    return true;
+  }
+  add(px: number, py: number): void {
+    const k = Math.floor(py) * this.size + Math.floor(px);
+    const list = this.byTile.get(k);
+    if (list) list.push([px, py]);
+    else this.byTile.set(k, [[px, py]]);
+  }
+}
+
+/** Points to try on a tile, centre first: a fine grid, so nearby spots can be packed tight. */
+const TILE_POINTS: [number, number][] = [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8], [0.5, 0.2], [0.2, 0.5], [0.8, 0.5], [0.5, 0.8]];
+
+/** The free point nearest to (px, py) on open ground, searching the tiles around. */
+function nearestSpot(map: GameMap, spots: Spots, px: number, py: number, tiles: number): [number, number] | undefined {
+  if (isWalkable(map, Math.floor(px), Math.floor(py)) && spots.free(px, py)) return [px, py];
+  for (const [tx, ty] of freeTilesNear(map, Math.floor(px), Math.floor(py), tiles)) {
+    const q = TILE_POINTS.map(([qx, qy]) => [tx + qx, ty + qy] as [number, number]).filter(([qx, qy]) => spots.free(qx, qy))
+      .sort((a, b) => Math.hypot(a[0] - px, a[1] - py) - Math.hypot(b[0] - px, b[1] - py))[0];
+    if (q) return q;
+  }
+  return undefined;
 }
 
 /** The formation most of the soldiers in a group have been given. */
@@ -590,28 +633,15 @@ function formation(state: GameState, units: Entity[], x: number, y: number, face
   const cx = units.reduce((a, e) => a + e.x, 0) / n;
   const cy = units.reduce((a, e) => a + e.y, 0) / n;
   const len = Math.hypot(x - cx, y - cy);
-  // Spots a half tile apart, four to a tile.
-  const half = state.map.size * 2;
-  const key = (px: number, py: number) => Math.floor(py * 2) * half + Math.floor(px * 2);
-  const taken = new Set<number>();
+  // Everyone a ring apart: the rings under them nearly touch.
+  const spots = new Spots(state.map.size);
   const out = new Map<Entity, [number, number]>();
   const place = (e: Entity, px: number, py: number) => {
-    // That spot if its tile is free ground; otherwise the nearest free spot, so that walls and trees just bend the formation.
-    let spot: [number, number] | undefined;
-    if (isWalkable(state.map, Math.floor(px), Math.floor(py)) && !taken.has(key(px, py))) spot = [px, py];
-    else {
-      // Enough tiles around for the whole group, however big.
-      for (const [tx, ty] of freeTilesNear(state.map, Math.floor(px), Math.floor(py), 12 + Math.ceil(n / 2))) {
-        const q = QUARTERS.map(([qx, qy]) => [tx + qx, ty + qy] as [number, number]).filter(([qx, qy]) => !taken.has(key(qx, qy)))
-          .sort((a, b) => Math.hypot(a[0] - px, a[1] - py) - Math.hypot(b[0] - px, b[1] - py))[0];
-        if (q) {
-          spot = q;
-          break;
-        }
-      }
-    }
+    // That spot if it is free open ground; otherwise the nearest free one (enough tiles around for the
+    // whole group, however big), so that walls and trees just bend the formation.
+    const spot = nearestSpot(state.map, spots, px, py, 12 + Math.ceil(n / 2));
     if (!spot) return;
-    taken.add(key(spot[0], spot[1]));
+    spots.add(spot[0], spot[1]);
     out.set(e, spot);
   };
   const kind = groupFormation(units);
@@ -1932,41 +1962,31 @@ function stepTraining(state: GameState, b: Entity): void {
   b.trainTicks = 0;
 }
 
-/** Units standing idle on the same tile shuffle apart so that each can be seen and clicked. */
-/** The four spots a half tile apart on a tile, as offsets from its corner. */
-const QUARTERS: [number, number][] = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
-
+/** Units standing idle right on top of each other shuffle apart, a ring apart, so that each can be seen and clicked. */
 function spreadIdleUnits(state: GameState): void {
-  const taken = new Set<number>();
+  const spots = new Spots(state.map.size);
   const crowded: Entity[] = [];
   for (const e of state.entities.values()) {
     if (isBuilding(e) || e.inside >= 0 || e.path.length > 0 || e.endAt) continue;
-    // Up to four can share a tile, a half tile apart, as formations put them.
-    const tile = Math.floor(e.y * 2) * state.map.size * 2 + Math.floor(e.x * 2);
     const shooting = e.order.t === 'attack' && isRangedKind(e.kind);
-    if (taken.has(tile) && (e.order.t === 'idle' || shooting)) crowded.push(e);
-    else taken.add(tile);
+    // Only when their rings overlap by more than half: standing close is fine, standing in one another is not.
+    if (!spots.free(e.x, e.y, 1) && (e.order.t === 'idle' || shooting)) crowded.push(e);
+    else spots.add(e.x, e.y);
   }
-  const half = state.map.size * 2;
   for (const e of crowded) {
     const team = teamOf(state, e.owner);
-    let spot: [number, number] | undefined;
-    for (const [x, y] of freeTilesNear(state.map, Math.floor(e.x), Math.floor(e.y), 8)) {
-      const q = QUARTERS.map(([qx, qy]) => [x + qx, y + qy] as [number, number]).find(([px, py]) => !taken.has(Math.floor(py * 2) * half + Math.floor(px * 2)));
-      if (q && canReach(state.map, Math.floor(e.x), Math.floor(e.y), x, y, team)) {
-        spot = q;
-        break;
-      }
-    }
-    if (!spot) continue;
-    taken.add(Math.floor(spot[1] * 2) * half + Math.floor(spot[0] * 2));
+    const spot = nearestSpot(state.map, spots, e.x, e.y, 8);
+    if (!spot || !canReach(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(spot[0]), Math.floor(spot[1]), team)) continue;
+    spots.add(spot[0], spot[1]);
     e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(spot[0]), Math.floor(spot[1]), team);
     e.endAt = spot;
-    if (e.path.length === 0 && Math.floor(spot[0]) === Math.floor(e.x) && Math.floor(spot[1]) === Math.floor(e.y)) e.path = [];
     // Archers keep shooting from the new spot.
     if (e.order.t === 'idle') e.order = { t: 'move' };
   }
 }
+
+/** The four spots a half tile apart on a tile, as offsets from its corner (troops squeezing through a gap). */
+const QUARTERS: [number, number][] = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
 
 function moveAlongPath(e: Entity): void {
   const speed = DEFS[e.kind].speed ?? 0;
