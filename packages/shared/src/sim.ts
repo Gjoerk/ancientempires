@@ -91,6 +91,9 @@ export interface Entity {
   rally?: [number, number];
   /** The marching formation this unit belongs to, if any. */
   group?: number;
+  /** Siege that sets up to shoot (trebuchets): set up, and ticks left of setting up or packing. */
+  deployed?: boolean;
+  setup?: number;
   /** While moving with a group: the group's speed, so that everyone keeps the same pace. */
   pace?: number;
   /** Building sites a villager will work on next, in order. */
@@ -938,7 +941,13 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     for (const e of ownUnits(state, slot, cmd.ids)) {
       e.path = [];
       if (isEnemy(state, target.owner, slot)) {
-        if (DEFS[e.kind].buildingsOnly && !isBuilding(target)) moveUnits(state, [e], target.x, target.y);
+        if (DEFS[e.kind].buildingsOnly && !isBuilding(target)) {
+          // Siege only breaks buildings: sent at a unit, it goes for the nearest enemy building there
+          // instead, or rolls up and takes on whatever building it finds.
+          const b = nearestEnemyBuilding(state, e, target.x, target.y, 8);
+          if (b) e.order = { t: 'attack', id: b.id, auto: false };
+          else attackMove(state, [e], target.x, target.y);
+        }
         else if (DEFS[e.kind].attack) e.order = { t: 'attack', id: target.id, auto: false };
         // Monks try to win enemy units over; kings and buildings cannot be converted.
         else if (DEFS[e.kind].converts && !isBuilding(target) && target.kind !== 'king') e.order = { t: 'convert', id: target.id, progress: 0 };
@@ -1150,6 +1159,19 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
       bestScore = d;
       best = other;
     }
+  }
+  return best;
+}
+
+/** The enemy building (not a field) nearest to a point, within `reach` tiles of it. */
+function nearestEnemyBuilding(state: GameState, e: Entity, x: number, y: number, reach: number): Entity | undefined {
+  let best: Entity | undefined;
+  let bestD = reach;
+  for (const b of state.entities.values()) {
+    if (!isBuilding(b) || b.kind === 'farm' || !isEnemy(state, b.owner, e.owner)) continue;
+    const [cx, cy] = centre(b);
+    const d = Math.hypot(cx - x, cy - y) - sizeOf(b) / 2;
+    if (d < bestD) [best, bestD] = [b, d];
   }
   return best;
 }
@@ -1412,8 +1434,20 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
     e.pace = undefined;
     e.path = [];
   }
-  // Too close to aim at: a catapult tower drops it and looks for someone further off.
-  if (d < (def.minRange ?? 0)) return isBuilding(e) ? endAttack(state, e, o) : undefined;
+  // Too close to aim at: a catapult tower drops it and looks for someone further off; a trebuchet backs off.
+  if (d < (def.minRange ?? 0)) {
+    if (isBuilding(e)) return endAttack(state, e, o);
+    if (e.path.length === 0) {
+      const [tx, ty] = isBuilding(target) ? centre(target) : [target.x, target.y];
+      const len = Math.hypot(e.x - tx, e.y - ty) || 1;
+      const back = (def.minRange ?? 0) + (isBuilding(target) ? sizeOf(target) / 2 : 0) + 1.5;
+      const [sx, sy] = nearestReachable(state.map, Math.floor(e.x), Math.floor(e.y),
+        Math.floor(tx + ((e.x - tx) / len) * back), Math.floor(ty + ((e.y - ty) / len) * back), teamOf(state, e.owner));
+      e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), sx, sy, teamOf(state, e.owner));
+      if (e.path.length === 0) endAttack(state, e, o);
+    }
+    return;
+  }
   if (d <= rangeOf(e.kind, hasTech(state, e.owner))) {
     // In reach. A melee fighter stops here only if nobody else stands on this tile; otherwise it carries on
     // to its own spot, swinging as it goes, so that fighters never pile up on one another.
@@ -1428,6 +1462,12 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
         e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], teamOf(state, e.owner));
         claim(state, e);
       }
+    }
+    // A trebuchet must be set up before the first stone flies.
+    if (def.setup && !e.deployed) {
+      e.path = [];
+      e.setup = Math.round(def.setup * TICK_RATE);
+      return;
     }
     if (e.cooldown <= 0) strike(state, e, target);
     return;
@@ -1646,7 +1686,12 @@ function stepHeal(state: GameState, e: Entity, o: Extract<Order, { t: 'heal' }>)
   const done = () => void (e.order = o.back !== undefined ? { t: 'escort', id: o.back } : { t: 'idle' });
   if (!target || isEnemy(state, target.owner, e.owner) || target.inside >= 0) return done();
   const max = maxHpOf(target.kind, hasTech(state, target.owner));
-  if (target.hp >= max) return done();
+  if (target.hp >= max) {
+    // Healed: carry on with whoever else is hurt close by, before going back.
+    const next = woundedAround(state, e, target.x, target.y).find((f) => f !== target);
+    if (next) return void (o.id = next.id);
+    return done();
+  }
   if (distance(e, target) > 4) {
     if (e.path.length === 0 || (state.tick + e.id) % 5 === 0) {
       e.path = findPath(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(target.x), Math.floor(target.y), teamOf(state, e.owner));
@@ -1654,8 +1699,27 @@ function stepHeal(state: GameState, e: Entity, o: Extract<Order, { t: 'heal' }>)
     return;
   }
   e.path = [];
-  target.hp = Math.min(max, target.hp + (DEFS[e.kind].heal ?? 1) / TICK_RATE);
-  if (state.tick % 5 === 0) state.blessings.push([e.id, target.id, 1]);
+  // The blessing reaches everyone wounded around the one being healed, not only them.
+  const rate = (DEFS[e.kind].heal ?? 1) / TICK_RATE;
+  for (const f of woundedAround(state, e, target.x, target.y)) {
+    f.hp = Math.min(maxHpOf(f.kind, hasTech(state, f.owner)), f.hp + rate);
+    if (state.tick % 5 === 0) state.blessings.push([e.id, f.id, 1]);
+  }
+}
+
+/** How far around the unit being healed the healing reaches. */
+export const HEAL_AREA = 2.5;
+
+/** Wounded units on the monk's side within HEAL_AREA of a point, nearest first. */
+function woundedAround(state: GameState, monk: Entity, x: number, y: number): Entity[] {
+  const out: [Entity, number][] = [];
+  for (const f of state.entities.values()) {
+    if (isBuilding(f) || f.inside >= 0 || isEnemy(state, f.owner, monk.owner)) continue;
+    if (Math.abs(f.x - x) > HEAL_AREA || Math.abs(f.y - y) > HEAL_AREA) continue;
+    const d = Math.hypot(f.x - x, f.y - y);
+    if (d <= HEAL_AREA && f.hp < maxHpOf(f.kind, hasTech(state, f.owner))) out.push([f, d]);
+  }
+  return out.sort((a, b) => a[1] - b[1]).map(([f]) => f);
 }
 
 /** How many tiles lie between a unit and a rectangle: 0 on it, 1 right next to it. */
@@ -1882,6 +1946,18 @@ export function step(state: GameState): void {
       continue;
     }
 
+    // A trebuchet busy setting up or packing does nothing else; one that is set up packs before it moves.
+    if (def.setup) {
+      if (e.setup) {
+        if (--e.setup === 0) e.deployed = !e.deployed;
+        continue;
+      }
+      if (e.deployed && e.path.length > 0) {
+        e.setup = Math.round(def.setup * TICK_RATE);
+        continue;
+      }
+    }
+
     const o = e.order;
     if (o.t === 'gather') stepGather(state, e, o);
     else if (o.t === 'build') stepBuild(state, e, o);
@@ -1900,9 +1976,11 @@ export function step(state: GameState): void {
     // Defensive soldiers wait until struck, though they still fight their way through an attack-move.
     const holding = now.t === 'idle' && e.stance === 'defensive';
     const looking = now.t === 'amove' || now.t === 'idle';
-    if (looking && def.attack && e.kind !== 'villager' && (state.tick + e.id) % 5 === 0) {
+    // A packed-up trebuchet waits for orders; set up, it shoots at whatever building comes in range.
+    const packed = !!def.setup && !e.deployed;
+    if (looking && def.attack && e.kind !== 'villager' && !packed && (state.tick + e.id) % 5 === 0) {
       // Holding their ground, they still strike at anyone in reach without stepping out for them.
-      const reach = isBuilding(e) || holding ? rangeOf(e.kind, hasTech(state, e.owner)) + (holding ? 0.3 : 0) : def.sight ?? DEFAULT_SIGHT;
+      const reach = isBuilding(e) || holding || def.setup ? rangeOf(e.kind, hasTech(state, e.owner)) + (holding ? 0.3 : 0) : def.sight ?? DEFAULT_SIGHT;
       const enemy = findEnemy(state, e, reach);
       if (enemy) e.order = { t: 'attack', id: enemy.id, auto: true, then: now.t === 'amove' ? [now.x, now.y] : undefined, hold: holding || undefined };
     }

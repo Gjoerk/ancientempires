@@ -1004,3 +1004,43 @@ test('with three or more players, the first to fall loses his troops and his kil
   assert.ok(s.players.get(0)!.res.wood <= woodBefore + 50, 'no resources are handed over');
   assert.ok(owned(s, 2, 'towncenter').length === 1, 'the third player keeps his own town');
 });
+
+test('a trebuchet sets up before it shoots, packs up before it moves, and only goes for buildings', () => {
+  const s = createGame(11);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  const tc = owned(s, 1, 'towncenter')[0];
+  const treb = spawn(s, 0, 'trebuchet', tc.x + 14, tc.y + 1)!;
+  const hp = tc.hp;
+  applyCommand(s, 0, { type: 'interact', ids: [treb.id], target: tc.id });
+  run(s, 20);
+  assert.equal(tc.hp, hp, 'no stone flies while it sets up');
+  run(s, 60);
+  assert.equal(treb.deployed, true);
+  assert.ok(tc.hp < hp - 100, `the town centre is hit hard: ${hp} -> ${tc.hp}`);
+  // Sent away: it packs up first, standing still.
+  const [x0, y0] = [treb.x, treb.y];
+  applyCommand(s, 0, { type: 'move', ids: [treb.id], x: treb.x + 6, y: treb.y });
+  run(s, 20);
+  assert.deepEqual([treb.x, treb.y], [x0, y0], 'still packing');
+  run(s, 60);
+  assert.equal(treb.deployed, false);
+  assert.ok(treb.x > x0, 'then rolls off');
+  // Sent at a unit, a ram goes for the nearest building there instead.
+  const ram = spawn(s, 0, 'ram', tc.x + 5, tc.y + 1)!;
+  const v = owned(s, 1, 'villager')[0];
+  applyCommand(s, 0, { type: 'interact', ids: [ram.id], target: v.id });
+  assert.ok(ram.order.t === 'attack' && DEFS[s.entities.get(ram.order.id)!.kind].building, 'the ram picks a building');
+});
+
+test('a monk heals everyone hurt around the one he tends', () => {
+  const s = createGame(5);
+  addPlayer(s, 0);
+  const tc = owned(s, 0, 'towncenter')[0];
+  const monk = spawn(s, 0, 'monk', tc.x + 4, tc.y + 6)!;
+  const hurt = [0, 1, 2].map((i) => spawn(s, 0, 'swordsman', tc.x + 6 + i, tc.y + 6)!);
+  for (const u of hurt) u.hp = 20;
+  applyCommand(s, 0, { type: 'interact', ids: [monk.id], target: hurt[1].id });
+  run(s, 50);
+  for (const u of hurt) assert.ok(u.hp > 22, `healed: ${u.hp}`);
+});

@@ -74,6 +74,8 @@ interface View {
   /** Visual offset in tiles that moves a working unit up to its work. */
   ox: number;
   oy: number;
+  /** Still stepping up to the work: walk there first, then start working. */
+  settling?: boolean;
   /** When this unit last struck a blow, and when it was last hit (for animations). */
   struck: number;
   hurt: number;
@@ -293,8 +295,29 @@ function updateWorkOffsets(now: number, dt: number): void {
         gy = (dy * (d - keep)) / d;
       }
     }
-    v.ox += (gx - v.ox) * k;
-    v.oy += (gy - v.oy) * k;
+    // Stepped at walking pace (a farmer's slow drift along the furrow is eased as before), so that a
+    // worker walks up to the spot and only then starts, instead of sliding into it already working.
+    const rx = gx - v.ox;
+    const ry = gy - v.oy;
+    const left = Math.hypot(rx, ry);
+    const walk = 1.8 * dt;
+    if (v.task === 5 && spot) {
+      v.ox += rx * k;
+      v.oy += ry * k;
+      v.settling = false;
+    } else if (left <= walk) {
+      v.ox = gx;
+      v.oy = gy;
+      v.settling = false;
+    } else {
+      v.ox += (rx / left) * walk;
+      v.oy += (ry / left) * walk;
+      v.settling = !!spot && left > 0.03;
+      if (v.settling) {
+        const turn = rx - ry;
+        if (Math.abs(turn) > 0.01) v.face = turn > 0 ? 1 : -1;
+      }
+    }
   }
 }
 
@@ -2390,7 +2413,7 @@ function renderPanel(): void {
   // Formations: how a group lines up whenever it is sent somewhere together.
   const marchers = mine.filter((v) => !isBuilding(v.kind) && v.kind !== 'villager');
   if (!placing && marchers.length >= 2) {
-    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000)] ?? 'line';
+    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000) % 4] ?? 'line';
     for (const f of FORMATIONS) {
       buttons.push({ label: FORMATION_NAMES[f], icon: `formation.${f}`, detail: describeAction(`formation.${f}`),
         data: { formation: f }, active: marchers.every((v) => formationOf(v) === f) });
@@ -2930,10 +2953,12 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
     ctx.stroke();
   }
   // Walking bobs up and down; working and fighting are a quicker, smaller motion.
-  const bob = v.act === 1 ? Math.abs(Math.sin(now / 90 + v.id)) * 2 : v.act >= 2 ? Math.abs(Math.sin(now / 60 + v.id)) * 1.5 : 0;
+  // Still walking up to the work: shown walking, not yet working.
+  const act = v.settling ? 1 : v.act;
+  const bob = act === 1 ? Math.abs(Math.sin(now / 90 + v.id)) * 2 : act >= 2 ? Math.abs(Math.sin(now / 60 + v.id)) * 1.5 : 0;
   const spot = workSpot(v, now);
   let work;
-  if (spot && v.act === 2) {
+  if (spot && act === 2) {
     // Facing the work only turns when it is clearly to one side: on a corner, right above or below,
     // the last way faced is kept instead of flipping back and forth.
     const off = tileToScreen(spot[0], spot[1])[0] - sx;
@@ -2963,7 +2988,13 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
     foeDir = v.foeDir;
   }
   const carried = v.kind === 'villager' && v.extra % 100 > 0 ? Math.floor(v.extra / 100) % 10 : -1;
-  drawUnit(ctx, v.kind, v.owner, sx, sy, work ? 0 : bob, work, carried, v.act, now, slash ? slash.dir : foeDir || v.face);
+  // A trebuchet: packed (rolling or standing), halfway, set up, or just after a throw.
+  let frame: number | undefined;
+  if (v.kind === 'trebuchet') {
+    const setup = Math.floor(v.extra / 80000);
+    frame = setup === 2 ? 5 : setup === 1 ? (now - v.struck < 900 ? 4 : 3) : act === 1 ? 1 + (Math.floor(now / 200) % 2) : 0;
+  }
+  drawUnit(ctx, v.kind, v.owner, sx, sy, work || v.kind === 'trebuchet' ? 0 : bob, work, carried, act, now, slash ? slash.dir : foeDir || v.face, frame);
   if (slash) {
     ctx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - slash.k)})`;
     ctx.lineWidth = 3;

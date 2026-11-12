@@ -6,7 +6,7 @@ export type Cost = Partial<Record<Res, number>>;
 export const KINDS = [
   'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider', 'scout',
   'towncenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
-  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery', 'catapulttower',
+  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery', 'catapulttower', 'trebuchet',
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
@@ -39,6 +39,8 @@ export interface KindDef {
   minRange?: number;
   /** Only attacks buildings (siege engines). */
   buildingsOnly?: boolean;
+  /** Seconds to set up before it can shoot, and to pack up again before it can move. */
+  setup?: number;
   /** How far it sees, and for soldiers how far they look for enemies on their own. */
   sight?: number;
   /** Population room this building provides. */
@@ -114,7 +116,13 @@ export const DEFS: Record<Kind, KindDef> = {
   blacksmith: { label: 'Blacksmith', building: true, hp: 350, cost: { wood: 120 }, time: 20, age: 2, size: 2, armor: 3 },
   market: { label: 'Market', building: true, hp: 350, cost: { wood: 150 }, time: 22, age: 2, size: 3, armor: 3 },
   workshop: {
-    label: 'Siege Workshop', building: true, hp: 400, cost: { wood: 180 }, time: 25, age: 3, size: 3, armor: 3, trains: ['ram'],
+    label: 'Siege Workshop', building: true, hp: 400, cost: { wood: 180 }, time: 25, age: 3, size: 3, armor: 3, trains: ['ram', 'trebuchet'],
+  },
+  // Rolls in packed up, then sets itself up to hurl stones at walls and buildings from far away.
+  trebuchet: {
+    label: 'Trebuchet', hp: 120, cost: { wood: 200, gold: 200 }, time: 40, age: 3, speed: 0.9,
+    attack: 8, range: 12, minRange: 4, cooldown: 7, armor: 2, sight: 12, vsBuildings: 160, bonus: { wall: 40, gate: 40 },
+    buildingsOnly: true, setup: 4, splash: 0.8,
   },
   // Thick armour: blades and arrows barely scratch walls, so breaking through takes rams.
   wall: { label: 'Wall', building: true, hp: 700, cost: { stone: 6 }, time: 5, size: 1, armor: 8, sight: 2 },
@@ -129,7 +137,7 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   // Slow, heavy shots that crush a whole group, but it cannot aim at anyone right at its foot.
   catapulttower: {
-    label: 'Catapult Tower', building: true, hp: 800, cost: { stone: 175, wood: 150, gold: 75 }, time: 45, age: 3, size: 2, armor: 7,
+    label: 'Catapult Tower', building: true, hp: 600, cost: { stone: 175, wood: 150, gold: 75 }, time: 45, age: 3, size: 2, armor: 7,
     attack: 22, range: 10, minRange: 1.6, cooldown: 4, sight: 11, splash: 1.5,
   },
   monastery: {

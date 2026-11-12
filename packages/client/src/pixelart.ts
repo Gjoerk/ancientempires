@@ -441,8 +441,63 @@ function ram(p: Pen, frame: number): void {
   p.dot(right + 9, floor - 5, 'm');
 }
 
+/**
+ * A trebuchet. Frames 0-2: packed up on its wagon, the arm folded along the bed (1 and 2 rolling).
+ * 3: set up, the arm cocked back with the sling hanging. 4: just thrown, the arm swung forward.
+ * 5: halfway, being set up or packed.
+ */
+function trebuchet(p: Pen, frame: number): void {
+  if (frame <= 2) {
+    const left = CX - 16;
+    const right = CX + 14;
+    for (const wx of [left + 4, CX - 1, right - 4]) {
+      p.ellipse(wx, GY - 2, 2.6, 2.6, 'n');
+      const a = frame * 1.1 + wx;
+      p.dot(wx + Math.round(Math.cos(a) * 1.5), GY - 2 + Math.round(Math.sin(a) * 1.5), 'y');
+      p.dot(wx, GY - 2, 'k');
+    }
+    p.rect(left, GY - 7, right - left + 1, 3, 'k');
+    p.rect(left + 2, GY - 9, right - left - 3, 2, 't');
+    // The folded frame and arm, the counterweight box at the front.
+    p.line(left + 3, GY - 10, CX + 2, GY - 15, 'o', 2);
+    p.line(CX + 2, GY - 15, right - 6, GY - 10, 'o', 2);
+    p.line(left - 2, GY - 12, right + 1, GY - 17, 'k', 2);
+    p.rect(right - 6, GY - 16, 6, 6, 'a');
+    p.rect(right - 5, GY - 15, 4, 1, 'm');
+    p.dot(left - 3, GY - 11, 'u');
+    return;
+  }
+  // Set up: a broad base, an A-frame and the axle on top.
+  const base = GY - 3;
+  p.rect(CX - 14, base - 1, 28, 3, 'k');
+  p.rect(CX - 12, base + 1, 3, 2, 'n');
+  p.rect(CX + 9, base + 1, 3, 2, 'n');
+  const ax = CX + 1;
+  const ay = GY - 27;
+  p.line(CX - 10, base - 1, ax - 1, ay, 'o', 2);
+  p.line(CX + 10, base - 1, ax + 1, ay, 'o', 2);
+  p.line(CX - 6, base - 10, CX + 7, base - 10, 'k');
+  p.rect(CX - 4, base - 9, 9, 3, 't');
+  // The arm: long throwing end, short weighted end, at an angle for each frame.
+  const angle = frame === 3 ? -2.25 : frame === 4 ? -0.55 : -1.35;
+  const len = 26;
+  const ex = ax + Math.cos(angle) * len;
+  const ey = ay + Math.sin(angle) * len;
+  const wx = ax - Math.cos(angle) * 8;
+  const wy = ay - Math.sin(angle) * 8;
+  p.line(wx, wy, ex, ey, 'O', 2);
+  p.rect(Math.round(wx) - 3, Math.round(wy) - 1, 7, 7, 'a');
+  p.rect(Math.round(wx) - 2, Math.round(wy), 5, 1, 'm');
+  p.ellipse(ax, ay, 1.4, 1.4, 'e');
+  // The sling hangs from the tip (cocked: down along the frame with its stone).
+  if (frame === 3) {
+    p.line(ex, ey, ex + 3, ey + 10, 'u');
+    p.ellipse(ex + 3, ey + 11, 1.6, 1.6, 'q');
+  } else if (frame === 4) p.line(ex, ey, ex + 5, ey - 3, 'u');
+}
+
 const UNITS: Partial<Record<Kind, (p: Pen, frame: number) => void>> = {
-  villager, king, swordsman, spearman, archer, monk, scout, rider, ram,
+  villager, king, swordsman, spearman, archer, monk, scout, rider, ram, trebuchet,
 };
 
 const unitCache = new Map<string, string[]>();

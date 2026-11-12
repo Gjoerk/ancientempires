@@ -176,12 +176,12 @@ function unitPalette(owner: number): Record<string, string> {
 
 export function drawUnit(
   ctx: Ctx, kind: Kind, owner: number, x: number, y: number, bob: number, work?: Work, carry = -1, activity = 0, now = 0,
-  face = 1,
+  face = 1, frame?: number,
 ): void {
-  const big = kind === 'king' || kind === 'rider' || kind === 'scout' || kind === 'ram';
+  const big = kind === 'king' || kind === 'rider' || kind === 'scout' || kind === 'ram' || kind === 'trebuchet';
   // Sprites are drawn facing right and mirrored to face left.
   const flip = (work ? work.dir : face) < 0;
-  const step = activity === 1 ? 1 + (Math.floor(now / 140) % 2) : 0;
+  const step = frame ?? (activity === 1 ? 1 + (Math.floor(now / 140) % 2) : 0);
   // A sprite pack may provide this unit, optionally with separate images per activity.
   const state = work ? `work.${WORK_NAMES[work.task]}` : ['idle', 'walk', 'work', 'attack'][activity] ?? 'idle';
   const custom = findSprite([`unit.${kind}.${state}`, `unit.${kind}.${state.split('.')[0]}`, `unit.${kind}`]);
