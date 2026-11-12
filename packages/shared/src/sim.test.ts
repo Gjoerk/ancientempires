@@ -1053,7 +1053,6 @@ test('without a formation everyone goes their own way at their own speed', () =>
   applyCommand(s, 0, { type: 'formation', ids, formation: 'none' });
   applyCommand(s, 0, { type: 'move', ids, x: tc.x + 4, y: tc.y + 20 });
   const units = ids.map((id) => s.entities.get(id)!);
-  assert.equal(s.groups.size, 0, 'no marching block');
   assert.ok(units.every((e) => e.pace === undefined), 'nobody waits for the slowest');
   run(s, 30);
   const rider = units.filter((e) => e.kind === 'rider')[0];
