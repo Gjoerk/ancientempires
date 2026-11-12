@@ -716,7 +716,7 @@ function formGroup(state: GameState, units: Entity[], finals: Map<Entity, [numbe
   if (path.length < 2 || path[path.length - 2] !== dest[0] || path[path.length - 1] !== dest[1]) return;
   const g: Group = { id: state.nextGroup++, members: [], off: new Map(), final: new Map(), centre: [start[0] + 0.5, start[1] + 0.5], path,
     since: state.tick, pace: Math.min(...members.map((e) => DEFS[e.kind].speed ?? 1)), team, moved: new Map() };
-  // Members in order from the middle of the shape outwards: in a narrow pass they file through in this order.
+  // Members in order from the middle of the shape outwards.
   const order = members.map((e) => {
     const f = finals.get(e)!;
     return { e, off: [f[0] - dest[0], f[1] - dest[1]] as [number, number], f };
