@@ -16,7 +16,7 @@ export type Order =
   | { t: 'gather'; tile: number; farm: number; res: Res; phase: 'go' | 'work' | 'return'; drop: number }
   | { t: 'build'; id: number }
   /** `then` is where an attack-move continues to once the fight is over. */
-  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean; answer?: boolean; hold?: boolean }
+  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean; answer?: boolean; hold?: boolean; march?: boolean }
   /** Walk to a point, fighting anything met on the way. */
   | { t: 'amove'; x: number; y: number }
   /** Walk to a town centre or castle and go inside (villagers and the king). */
@@ -71,6 +71,8 @@ export interface Entity {
   /** Siege that sets up to shoot (trebuchets): set up, and ticks left of setting up or packing. */
   deployed?: boolean;
   setup?: number;
+  /** The formation on the march this unit belongs to, if any. */
+  group?: number;
   /** While moving with a group: the group's speed, so that everyone keeps the same pace. */
   pace?: number;
   /** Building sites a villager will work on next, in order. */
@@ -143,13 +145,17 @@ export interface GameState {
   winner: number;
   /** Who struck down each player's king: fallen slot → slayer slot. */
   slayers: Map<number, number>;
+  /** Formations on the march. */
+  groups: Map<number, Group>;
+  nextGroup: number;
   /** Notes the computer opponents keep between their turns. */
   ai: Map<number, { lastAttack: number; waves: number }>;
   relics: Relic[];
 }
 
 export type Command =
-  | { type: 'move'; ids: number[]; x: number; y: number }
+  /** `face`: the way the formation should face at the end (dragged out with the right mouse button). */
+  | { type: 'move'; ids: number[]; x: number; y: number; face?: [number, number] }
   | { type: 'gather'; ids: number[]; tile: number }
   | { type: 'interact'; ids: number[]; target: number }
   /** With `queue`, villagers busy building take the new site on after the ones they have. */
@@ -160,7 +166,7 @@ export type Command =
   | { type: 'train'; building: number; kind: string }
   | { type: 'rally'; building: number; x: number; y: number }
   | { type: 'trade'; building: number; res: Res; buy: boolean }
-  | { type: 'amove'; ids: number[]; x: number; y: number }
+  | { type: 'amove'; ids: number[]; x: number; y: number; face?: [number, number] }
   | { type: 'stop'; ids: number[] }
   | { type: 'stance'; ids: number[]; stance: Stance }
   | { type: 'formation'; ids: number[]; formation: Formation }
@@ -187,7 +193,7 @@ export function createGame(seed: number, size?: number, popLimit = POP_MAX): Gam
   return {
     popLimit, blessings: [],
     tick: 0, seed, map: generateMap(seed, size), entities: new Map(), players: new Map(), nextId: 1,
-    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, slayers: new Map(), ai: new Map(), occupied: new Map(), relics: [],
+    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, slayers: new Map(), groups: new Map(), nextGroup: 1, ai: new Map(), occupied: new Map(), relics: [],
   };
 }
 
@@ -516,65 +522,46 @@ function canShelter(state: GameState, e: Entity, b: Entity): boolean {
 
 const isRangedKind = (k: Kind) => (DEFS[k].range ?? 0) > 2;
 
-/** Where each unit of a group stands at the destination: soldiers in front, archers behind, the rest at the back. */
-function formation(state: GameState, units: Entity[], x: number, y: number, face?: [number, number]): Map<Entity, [number, number]> {
-  const n = units.length;
-  let cx = 0;
-  let cy = 0;
-  for (const e of units) {
-    cx += e.x / n;
-    cy += e.y / n;
-  }
-  // Rows face the direction of travel.
-  let dx = x - cx;
-  let dy = y - cy;
-  const len = Math.hypot(dx, dy);
-  // A short step keeps everyone where they stand relative to each other, instead of forcing the shape.
-  if (!face && n > 1 && len < SHORT_MOVE) {
-    const taken = new Set<number>();
-    const out = new Map<Entity, [number, number]>();
-    for (const e of units) {
-      const spot = freeTilesNear(state.map, Math.floor(e.x + x - cx), Math.floor(e.y + y - cy), 12).find(([sx, sy]) => !taken.has(sy * state.map.size + sx));
-      if (!spot) continue;
-      taken.add(spot[1] * state.map.size + spot[0]);
-      out.set(e, spot);
-    }
-    return out;
-  }
-  if (face) [dx, dy] = face;
-  else if (len < 0.5) [dx, dy] = units[0]?.facing ?? [1, 1].map((v) => v / Math.SQRT2) as [number, number];
-  else [dx, dy] = [dx / len, dy / len];
-  // Snapped to one of eight directions, so that rows run along whole tiles and the shape stays clean.
-  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
-  const fx = Math.round(Math.cos(angle));
-  const fy = Math.round(Math.sin(angle));
-  const l = Math.hypot(fx, fy);
-  for (const e of units) e.facing = [fx / l, fy / l];
-  [dx, dy] = [fx / l, fy / l];
-  const [px, py] = [-dy, dx];
-  const rank = (e: Entity) => (DEFS[e.kind].building ? 9 : e.kind === 'villager' || e.kind === 'king' ? 3 : e.kind === 'ram' ? 2 : isRangedKind(e.kind) ? 1 : 0);
-  const ordered = [...units].sort((a, b) => rank(a) - rank(b) || (a.x - cx) * px + (a.y - cy) * py - ((b.x - cx) * px + (b.y - cy) * py));
-  const slots = formationSlots(groupFormation(units), ordered.map(rank));
-  const taken = new Set<number>();
-  const out = new Map<Entity, [number, number]>();
-  ordered.forEach((e, i) => {
-    // Each slot is [steps behind the front, steps to the side].
-    // Whole steps along the snapped axes: straight rows, or on a diagonal a neat chequer of tiles.
-    const row = Math.round(slots[i][0]);
-    const col = Math.round(slots[i][1]);
-    const tx = Math.floor(x) - fx * row - fy * col;
-    const ty = Math.floor(y) - fy * row + fx * col;
-    // The nearest free tile to the slot, so that walls and trees just bend the formation.
-    const spot = freeTilesNear(state.map, tx, ty, 12).find(([sx, sy]) => !taken.has(sy * state.map.size + sx));
-    if (!spot) return;
-    taken.add(spot[1] * state.map.size + spot[0]);
-    out.set(e, spot);
-  });
-  return out;
-}
+/**
+ * Formations, after Age of Empires II. A group sent somewhere together lines up in its formation and
+ * moves as one block at the pace of its slowest member: soldiers in front, archers behind, siege,
+ * monks and villagers at the back (inside, in a box). Units that fall behind hurry to their places,
+ * so the block forms up on the way instead of standing about first. Where the ground narrows (a gap
+ * in a wood, a gate) those whose places are blocked follow on behind the middle of the block, and
+ * spread back out once there is room. At the destination everyone takes their spot, facing the way
+ * the block was going, or the way the player dragged out with the right mouse button.
+ */
 
 /** A group sent less than this far just shifts over as it stands. */
 const SHORT_MOVE = 6;
+
+/** Where a unit goes in a formation: soldiers first (0), archers (1), siege (2), then monks, villagers and kings (3). */
+export function formationRank(kind: Kind): number {
+  if (DEFS[kind].building) return 9;
+  if (kind === 'villager' || kind === 'king' || kind === 'monk') return 3;
+  if (DEFS[kind].buildingsOnly) return 2;
+  return (DEFS[kind].range ?? 0) > 2 ? 1 : 0;
+}
+
+/** One of the eight directions nearest to (dx, dy), as whole steps (e.g. [1, 0] or [1, -1]). */
+export function snapFacing(dx: number, dy: number): [number, number] {
+  if (Math.hypot(dx, dy) < 1e-6) return [1, 1];
+  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+  return [Math.round(Math.cos(angle)), Math.round(Math.sin(angle))];
+}
+
+/**
+ * The tiles of a formation with its front at (x, y), facing (fx, fy) in whole steps, for units of the
+ * given ranks sorted soldiers first. Rows run along whole tiles; on a diagonal they make a neat chequer.
+ */
+export function formationLayout(kind: Formation, ranks: number[], x: number, y: number, face: [number, number]): [number, number][] {
+  const [fx, fy] = face;
+  return formationSlots(kind, ranks).map(([r, c]) => {
+    const row = Math.round(r);
+    const col = Math.round(c);
+    return [Math.floor(x) - fx * row - fy * col, Math.floor(y) - fy * row + fx * col] as [number, number];
+  });
+}
 
 /** The formation most of the soldiers in a group have been given. */
 function groupFormation(units: Entity[]): Formation {
@@ -584,6 +571,45 @@ function groupFormation(units: Entity[]): Formation {
   let most = 0;
   for (const [f, c] of votes) if (c > most || (c === most && f < best)) [best, most] = [f, c];
   return most * 2 >= units.length ? best : 'line';
+}
+
+/** Where each unit of a group stands at (x, y). `face` overrides the direction of travel. */
+function formation(state: GameState, units: Entity[], x: number, y: number, face?: [number, number]): Map<Entity, [number, number]> {
+  const n = units.length;
+  const cx = units.reduce((a, e) => a + e.x, 0) / n;
+  const cy = units.reduce((a, e) => a + e.y, 0) / n;
+  const len = Math.hypot(x - cx, y - cy);
+  const taken = new Set<number>();
+  const out = new Map<Entity, [number, number]>();
+  const place = (e: Entity, tx: number, ty: number) => {
+    // The nearest free tile to the slot, so that walls and trees just bend the formation.
+    const spot = freeTilesNear(state.map, tx, ty, 12).find(([sx, sy]) => !taken.has(sy * state.map.size + sx));
+    if (!spot) return;
+    taken.add(spot[1] * state.map.size + spot[0]);
+    out.set(e, spot);
+  };
+  const kind = groupFormation(units);
+  // A short step, or no formation: everyone shifts over as they stand.
+  if (n > 1 && !face && (len < SHORT_MOVE || kind === 'none')) {
+    if (kind === 'none' && len >= SHORT_MOVE) {
+      // Loosely gathered around the spot, nearest first.
+      const order = [...units].sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));
+      const spots = freeTilesNear(state.map, Math.floor(x), Math.floor(y), n * 2);
+      order.forEach((e, i) => spots[i] && (out.set(e, spots[i]), taken.add(spots[i][1] * state.map.size + spots[i][0])));
+      return out;
+    }
+    for (const e of units) place(e, Math.floor(e.x + x - cx), Math.floor(e.y + y - cy));
+    return out;
+  }
+  const f = face ? snapFacing(face[0], face[1]) : len < 0.5 && units[0]?.facing ? snapFacing(...units[0].facing) : snapFacing(x - cx, y - cy);
+  const l = Math.hypot(f[0], f[1]);
+  for (const e of units) e.facing = [f[0] / l, f[1] / l];
+  // Across the front, units keep their order from left to right, so nobody crosses over.
+  const [px, py] = [-f[1] / l, f[0] / l];
+  const ordered = [...units].sort((a, b) => formationRank(a.kind) - formationRank(b.kind) || (a.x * px + a.y * py) - (b.x * px + b.y * py));
+  const tiles = formationLayout(kind === 'none' ? 'line' : kind, ordered.map((e) => formationRank(e.kind)), x, y, f);
+  ordered.forEach((e, i) => place(e, tiles[i][0], tiles[i][1]));
+  return out;
 }
 
 /**
@@ -650,13 +676,34 @@ export function formationSlots(kind: Formation, ranks: number[]): [number, numbe
   return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 1.6)))), 1, false);
 }
 
+/** A formation on the march (see above). */
+export interface Group {
+  id: number;
+  members: number[];
+  /** Each member's place, as tiles from the middle of the block. */
+  off: Map<number, [number, number]>;
+  /** Where each member finally stands. */
+  final: Map<number, [number, number]>;
+  /** The middle of the block, walking the route. */
+  centre: [number, number];
+  /** The rest of the route, as tile pairs, and the tiles already walked (members squeeze along those). */
+  path: number[];
+  trail: number[];
+  pace: number;
+  team: number;
+  /** Since when the block has been waiting for stragglers. */
+  waiting: number;
+  /** Where each member was when it last got anywhere, and when. */
+  moved: Map<number, [number, number, number]>;
+}
+
 function moveUnits(state: GameState, units: Entity[], x: number, y: number, face?: [number, number]): void {
-  // A group keeps formation and walks at the pace of its slowest member.
   const slots = formation(state, units, x, y, face);
-  // No formation: everyone at their own speed, each on their own.
+  // No formation: everyone at their own speed, each on their own. Otherwise at the pace of the slowest.
   const loose = groupFormation(units) === 'none';
   const pace = units.length > 1 && !loose ? Math.min(...units.map((e) => DEFS[e.kind].speed ?? 1)) : undefined;
   const nearby = new Map<string, { spots: [number, number][]; next: number }>();
+  const finals = new Map<Entity, [number, number]>();
   for (const e of units) {
     let spot = slots.get(e);
     if (!spot) continue;
@@ -680,9 +727,192 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
     e.path = findPath(state.map, ex, ey, spot[0], spot[1], team);
     e.order = { t: 'move' };
     e.pace = pace;
+    delete e.group;
+    finals.set(e, spot);
+  }
+  if (!loose && units.length >= 2) formGroup(state, units, finals, x, y);
+}
+
+/** Sends a group off as a block on the march, if it is going far enough for that. */
+function formGroup(state: GameState, units: Entity[], finals: Map<Entity, [number, number]>, x: number, y: number): void {
+  const map = state.map;
+  const team = teamOf(state, units[0].owner);
+  const members = units.filter((e) => finals.has(e) && !isBuilding(e) && teamOf(state, e.owner) === team);
+  if (members.length < 2) return;
+  const cx = members.reduce((a, e) => a + e.x, 0) / members.length;
+  const cy = members.reduce((a, e) => a + e.y, 0) / members.length;
+  if (Math.hypot(x - cx, y - cy) < SHORT_MOVE) return;
+  const dest: [number, number] = [Math.floor(x), Math.floor(y)];
+  const start = freeTilesNear(map, Math.floor(cx), Math.floor(cy), 1)[0];
+  if (!start) return;
+  const path = findPath(map, start[0], start[1], dest[0], dest[1], team);
+  // The middle of the block cannot get there: everyone just finds their own way.
+  if (path.length < 2 || path[path.length - 2] !== dest[0] || path[path.length - 1] !== dest[1]) return;
+  const g: Group = { id: state.nextGroup++, members: [], off: new Map(), final: new Map(), centre: [start[0] + 0.5, start[1] + 0.5], path,
+    trail: [start[0], start[1]], pace: Math.min(...members.map((e) => DEFS[e.kind].speed ?? 1)), team, waiting: -1, moved: new Map() };
+  // From the middle of the shape outwards: in a narrow pass they follow on in this order.
+  const order = members.map((e) => ({ e, f: finals.get(e)! })).sort((a, b) =>
+    Math.hypot(a.f[0] - dest[0], a.f[1] - dest[1]) - Math.hypot(b.f[0] - dest[0], b.f[1] - dest[1]));
+  for (const { e, f } of order) {
+    g.members.push(e.id);
+    g.off.set(e.id, [f[0] - dest[0], f[1] - dest[1]]);
+    g.final.set(e.id, f);
+    g.moved.set(e.id, [e.x, e.y, state.tick]);
+    e.group = g.id;
+    e.path = [];
+  }
+  state.groups.set(g.id, g);
+}
+
+/** Still with group `g`: on the order it was given with the group. */
+function inGroup(e: Entity | undefined, g: Group): e is Entity {
+  if (!e || e.group !== g.id || e.inside >= 0) return false;
+  const o = e.order;
+  return o.t === 'move' || o.t === 'amove' || (o.t === 'attack' && !!o.march);
+}
+
+/** Every tile on the straight line between two tiles can be walked on. */
+function lineClear(map: GameMap, x0: number, y0: number, x1: number, y1: number, team: number): boolean {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  for (let i = 1; i <= n; i++) {
+    if (!isWalkable(map, Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), team)) return false;
+  }
+  return true;
+}
+
+/** Stragglers are waited for at most this long at a time; one that gets nowhere this long goes its own way. */
+const GROUP_WAIT_TICKS = Math.round(1.5 * TICK_RATE);
+const GROUP_STUCK_TICKS = 4 * TICK_RATE;
+
+function stepGroups(state: GameState): void {
+  const map = state.map;
+  for (const g of [...state.groups.values()]) {
+    const release = (e: Entity) => {
+      delete e.group;
+      const f = g.final.get(e.id)!;
+      e.path = findPath(map, Math.floor(e.x), Math.floor(e.y), f[0], f[1], g.team);
+    };
+    const end = () => {
+      for (const id of g.members) {
+        const e = state.entities.get(id);
+        if (e && e.group === g.id) release(e);
+      }
+      state.groups.delete(g.id);
+    };
+    // With attack-move, the block breaks up as soon as one of them takes on an enemy.
+    if (g.members.some((id) => {
+      const e = state.entities.get(id);
+      return e && e.group === g.id && e.order.t === 'attack' && !e.order.march;
+    })) {
+      end();
+      continue;
+    }
+    g.members = g.members.filter((id) => inGroup(state.entities.get(id), g));
+    const members = g.members.map((id) => state.entities.get(id)!);
+    if (members.length <= 1 || g.path.length < 2) {
+      end();
+      continue;
+    }
+    // Each member's place beside the middle of the block; where that place is blocked or cut off by
+    // trees or a wall, close behind the middle on the track it took, in the order from the middle out.
+    const ctx = Math.floor(g.centre[0]);
+    const cty = Math.floor(g.centre[1]);
+    const targets = new Map<number, [number, number]>();
+    let queued = 0;
+    for (const e of members) {
+      const o = g.off.get(e.id)!;
+      const sx = ctx + o[0];
+      const sy = cty + o[1];
+      if (isWalkable(map, sx, sy, g.team) && lineClear(map, ctx, cty, sx, sy, g.team)) targets.set(e.id, [sx, sy]);
+      else {
+        // Two abreast, the way troops squeeze through a gap.
+        const back = Math.max(0, g.trail.length / 2 - 1 - Math.floor(queued++ / 2));
+        targets.set(e.id, [g.trail[back * 2], g.trail[back * 2 + 1]]);
+      }
+    }
+    // Someone wedged behind something for a while goes their own way.
+    for (const e of members) {
+      const m = g.moved.get(e.id)!;
+      const [tx, ty] = targets.get(e.id)!;
+      const far = Math.hypot(tx + 0.5 - e.x, ty + 0.5 - e.y);
+      if (Math.hypot(e.x - m[0], e.y - m[1]) > 0.6 || far < 1) g.moved.set(e.id, [e.x, e.y, state.tick]);
+      else if (state.tick - m[2] > GROUP_STUCK_TICKS) release(e);
+    }
+    const marching = members.filter((e) => e.group === g.id);
+    if (marching.length <= 1) {
+      end();
+      continue;
+    }
+    // The block walks on at the pace of the slowest, slows when many lag behind and waits a moment for
+    // stragglers, never long: whoever is still behind catches up at full speed.
+    const lag = marching.reduce((a, e) => {
+      const [tx, ty] = targets.get(e.id)!;
+      return a + Math.hypot(tx + 0.5 - e.x, ty + 0.5 - e.y);
+    }, 0) / marching.length;
+    let speed = g.pace;
+    if (lag > 4) {
+      if (g.waiting < 0) g.waiting = state.tick;
+      speed = state.tick - g.waiting < GROUP_WAIT_TICKS ? 0 : g.pace * 0.5;
+    } else {
+      g.waiting = -1;
+      if (lag > 2) speed = g.pace * 0.6;
+    }
+    let budget = speed / TICK_RATE;
+    while (budget > 0 && g.path.length >= 2) {
+      const wx = g.path[0] + 0.5;
+      const wy = g.path[1] + 0.5;
+      const d = Math.hypot(wx - g.centre[0], wy - g.centre[1]);
+      if (d <= budget) {
+        g.centre = [wx, wy];
+        g.path.splice(0, 2);
+        budget -= d;
+        g.trail.push(Math.floor(wx), Math.floor(wy));
+        if (g.trail.length > 400) g.trail.splice(0, 2);
+      } else {
+        g.centre = [g.centre[0] + ((wx - g.centre[0]) / d) * budget, g.centre[1] + ((wy - g.centre[1]) / d) * budget];
+        budget = 0;
+      }
+    }
+    if (g.path.length < 2) {
+      end();
+      continue;
+    }
+    for (const e of marching) {
+      const [tx, ty] = targets.get(e.id)!;
+      const ex = Math.floor(e.x);
+      const ey = Math.floor(e.y);
+      const far = Math.hypot(tx + 0.5 - e.x, ty + 0.5 - e.y);
+      // Out of place: hurry there at full speed; in place: the pace of the block.
+      e.pace = far > 1.2 ? undefined : g.pace;
+      const at = e.path.length >= 2 && e.path[e.path.length - 2] === tx && e.path[e.path.length - 1] === ty;
+      if (at) continue;
+      const step = Math.max(Math.abs(tx - ex), Math.abs(ty - ey));
+      const clear = step <= 1 && (tx === ex || ty === ey || (isWalkable(map, tx, ey, g.team) && isWalkable(map, ex, ty, g.team)));
+      if (step === 0) e.path = [];
+      else if (clear) e.path = [tx, ty];
+      else if (e.path.length === 0 || (state.tick + e.id) % 5 === 0) e.path = findPath(map, ex, ey, tx, ty, g.team);
+    }
   }
 }
 
+/** How far from its target a soldier marching in a block breaks ranks and charges (archers: once in range). */
+const CHARGE_DISTANCE = 4;
+
+/** A group sent at an enemy marches there in its formation and breaks ranks close by. */
+function marchOn(state: GameState, all: Entity[], target: Entity): void {
+  const units = all.filter((e) => e.order.t === 'attack' && e.order.id === target.id && e.kind !== 'villager' && !isBuilding(e));
+  if (units.length < 2 || groupFormation(units) === 'none') return;
+  const [tx, ty] = isBuilding(target) ? centre(target) : [target.x, target.y];
+  const cx = units.reduce((a, e) => a + e.x, 0) / units.length;
+  const cy = units.reduce((a, e) => a + e.y, 0) / units.length;
+  const len = Math.hypot(tx - cx, ty - cy);
+  const reach = (isBuilding(target) ? sizeOf(target) / 2 : 0) + CHARGE_DISTANCE;
+  if (len <= reach + SHORT_MOVE) return;
+  const k = (len - reach) / len;
+  const keep = units.map((e) => ({ ...(e.order as Extract<Order, { t: 'attack' }>) }));
+  moveUnits(state, units, cx + (tx - cx) * k, cy + (ty - cy) * k, [tx - cx, ty - cy]);
+  units.forEach((e, i) => (e.order = { ...keep[i], march: true }));
+}
 
 /** Units standing where a new building goes step off it, so that nobody is walled in. */
 /** Units standing where a building goes walk off it to the nearest free tile, then carry on. */
@@ -725,8 +955,14 @@ function copyTask(state: GameState, e: Entity, from: Entity): void {
 }
 
 
-function attackMove(state: GameState, units: Entity[], x: number, y: number): void {
-  moveUnits(state, units, x, y);
+/** A facing sent by a player, if it is a real direction. */
+function faceOf(face: unknown): [number, number] | undefined {
+  if (!Array.isArray(face) || face.length !== 2 || !face.every((v) => Number.isFinite(v)) || Math.hypot(face[0], face[1]) < 1e-3) return undefined;
+  return [face[0], face[1]];
+}
+
+function attackMove(state: GameState, units: Entity[], x: number, y: number, face?: [number, number]): void {
+  moveUnits(state, units, x, y, face);
   for (const e of units) e.order = DEFS[e.kind].attack && e.kind !== 'villager' ? { t: 'amove', x, y } : e.order;
 }
 
@@ -744,7 +980,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
 
   if (cmd.type === 'move') {
     if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.y)) return;
-    moveUnits(state, ownUnits(state, slot, cmd.ids), cmd.x, cmd.y);
+    moveUnits(state, ownUnits(state, slot, cmd.ids), cmd.x, cmd.y, faceOf(cmd.face));
   } else if (cmd.type === 'gather') {
     const tile = cmd.tile;
     if (!Number.isInteger(tile) || tile < 0 || tile >= map.tiles.length) return;
@@ -830,6 +1066,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
         moveUnits(state, [e], target.x, target.y);
       }
     }
+    if (isEnemy(state, target.owner, slot)) marchOn(state, ownUnits(state, slot, cmd.ids), target);
   } else if (cmd.type === 'place') {
     const def = DEFS[cmd.kind];
     if (!def?.building || !Number.isInteger(cmd.x) || !Number.isInteger(cmd.y)) return;
@@ -895,7 +1132,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     }
   } else if (cmd.type === 'amove') {
     if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.y)) return;
-    attackMove(state, ownUnits(state, slot, cmd.ids), cmd.x, cmd.y);
+    attackMove(state, ownUnits(state, slot, cmd.ids), cmd.x, cmd.y, faceOf(cmd.face));
   } else if (cmd.type === 'stop') {
     for (const e of ownUnits(state, slot, cmd.ids)) {
       e.path = [];
@@ -1261,6 +1498,15 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
   const target = state.entities.get(o.id);
   if (!target || !isEnemy(state, target.owner, e.owner) || target.inside >= 0) return endAttack(state, e, o);
   const d = distance(e, target);
+  // Marching in a block: keep to the ranks until near enough to charge, or to shoot.
+  if (o.march) {
+    const near = isRangedKind(e.kind) ? d <= rangeOf(e.kind, hasTech(state, e.owner)) : d <= CHARGE_DISTANCE;
+    if (!near && (e.path.length > 0 || e.group !== undefined)) return;
+    o.march = false;
+    delete e.group;
+    e.pace = undefined;
+    e.path = [];
+  }
   // Too close to aim at: a catapult tower drops it and looks for someone further off; a trebuchet backs off.
   if (d < (def.minRange ?? 0)) {
     if (isBuilding(e)) return endAttack(state, e, o);
@@ -1673,7 +1919,7 @@ function spreadIdleUnits(state: GameState): void {
 
 function moveAlongPath(e: Entity): void {
   const speed = DEFS[e.kind].speed ?? 0;
-  const grouped = e.pace !== undefined && (e.order.t === 'move' || e.order.t === 'amove');
+  const grouped = e.pace !== undefined && (e.order.t === 'move' || e.order.t === 'amove' || (e.order.t === 'attack' && !!e.order.march));
   let budget = (grouped ? Math.min(speed, e.pace!) : speed) / TICK_RATE;
   while (budget > 0 && e.path.length >= 2) {
     const wx = e.path[0] + 0.5;
@@ -1749,6 +1995,7 @@ export function step(state: GameState): void {
   if (state.deaths.length > 500) state.deaths.splice(0, state.deaths.length - 500);
   state.blessings = [];
   updateOccupied(state);
+  stepGroups(state);
   if (state.tick % 10 === 0) spreadIdleUnits(state);
 
   for (const p of state.players.values()) p.pop = p.cap = 0;
@@ -1794,7 +2041,7 @@ export function step(state: GameState): void {
     else if (o.t === 'escort') stepEscort(state, e, o);
     else if (o.t === 'fetch') stepFetch(state, e, o);
     else if (o.t === 'deliver') stepDeliver(state, e, o);
-    else if ((o.t === 'move' || o.t === 'amove') && e.path.length === 0) e.order = { t: 'idle' };
+    else if ((o.t === 'move' || o.t === 'amove') && e.path.length === 0 && e.group === undefined) e.order = { t: 'idle' };
     if (e.kind === 'villager') watchIdle(state, e, o);
 
     // Soldiers and towers pick fights on their own; villagers and kings do not.

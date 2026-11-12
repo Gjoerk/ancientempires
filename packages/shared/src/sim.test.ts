@@ -1059,3 +1059,39 @@ test('without a formation everyone goes their own way at their own speed', () =>
   const sword = units.filter((e) => e.kind === 'swordsman')[0];
   assert.ok(rider.y > sword.y + 1, 'the riders pull ahead');
 });
+
+test('a formation faces the way the player dragged, and breaks up to fight on an attack-move', () => {
+  const open = () => {
+    const s = createGame(5, 96);
+    addPlayer(s, 0, 0);
+    addPlayer(s, 1, 1);
+    for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+    s.map.blocked.fill(0); s.map.footprint.fill(0); s.map.tiles.fill(Tile.Grass); s.map.version++;
+    spawn(s, 0, 'king', 2, 2);
+    spawn(s, 1, 'king', 93, 93);
+    return s;
+  };
+  const s = open();
+  const ids: number[] = [];
+  for (let i = 0; i < 8; i++) ids.push(spawn(s, 0, i < 4 ? 'swordsman' : 'archer', 30 + (i % 4), 30 + Math.floor(i / 4))!.id);
+  // Sent south, but told to face west: soldiers end up on the west side of the archers.
+  applyCommand(s, 0, { type: 'move', ids, x: 31, y: 50, face: [-1, 0] });
+  assert.equal(s.groups.size, 1, 'they march as a block');
+  run(s, 300);
+  const units = ids.map((id) => s.entities.get(id)!);
+  const avg = (k: string) => units.filter((e) => e.kind === k).reduce((a, e) => a + e.x, 0) / 4;
+  assert.ok(avg('swordsman') < avg('archer'), `soldiers in front, to the west: ${avg('swordsman')} vs ${avg('archer')}`);
+  assert.equal(s.groups.size, 0);
+
+  const t = open();
+  const army: number[] = [];
+  for (let i = 0; i < 6; i++) army.push(spawn(t, 0, 'swordsman', 20 + (i % 3), 40 + Math.floor(i / 3))!.id);
+  applyCommand(t, 0, { type: 'amove', ids: army, x: 70, y: 41 });
+  spawn(t, 1, 'spearman', 45, 41);
+  let broke = false;
+  for (let i = 0; i < 400 && !broke; i++) {
+    step(t);
+    broke = t.groups.size === 0 && army.some((id) => t.entities.get(id)?.order.t === 'attack');
+  }
+  assert.ok(broke, 'the block breaks up and goes for the enemy');
+});

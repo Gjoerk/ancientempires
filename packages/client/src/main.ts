@@ -28,6 +28,9 @@ import {
   Stance,
   FORMATIONS,
   Formation,
+  formationLayout,
+  formationRank,
+  snapFacing,
   RESOURCES,
   ServerMessage,
   TECH_IDS,
@@ -1627,6 +1630,63 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
   } else send({ type: 'move', ids, x: tx, y: ty });
 }
 
+/** A right-button drag over the map: where it started, and where the cursor is now. */
+let rdrag: { x: number; y: number; cx: number; cy: number; attack: boolean } | undefined;
+
+/** The way a right-drag points, in tiles, once it is long enough to mean a facing (and starts on open ground). */
+function dragFacing(r: NonNullable<typeof rdrag>): [number, number] | undefined {
+  if (Math.hypot(r.cx - r.x, r.cy - r.y) < 18) return undefined;
+  if (unitAt(r.x, r.y) || buildingAt(r.x, r.y) || resourceTileAt(r.x, r.y) >= 0 || relicAt(r.x, r.y) >= 0) return undefined;
+  const [ax, ay] = screenToTile(r.x, r.y);
+  const [bx, by] = screenToTile(r.cx, r.cy);
+  return [bx - ax, by - ay];
+}
+
+/** While dragging out a facing: the formation's spots, the arrow, and which way they will face. */
+function drawFormationPreview(): void {
+  if (!rdrag || !map) return;
+  const face = dragFacing(rdrag);
+  if (!face) return;
+  const units = ownSelectedUnits();
+  const votes = new Map<Formation, number>();
+  for (const v of units) {
+    const f = FORMATIONS[Math.floor(v.extra / 20000) % 5] ?? 'line';
+    votes.set(f, (votes.get(f) ?? 0) + 1);
+  }
+  let kind: Formation = 'line';
+  let most = 0;
+  for (const [f, c] of votes) if (c > most) [kind, most] = [f, c];
+  if (most * 2 < units.length) kind = 'line';
+  const ranks = units.map((v) => formationRank(v.kind)).sort((a, b) => a - b);
+  const [tx, ty] = screenToTile(rdrag.x, rdrag.y);
+  const tiles = formationLayout(kind === 'none' ? 'line' : kind, ranks, tx, ty, snapFacing(face[0], face[1]));
+  tiles.forEach(([x, y], i) => {
+    diamond(x, y, 1);
+    ctx.fillStyle = ranks[i] === 0 ? 'rgba(255,240,180,.32)' : 'rgba(150,210,255,.3)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,240,180,.7)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+  // The arrow along the drag.
+  const [ax, ay] = tileToScreen(Math.floor(tx) + 0.5, Math.floor(ty) + 0.5);
+  const [bx, by] = [rdrag.cx, rdrag.cy];
+  const a = Math.atan2(by - ay, bx - ax);
+  ctx.strokeStyle = rdrag.attack ? '#ff8a6a' : '#f3d77e';
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(bx + Math.cos(a) * 4, by + Math.sin(a) * 4);
+  ctx.lineTo(bx - Math.cos(a - 0.5) * 12, by - Math.sin(a - 0.5) * 12);
+  ctx.lineTo(bx - Math.cos(a + 0.5) * 12, by - Math.sin(a + 0.5) * 12);
+  ctx.closePath();
+  ctx.fill();
+}
+
 /** Tiles on a straight line between two tiles, ends included. */
 function lineTiles(a: [number, number], b: [number, number]): [number, number][] {
   const steps = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
@@ -1715,6 +1775,9 @@ canvas.addEventListener('mousedown', (ev) => {
   const y = ev.clientY / zoom;
   if (ev.button === 2) {
     if (placing) placing = wallStart = undefined;
+    // On open ground with troops selected, holding the button and dragging turns the formation
+    // to face that way (see the preview); a plain click gives the order on release.
+    else if (ownSelectedUnits().length > 0) rdrag = { x, y, attack: ev.ctrlKey || ev.metaKey, cx: x, cy: y };
     else rightClick(x, y, ev.ctrlKey || ev.metaKey);
     return;
   }
@@ -1729,6 +1792,18 @@ canvas.addEventListener('mousedown', (ev) => {
 });
 
 window.addEventListener('mouseup', (ev) => {
+  if (ev.button === 2 && rdrag) {
+    const r = rdrag;
+    rdrag = undefined;
+    const face = dragFacing(r);
+    if (!face) return rightClick(r.x, r.y, r.attack);
+    const [tx, ty] = screenToTile(r.x, r.y);
+    const ids = ownSelectedUnits().map((v) => v.id);
+    send({ type: r.attack ? 'amove' : 'move', ids, x: tx, y: ty, face });
+    marker = { x: tx, y: ty, t: performance.now() };
+    play(r.attack ? 'order.attack' : moveSound(ownSelectedUnits()));
+    return;
+  }
   if (ev.button === 0 && wallStart && placing === 'wall') return finishWall(ev.shiftKey);
   if (ev.button !== 0 || !drag) return;
   const x = ev.clientX / zoom;
@@ -1869,6 +1944,7 @@ canvas.addEventListener('dblclick', (ev) => {
 window.addEventListener('mousemove', (ev) => {
   mouse.x = ev.clientX / zoom;
   mouse.y = ev.clientY / zoom;
+  if (rdrag) [rdrag.cx, rdrag.cy] = [mouse.x, mouse.y];
   mouse.inside = true;
   mouse.onMap = ev.target === canvas;
   // No edge scrolling while the cursor is on something clickable in the interface.
@@ -3139,6 +3215,8 @@ function frame(now: number): void {
       ctx.fill();
     }
   }
+
+  drawFormationPreview();
 
   // Resource tiles are outlined when pointed at, and flash when villagers are sent there.
   const outline = (tile: number, color: string, width: number) => {
