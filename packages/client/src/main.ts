@@ -1660,8 +1660,9 @@ function drawFormationPreview(): void {
   const ranks = units.map((v) => formationRank(v.kind)).sort((a, b) => a - b);
   const [tx, ty] = screenToTile(rdrag.x, rdrag.y);
   const tiles = formationLayout(kind === 'none' ? 'line' : kind, ranks, tx, ty, snapFacing(face[0], face[1]));
+  // Each spot is a quarter of a tile: up to four units stand on one.
   tiles.forEach(([x, y], i) => {
-    diamond(x, y, 1);
+    diamond(x - 0.22, y - 0.22, 0.44);
     ctx.fillStyle = ranks[i] === 0 ? 'rgba(255,240,180,.32)' : 'rgba(150,210,255,.3)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,240,180,.7)';

@@ -483,8 +483,9 @@ test('a group moves in formation at the pace of its slowest unit', () => {
   const furthest = Math.max(...foot.map((e) => e.x));
   assert.ok(rider.x <= furthest + 1.1, `rider ${rider.x.toFixed(1)} stays with the infantry (${furthest.toFixed(1)})`);
   run(s, 150);
-  const spots = new Set([rider, ...foot].map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`));
-  assert.equal(spots.size, 6, 'each on its own tile');
+  // Each on a spot of their own, at least a half tile apart (four fit on a tile).
+  const all = [rider, ...foot];
+  for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) assert.ok(Math.hypot(all[i].x - all[j].x, all[i].y - all[j].y) >= 0.45);
   // Spearmen, being melee, stand in front of the rider-free rear? All arrived near the target.
   assert.ok([rider, ...foot].every((e) => Math.hypot(e.x - 45, e.y - 33) < 4));
 });
@@ -942,9 +943,9 @@ test('formations give every member its own spot; a box keeps the archers inside'
   const outside = Math.min(...box.slice(0, 12).map(ring));
   assert.ok(Math.max(...box.slice(12).map(ring)) < outside, 'archers in the middle');
   // A flank leaves a gap in the middle; staggered spreads out.
-  assert.ok(formationSlots('flank', Array(8).fill(0)).every(([, c]) => Math.abs(c) >= 1.5));
+  assert.ok(formationSlots('flank', Array(8).fill(0)).every(([, c]) => Math.abs(c) >= 3));
   const st = formationSlots('staggered', Array(9).fill(0));
-  for (let i = 0; i < st.length; i++) for (let j = i + 1; j < st.length; j++) assert.ok(Math.hypot(st[i][0] - st[j][0], st[i][1] - st[j][1]) >= 1.9);
+  for (let i = 0; i < st.length; i++) for (let j = i + 1; j < st.length; j++) assert.ok(Math.hypot(st[i][0] - st[j][0], st[i][1] - st[j][1]) >= 2.9);
 });
 
 test('a group set to a box walks there as a box', () => {
