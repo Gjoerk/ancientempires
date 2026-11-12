@@ -130,7 +130,7 @@ export const DEFS: Record<Kind, KindDef> = {
   // Slow, heavy shots that crush a whole group, but it cannot aim at anyone right at its foot.
   catapulttower: {
     label: 'Catapult Tower', building: true, hp: 800, cost: { stone: 175, wood: 150, gold: 75 }, time: 45, age: 3, size: 2, armor: 7,
-    attack: 22, range: 8, minRange: 1.6, cooldown: 4, sight: 10, splash: 1.5,
+    attack: 22, range: 10, minRange: 1.6, cooldown: 4, sight: 11, splash: 1.5,
   },
   monastery: {
     label: 'Monastery', building: true, hp: 450, cost: { wood: 175 }, time: 30, age: 3, size: 3, armor: 3, trains: ['monk'],
