@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addPlayer, applyCommand, armorOf, attackOf, canPlace, createGame, DEFS, hasTech, Entity, findPath, GameHost, GameState, generateMap, isWalkable, spawn, step, Tile,
-  TILE_RESOURCE, RESEED_COST, FARM_FOOD, FALLOW_SECONDS,
+  TILE_RESOURCE, RESEED_COST, FARM_FOOD, FALLOW_SECONDS, formationSlots, FORMATIONS,
 } from './index';
 
 const owned = (s: GameState, slot: number, kind: string): Entity[] =>
@@ -924,4 +924,44 @@ test('a villager whose work stopped by itself goes back to it after a few second
   applyCommand(s, 0, { type: 'stop', ids: [v.id] });
   run(s, 100);
   assert.equal((v.order as { t: string }).t, 'idle');
+});
+
+test('formations give every member its own spot; a box keeps the archers inside', () => {
+  for (const f of FORMATIONS) {
+    for (const n of [1, 2, 5, 12, 30]) {
+      const ranks = Array.from({ length: n }, (_, i) => (i < n / 2 ? 0 : 1));
+      const slots = formationSlots(f, ranks);
+      assert.equal(slots.length, n);
+      assert.equal(new Set(slots.map(([r, c]) => `${Math.floor(r + 0.5)},${Math.floor(c + 0.5)}`)).size, n, `${f} ${n}`);
+    }
+  }
+  const ranks = [...Array(12).fill(0), ...Array(4).fill(1)];
+  const box = formationSlots('box', ranks);
+  const ring = ([r, c]: [number, number]) => Math.max(Math.abs(r), Math.abs(c));
+  const outside = Math.min(...box.slice(0, 12).map(ring));
+  assert.ok(Math.max(...box.slice(12).map(ring)) < outside, 'archers in the middle');
+  // A flank leaves a gap in the middle; staggered spreads out.
+  assert.ok(formationSlots('flank', Array(8).fill(0)).every(([, c]) => Math.abs(c) >= 2));
+  const st = formationSlots('staggered', Array(9).fill(0));
+  for (let i = 0; i < st.length; i++) for (let j = i + 1; j < st.length; j++) assert.ok(Math.hypot(st[i][0] - st[j][0], st[i][1] - st[j][1]) >= 1.9);
+});
+
+test('a group set to a box walks there as a box', () => {
+  const s = createGame(5);
+  addPlayer(s, 0);
+  const tc = owned(s, 0, 'towncenter')[0];
+  const ids: number[] = [];
+  for (let i = 0; i < 8; i++) ids.push(spawn(s, 0, 'swordsman', tc.x + 4 + (i % 4), tc.y + 4 + Math.floor(i / 4))!.id);
+  for (let i = 0; i < 4; i++) ids.push(spawn(s, 0, 'archer', tc.x + 4 + i, tc.y + 6)!.id);
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'box' });
+  assert.ok(ids.every((id) => s.entities.get(id)!.formation === 'box'));
+  applyCommand(s, 0, { type: 'move', ids, x: tc.x + 4, y: tc.y + 16 });
+  run(s, 300);
+  const units = ids.map((id) => s.entities.get(id)!);
+  const cx = units.reduce((a, e) => a + e.x, 0) / units.length;
+  const cy = units.reduce((a, e) => a + e.y, 0) / units.length;
+  const d = (e: Entity) => Math.hypot(e.x - cx, e.y - cy);
+  const archers = units.filter((e) => e.kind === 'archer');
+  const swords = units.filter((e) => e.kind === 'swordsman');
+  assert.ok(Math.max(...archers.map(d)) <= Math.max(...swords.map(d)), 'archers are not on the outside');
 });

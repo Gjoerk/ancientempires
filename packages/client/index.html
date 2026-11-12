@@ -111,6 +111,11 @@
     .well { background: rgba(0, 0, 0, .26); border: 1px solid #050d09; border-radius: 4px;
       box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55), 0 0 0 1px rgba(201, 165, 74, .2); box-sizing: border-box; min-width: 0; min-height: 0; }
     #sel { grid-area: sel; display: flex; gap: 10px; padding: 8px; overflow: hidden; }
+    /* Nothing selected: no picture, the text in the middle of the card. */
+    #sel.none { align-items: center; justify-content: center; }
+    #sel.none #portrait { display: none; }
+    #sel.none > .head { justify-content: center; }
+    #sel.none #sel-text { flex: none; align-items: center; text-align: center; }
     #portrait { flex: none; width: 84px; height: 84px; background: rgba(0, 0, 0, .3); border: 2px solid var(--edge);
       box-shadow: inset 0 0 0 1px var(--trim); border-radius: 4px; }
     #sel-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -185,6 +190,8 @@
       grid-template-columns: auto minmax(260px, 380px) minmax(220px, 1fr) auto auto; grid-template-areas: "actions sel details idle map"; }
     /* Wide screens: three rows of big tiles, each with its picture and name; cost and effect are in the details box. */
     body[data-bar="a"] #actions { display: grid; grid-template-columns: repeat(var(--cols, 8), var(--tile-w, 80px)); grid-auto-rows: var(--tile-h, 64px); gap: 4px; }
+    /* A scroll box may shrink below its content in the grid; the tiles must never be cut off. */
+    body[data-bar="a"] #actions { min-width: max-content; box-sizing: border-box; }
     body[data-bar="a"] #actions button { width: var(--tile-w, 80px); height: var(--tile-h, 64px); padding: 2px 2px 3px; justify-content: center; gap: 1px; }
     body[data-bar="a"] #actions button img.pic { width: 44px; height: 44px; }
     body[data-bar="a"] #actions button .lbl { font-size: 11px; line-height: 13px; height: 13px; color: var(--ink); opacity: .9; }
@@ -194,7 +201,7 @@
     @media (max-width: 1700px) {
       body[data-bar="a"] #bottom { --cols: 6; }
     }
-    @media (max-width: 1450px) {
+    @media (max-width: 1560px) {
       body[data-bar="a"] #bottom { --tile-w: 58px; --tile-h: 58px; }
       body[data-bar="a"] #actions button { padding: 0; }
       body[data-bar="a"] #actions button img.pic { width: 46px; height: 46px; }

@@ -2,7 +2,7 @@ import { DEFS, FALLOW_SECONDS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, T
 import { MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
 import { runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
-import { activityOf, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
+import { activityOf, FORMATIONS, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
 
 /**
  * The authoritative game for one room. It knows nothing about networking:
@@ -156,7 +156,7 @@ export class GameHost {
       ents.push([
         e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
         // Units: carried amount + 100 * resource + 1000 * building sites still queued.
-        building ? Math.floor(e.progress * 100) : e.carry + 100 * RESOURCES.indexOf(e.carryRes) + 1000 * Math.min(9, e.tasks?.length ?? 0) + (e.stance === 'defensive' ? 10000 : 0),
+        building ? Math.floor(e.progress * 100) : e.carry + 100 * RESOURCES.indexOf(e.carryRes) + 1000 * Math.min(9, e.tasks?.length ?? 0) + (e.stance === 'defensive' ? 10000 : 0) + 20000 * FORMATIONS.indexOf(e.formation ?? 'line'),
         task, target,
       ]);
       if (e.queue.length > 0) {

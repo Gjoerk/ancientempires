@@ -25,6 +25,8 @@ import {
   RELIC_ATTACK,
   RELIC_MAX,
   Stance,
+  FORMATIONS,
+  Formation,
   RESOURCES,
   ServerMessage,
   TECH_IDS,
@@ -2028,7 +2030,16 @@ $('actions').addEventListener('click', (ev) => {
   // Not enough resources: nothing is queued or placed.
   if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return refuse(button.dataset.why || 'Not enough resources.');
   if (!button.dataset.train) play('click', 60);
-  const { build, train, cancel, eject, sell, buy, stance, bell, back } = button.dataset;
+  const { build, train, cancel, eject, sell, buy, stance, bell, back, formation, only } = button.dataset;
+  if (formation) send({ type: 'formation', ids: ownSelectedUnits().map((v) => v.id), formation: formation as Formation });
+  if (only) {
+    // Shift-click drops that kind from the selection instead.
+    const keep = (ev as MouseEvent).shiftKey;
+    for (const id of [...selected]) {
+      const v = views.get(id);
+      if (!v || v.owner !== me || (v.kind === only) === keep) selected.delete(id);
+    }
+  }
   if (back) placing = wallStart = undefined;
   if (bell) {
     send({ type: 'bell' });
@@ -2207,6 +2218,8 @@ const TIPS = [
   'A mill, lumber camp or mining camp next to a resource saves your villagers a long walk.',
 ];
 
+const FORMATION_NAMES: Record<Formation, string> = { line: 'Line', box: 'Box', staggered: 'Staggered', flank: 'Flank' };
+
 /** Button whose details stay in the box until something else is selected. */
 let focusKey = '';
 let focusSelection = '';
@@ -2345,10 +2358,34 @@ function renderPanel(): void {
   // Soldiers can be told to go for anything they see, or to stand their ground until struck.
   const fighters = mine.filter((v) => !isBuilding(v.kind) && DEFS[v.kind].attack && v.kind !== 'villager' && v.kind !== 'king');
   if (!placing && fighters.length > 0) {
-    const defensive = fighters.filter((v) => v.extra >= 10000).length;
+    const defensive = fighters.filter((v) => Math.floor(v.extra / 10000) % 2 === 1).length;
     for (const stance of ['aggressive', 'defensive'] as const) {
       buttons.push({ label: stance === 'aggressive' ? 'Aggressive' : 'Defensive', icon: `stance.${stance}`, detail: describeAction(`stance.${stance}`),
         data: { stance }, active: stance === 'defensive' ? defensive === fighters.length : defensive === 0 });
+    }
+  }
+
+  // Formations: how a group lines up whenever it is sent somewhere together.
+  const marchers = mine.filter((v) => !isBuilding(v.kind) && v.kind !== 'villager');
+  if (!placing && marchers.length >= 2) {
+    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000)] ?? 'line';
+    for (const f of FORMATIONS) {
+      buttons.push({ label: FORMATION_NAMES[f], icon: `formation.${f}`, detail: describeAction(`formation.${f}`),
+        data: { formation: f }, active: marchers.every((v) => formationOf(v) === f) });
+    }
+  }
+
+  // A mixed army: one button per kind of unit picks out only those.
+  if (!placing && chosen.length > 1) {
+    const kinds = new Map<Kind, number>();
+    for (const v of mine) if (!isBuilding(v.kind)) kinds.set(v.kind, (kinds.get(v.kind) ?? 0) + 1);
+    if (kinds.size > 1) {
+      for (const [kind, count] of [...kinds].sort((a, b) => b[1] - a[1])) {
+        const name = count === 1 ? DEFS[kind].label : DEFS[kind].label.endsWith('man') ? DEFS[kind].label.replace(/man$/, 'men') : `${DEFS[kind].label}s`;
+        buttons.push({ label: `${count} ${name}`, icon: kind,
+          detail: { title: `Only the ${name.toLowerCase()}`, icon: kind, stats: [], lines: [`Selects only the ${count} ${name.toLowerCase()} from this group.`, 'Shift-click instead to take them out of the selection.'] },
+          data: { only: kind } });
+      }
     }
   }
 
@@ -2403,6 +2440,7 @@ function renderCard(card: SelCard): void {
   pic.style.visibility = card.portrait ? 'visible' : 'hidden';
   if (card.portrait) pic.src = card.portrait;
   $('sel-name').textContent = card.name || 'Nothing selected';
+  $('sel').classList.toggle('none', !card.name);
   $('sel-sub').textContent = card.sub;
   const bar = $('hpbar');
   bar.hidden = !card.bar;

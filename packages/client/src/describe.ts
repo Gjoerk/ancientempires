@@ -126,6 +126,17 @@ export function describeAction(id: string): Detail {
   if (id === 'eject') {
     return { title: 'Send everyone out', icon: id, stats: [], lines: ['Everyone sheltering inside comes out. Outside they can be attacked, the king too.'] };
   }
+  if (id.startsWith('formation.')) {
+    const f = id.slice(10);
+    const text: Record<string, [string, string]> = {
+      line: ['Line', 'A wide front: soldiers in the first rows, archers and siege behind them. Good for most fights.'],
+      box: ['Box', 'Soldiers form a square around the archers, monks and siege, which are safe from riders coming from any side.'],
+      staggered: ['Staggered', 'Everyone keeps two tiles apart, row by row offset. Catapult towers and massed arrows hit far fewer at once.'],
+      flank: ['Flank', 'Two wings with a gap in the middle, ready to close in on an enemy from both sides.'],
+    };
+    const [title, line] = text[f] ?? text.line;
+    return { title: `${title} formation`, icon: id, stats: [], lines: [line, 'The group keeps it whenever you send it somewhere together, and walks at the pace of its slowest member.'] };
+  }
   if (id === 'back') {
     return { title: 'Back', icon: id, stats: [], lines: ['Puts the building away without placing it, and brings back the menu from before (same as Esc or right-click).'] };
   }

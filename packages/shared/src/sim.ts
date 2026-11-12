@@ -80,11 +80,17 @@ export interface Entity {
   inside: number;
   /** Soldiers: 'defensive' ones only fight back when struck; otherwise they go for enemies they see. */
   stance?: Stance;
+  /** How the unit lines up when it moves with others; a line when unset. */
+  formation?: Formation;
   /** Villagers called in by the town bell: the job to go back to when it rings again. */
   recall?: Order;
 }
 
 export type Stance = 'aggressive' | 'defensive';
+/** Line: a wide front. Box: soldiers all around the archers and siege. Staggered: spread out
+ *  against catapult fire. Flank: two wings with a gap in the middle. */
+export const FORMATIONS = ['line', 'box', 'staggered', 'flank'] as const;
+export type Formation = (typeof FORMATIONS)[number];
 
 export interface PlayerState {
   slot: number;
@@ -149,6 +155,7 @@ export type Command =
   | { type: 'amove'; ids: number[]; x: number; y: number }
   | { type: 'stop'; ids: number[] }
   | { type: 'stance'; ids: number[]; stance: Stance }
+  | { type: 'formation'; ids: number[]; formation: Formation }
   /** The town bell: villagers go into shelter, or, rung again, back to work. */
   | { type: 'bell' }
   /** Monks go and pick up a relic. */
@@ -519,13 +526,12 @@ function formation(state: GameState, units: Entity[], x: number, y: number): Map
   const [px, py] = [-dy, dx];
   const rank = (e: Entity) => (DEFS[e.kind].building ? 9 : e.kind === 'villager' || e.kind === 'king' ? 3 : e.kind === 'ram' ? 2 : isRangedKind(e.kind) ? 1 : 0);
   const ordered = [...units].sort((a, b) => rank(a) - rank(b) || (a.x - cx) * px + (a.y - cy) * py - ((b.x - cx) * px + (b.y - cy) * py));
-  const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5))));
+  const slots = formationSlots(groupFormation(units), ordered.map(rank));
   const taken = new Set<number>();
   const out = new Map<Entity, [number, number]>();
   ordered.forEach((e, i) => {
-    const row = Math.floor(i / cols);
-    const inRow = Math.min(cols, n - row * cols);
-    const col = (i % cols) - (inRow - 1) / 2;
+    // Each slot is [steps behind the front, steps to the side].
+    const [row, col] = slots[i];
     const tx = Math.floor(x + 0.5 - dx * row + px * col);
     const ty = Math.floor(y + 0.5 - dy * row + py * col);
     // The nearest free tile to the slot, so that walls and trees just bend the formation.
@@ -535,6 +541,70 @@ function formation(state: GameState, units: Entity[], x: number, y: number): Map
     out.set(e, spot);
   });
   return out;
+}
+
+/** The formation most of the soldiers in a group have been given. */
+function groupFormation(units: Entity[]): Formation {
+  const votes = new Map<Formation, number>();
+  for (const e of units) if (e.formation) votes.set(e.formation, (votes.get(e.formation) ?? 0) + 1);
+  let best: Formation = 'line';
+  let most = 0;
+  for (const [f, c] of votes) if (c > most || (c === most && f < best)) [best, most] = [f, c];
+  return most * 2 >= units.length ? best : 'line';
+}
+
+/**
+ * Where each member of a group stands, as [rows behind the front, steps to the side of the middle].
+ * `ranks` is sorted: soldiers first (0), then archers (1), siege (2) and villagers or the king (3).
+ */
+export function formationSlots(kind: Formation, ranks: number[]): [number, number][] {
+  const n = ranks.length;
+  const rows = (count: number, cols: number, gap: number, stagger: boolean, from = 0): [number, number][] => {
+    const out: [number, number][] = [];
+    for (let i = 0; i < count; i++) {
+      const row = Math.floor(i / cols);
+      const inRow = Math.min(cols, count - row * cols);
+      let col = ((i % cols) - (inRow - 1) / 2) * gap;
+      if (stagger && row % 2 === 1) col += gap / 2;
+      out.push([(from + row) * gap, col]);
+    }
+    return out;
+  };
+  if (kind === 'staggered') {
+    // Two tiles apart and offset row by row: one boulder hits one soldier.
+    return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2)))), 2, true);
+  }
+  if (kind === 'flank') {
+    // Two wings side by side with a gap of four tiles; each wing keeps soldiers in front.
+    const left: number[] = [];
+    const right: number[] = [];
+    ranks.forEach((_, i) => (i % 2 === 0 ? left : right).push(i));
+    const out: [number, number][] = new Array(n);
+    for (const [wing, side] of [[left, -1], [right, 1]] as const) {
+      const cols = Math.max(1, Math.ceil(Math.sqrt(wing.length * 1.5)));
+      const spots = rows(wing.length, cols, 1, false);
+      const half = (Math.min(cols, wing.length) - 1) / 2;
+      wing.forEach((idx, k) => (out[idx] = [spots[k][0], spots[k][1] + side * (half + 2.5)]));
+    }
+    return out;
+  }
+  if (kind === 'box') {
+    // A square: archers, siege and villagers in the middle, soldiers on the outside.
+    const side = Math.ceil(Math.sqrt(n));
+    const cells: [number, number][] = [];
+    for (let r = 0; r < side + 2; r++) for (let c = 0; c < side + 2; c++) cells.push([r - (side + 1) / 2, c - (side + 1) / 2]);
+    const ring = ([r, c]: [number, number]) => Math.max(Math.abs(r), Math.abs(c));
+    // The outer ring first, and around each ring in turn, so the soldiers close the box.
+    cells.sort((a, b) => ring(b) - ring(a) || Math.atan2(a[0], a[1]) - Math.atan2(b[0], b[1]));
+    const inner = ranks.filter((r) => r > 0).length;
+    const outerCells = cells.slice(0, n - inner);
+    const innerCells = cells.slice(n - inner).reverse();
+    let o = 0;
+    let m = 0;
+    return ranks.map((r) => (r > 0 ? innerCells[m++] : outerCells[o++]));
+  }
+  // Line: a wide front, soldiers in front and archers behind.
+  return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5)))), 1, false);
 }
 
 function moveUnits(state: GameState, units: Entity[], x: number, y: number): void {
@@ -623,7 +693,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
   if (!player || player.defeated || !cmd) return;
   const map = state.map;
   // Villagers given a new job are no longer waiting for the bell to send them back.
-  if ('ids' in cmd && Array.isArray(cmd.ids) && cmd.type !== 'stance') for (const e of ownUnits(state, slot, cmd.ids, true)) delete e.recall;
+  if ('ids' in cmd && Array.isArray(cmd.ids) && cmd.type !== 'stance' && cmd.type !== 'formation') for (const e of ownUnits(state, slot, cmd.ids, true)) delete e.recall;
 
   if (cmd.type === 'move') {
     if (!Number.isFinite(cmd.x) || !Number.isFinite(cmd.y)) return;
@@ -789,6 +859,13 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
         e.path = [];
         e.order = { t: 'idle' };
       }
+    }
+  } else if (cmd.type === 'formation') {
+    if (!FORMATIONS.includes(cmd.formation)) return;
+    for (const e of ownUnits(state, slot, cmd.ids)) {
+      if (isBuilding(e) || e.kind === 'villager') continue;
+      if (cmd.formation === 'line') delete e.formation;
+      else e.formation = cmd.formation;
     }
   } else if (cmd.type === 'bell') {
     ringBell(state, slot);
