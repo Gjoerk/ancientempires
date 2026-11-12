@@ -621,10 +621,11 @@ function nearestSpot(map: GameMap, spots: Spots, px: number, py: number, tiles: 
 function groupFormation(units: Entity[]): Formation {
   const votes = new Map<Formation, number>();
   for (const e of units) if (e.formation) votes.set(e.formation, (votes.get(e.formation) ?? 0) + 1);
-  let best: Formation = 'line';
+  let best: Formation = 'none';
   let most = 0;
   for (const [f, c] of votes) if (c > most || (c === most && f < best)) [best, most] = [f, c];
-  return most * 2 >= units.length ? best : 'line';
+  // Without a formation chosen by most of them, they just go loosely together.
+  return most * 2 > units.length ? best : 'none';
 }
 
 /** Where each unit of a group stands at (x, y). `face` overrides the direction of travel. */
@@ -645,15 +646,36 @@ function formation(state: GameState, units: Entity[], x: number, y: number, face
     out.set(e, spot);
   };
   const kind = groupFormation(units);
-  // A short step, or no formation: everyone shifts over as they stand.
-  if (n > 1 && !face && (len < SHORT_MOVE || kind === 'none')) {
-    if (kind === 'none' && len >= SHORT_MOVE) {
-      // Loosely gathered around the spot, nearest first.
-      const order = [...units].sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));
-      for (const e of order) place(e, x, y);
-      return out;
-    }
+  // Standing close together already (not scattered after a fight, say).
+  const spread = Math.max(...units.map((e) => Math.hypot(e.x - cx, e.y - cy)));
+  const compact = spread <= 0.45 * Math.sqrt(n) + 1.5;
+  // A short step for a group standing together: everyone shifts over as they stand.
+  if (n > 1 && !face && len < SHORT_MOVE && compact) {
     for (const e of units) place(e, e.x + x - cx, e.y + y - cy);
+    return out;
+  }
+  if (n > 1 && !face && kind === 'none') {
+    // No formation: a tight crowd around the spot clicked. The spots nearest the click are handed out
+    // first, each to the unit nearest to it, so that nobody crosses the whole group to get there.
+    const free: [number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      const spot = nearestSpot(state.map, spots, x, y, 12 + Math.ceil(n / 2));
+      if (!spot) break;
+      spots.add(spot[0], spot[1]);
+      free.push(spot);
+    }
+    const left = new Set(units);
+    for (const spot of free) {
+      let best: Entity | undefined;
+      let bestD = Infinity;
+      for (const e of left) {
+        const d = Math.hypot(e.x - spot[0], e.y - spot[1]);
+        if (d < bestD) [best, bestD] = [e, d];
+      }
+      if (!best) break;
+      left.delete(best);
+      out.set(best, spot);
+    }
     return out;
   }
   const f = face ? snapFacing(face[0], face[1]) : len < 0.5 && units[0]?.facing ? snapFacing(...units[0].facing) : snapFacing(x - cx, y - cy);
@@ -1223,7 +1245,7 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
     const group: Entity[] = [];
     for (const e of ownUnits(state, slot, cmd.ids)) {
       if (isBuilding(e) || e.kind === 'villager') continue;
-      if (cmd.formation === 'line') delete e.formation;
+      if (cmd.formation === 'none') delete e.formation;
       else e.formation = cmd.formation;
       // Those standing about or on the march line up at once; fights carry on.
       if (e.order.t === 'idle' || e.order.t === 'move') group.push(e);

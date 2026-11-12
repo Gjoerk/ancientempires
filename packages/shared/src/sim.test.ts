@@ -478,6 +478,7 @@ test('a group moves in formation at the pace of its slowest unit', () => {
   for (let y = 20; y < 60; y++) for (let x = 20; x < 60; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
   const rider = spawn(s, 0, 'rider', 25, 30);
   const foot = Array.from({ length: 5 }, (_, i) => spawn(s, 0, 'spearman', 25, 31 + i));
+  applyCommand(s, 0, { type: 'formation', ids: [rider.id, ...foot.map((e) => e.id)], formation: 'line' });
   applyCommand(s, 0, { type: 'move', ids: [rider.id, ...foot.map((e) => e.id)], x: 45, y: 33 });
   run(s, 30);
   const furthest = Math.max(...foot.map((e) => e.x));
@@ -1076,6 +1077,7 @@ test('a formation faces the way the player dragged, and breaks up to fight on an
   const ids: number[] = [];
   for (let i = 0; i < 8; i++) ids.push(spawn(s, 0, i < 4 ? 'swordsman' : 'archer', 30 + (i % 4), 30 + Math.floor(i / 4))!.id);
   // Sent south, but told to face west: soldiers end up on the west side of the archers.
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'line' });
   applyCommand(s, 0, { type: 'move', ids, x: 31, y: 50, face: [-1, 0] });
   assert.equal(s.groups.size, 1, 'they march as a block');
   run(s, 300);
@@ -1087,6 +1089,7 @@ test('a formation faces the way the player dragged, and breaks up to fight on an
   const t = open();
   const army: number[] = [];
   for (let i = 0; i < 6; i++) army.push(spawn(t, 0, 'swordsman', 20 + (i % 3), 40 + Math.floor(i / 3))!.id);
+  applyCommand(t, 0, { type: 'formation', ids: army, formation: 'line' });
   applyCommand(t, 0, { type: 'amove', ids: army, x: 70, y: 41 });
   spawn(t, 1, 'spearman', 45, 41);
   let broke = false;
@@ -1095,4 +1098,20 @@ test('a formation faces the way the player dragged, and breaks up to fight on an
     broke = t.groups.size === 0 && army.some((id) => t.entities.get(id)?.order.t === 'attack');
   }
   assert.ok(broke, 'the block breaks up and goes for the enemy');
+});
+
+test('without a formation, a scattered group gathers tightly round the spot clicked', () => {
+  const s = createGame(5, 96);
+  addPlayer(s, 0, 0);
+  for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+  s.map.blocked.fill(0); s.map.footprint.fill(0); s.map.tiles.fill(Tile.Grass); s.map.version++;
+  spawn(s, 0, 'king', 2, 2);
+  // Scattered all over after a fight.
+  const ids = [[20, 20], [34, 22], [22, 36], [36, 35], [28, 18], [18, 28], [38, 28], [28, 38]].map(([x, y]) => spawn(s, 0, 'swordsman', x, y)!.id);
+  applyCommand(s, 0, { type: 'move', ids, x: 30, y: 30 });
+  run(s, 200);
+  for (const id of ids) {
+    const e = s.entities.get(id)!;
+    assert.ok(Math.hypot(e.x - 30.5, e.y - 30.5) < 2.5, `close to the spot: ${e.x.toFixed(1)}, ${e.y.toFixed(1)}`);
+  }
 });

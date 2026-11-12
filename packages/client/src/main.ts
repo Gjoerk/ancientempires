@@ -988,6 +988,7 @@ function onMessage(msg: ServerMessage): void {
       if (seen.has(id)) continue;
       setBlocked(v, 0);
       views.delete(id);
+      if (bands.delete(id)) pruneBands();
       selected.delete(id);
     }
     for (const [index, tile] of msg.tiles) setTile(index, tile);
@@ -1264,6 +1265,7 @@ function resetGame(): void {
   centred = false;
   placing = undefined;
   winner = -1;
+  bands.clear();
   silence(false);
   announcedTakeover.clear();
   map = undefined;
@@ -1733,6 +1735,48 @@ function finishWall(keep: boolean): void {
 }
 
 /** Selects whatever is at a point: a unit, a building, or a resource to see what is left of it. */
+/**
+ * Groups: soldiers the player has bound together. Picking one of them on the map picks them all, until
+ * the group is disbanded. Each group has a number, shown on a little banner over its members.
+ */
+const bands = new Map<number, number>();
+
+/** Adds the rest of every group someone in the selection belongs to. */
+function expandBands(): void {
+  const wanted = new Set([...selected].map((id) => bands.get(id)).filter((b): b is number => b !== undefined));
+  if (wanted.size === 0) return;
+  for (const [id, b] of bands) if (wanted.has(b) && views.has(id)) selected.add(id);
+}
+
+/** Binds the selected units into a new group, out of whatever groups they were in before. */
+function formBand(): void {
+  const units = ownSelectedUnits();
+  if (units.length < 2) return;
+  const used = new Set(bands.values());
+  let n = 1;
+  while (used.has(n)) n++;
+  for (const v of units) bands.set(v.id, n);
+  // A group left with a single member is no group.
+  pruneBands();
+  showNotice(-1, `Group ${n} formed: ${units.length} units. Selecting one selects them all.`);
+}
+
+function disbandSelected(): void {
+  const gone = new Set([...selected].map((id) => bands.get(id)).filter((b): b is number => b !== undefined));
+  for (const [id, b] of [...bands]) if (gone.has(b)) bands.delete(id);
+  if (gone.size) showNotice(-1, gone.size === 1 ? `Group ${[...gone][0]} disbanded.` : 'Groups disbanded.');
+}
+
+/** Forgets the dead, and groups with only one member left. */
+function pruneBands(): void {
+  const count = new Map<number, number>();
+  for (const [id, b] of [...bands]) {
+    if (!views.has(id) || views.get(id)!.owner !== me) bands.delete(id);
+    else count.set(b, (count.get(b) ?? 0) + 1);
+  }
+  for (const [id, b] of [...bands]) if ((count.get(b) ?? 0) < 2) bands.delete(id);
+}
+
 function clickSelect(sx: number, sy: number): void {
   const v = unitAt(sx, sy) ?? buildingAt(sx, sy);
   if (!v) {
@@ -1740,6 +1784,7 @@ function clickSelect(sx: number, sy: number): void {
     return;
   }
   selected.add(v.id);
+  expandBands();
   // Clicking your own building plays its sound: its own select sound if there is one, else the one for finishing it.
   if (v.owner === me) playFirstFile(isBuilding(v.kind) ? [`select.${v.kind}`, `built.${v.kind}`, 'select', 'built'] : [`select.${v.kind}`, 'select']);
   // Selecting something of a test opponent hands control to that side.
@@ -1769,6 +1814,7 @@ function boxSelect(box: { x0: number; y0: number; x1: number; y1: number }): voi
     }
   }
   for (const v of picked) selected.add(v.id);
+  expandBands();
 }
 
 canvas.addEventListener('mousedown', (ev) => {
@@ -2157,7 +2203,9 @@ $('actions').addEventListener('click', (ev) => {
   // Not enough resources: nothing is queued or placed.
   if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return refuse(button.dataset.why || 'Not enough resources.');
   if (!button.dataset.train) play('click', 60);
-  const { build, train, cancel, eject, sell, buy, stance, bell, back, formation, only } = button.dataset;
+  const { build, train, cancel, eject, sell, buy, stance, bell, back, formation, only, band } = button.dataset;
+  if (band === 'form') formBand();
+  if (band === 'disband') disbandSelected();
   if (formation) send({ type: 'formation', ids: ownSelectedUnits().map((v) => v.id), formation: formation as Formation });
   if (only) {
     // Shift-click drops that kind from the selection instead.
@@ -2495,10 +2543,27 @@ function renderPanel(): void {
   // Formations: how a group lines up whenever it is sent somewhere together.
   const marchers = mine.filter((v) => !isBuilding(v.kind) && v.kind !== 'villager');
   if (!placing && marchers.length >= 2) {
-    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000) % 5] ?? 'line';
-    for (const f of FORMATIONS) {
+    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000) % 5] ?? 'none';
+    for (const f of ['none', ...FORMATIONS.filter((k) => k !== 'none')] as Formation[]) {
       buttons.push({ label: FORMATION_NAMES[f], icon: `formation.${f}`, detail: describeAction(`formation.${f}`),
         data: { formation: f }, active: marchers.every((v) => formationOf(v) === f) });
+    }
+  }
+
+  // Groups: bind the selection together, or break up the groups in it.
+  const units = mine.filter((v) => !isBuilding(v.kind));
+  if (!placing && units.length >= 1) {
+    const inBands = new Set(units.map((v) => bands.get(v.id)));
+    const oneBand = inBands.size === 1 && !inBands.has(undefined);
+    if (units.length >= 2 && !oneBand) {
+      buttons.push({ label: 'Form group', icon: 'flag', data: { band: 'form' },
+        detail: { title: 'Form a group', icon: 'flag', stats: [], lines: ['Binds these units together: from now on, clicking or dragging over any one of them selects the whole group.',
+          'Units already in another group leave it for this one.'] } });
+    }
+    if ([...inBands].some((b) => b !== undefined)) {
+      const n = [...inBands].filter((b) => b !== undefined);
+      buttons.push({ label: n.length === 1 ? `Disband ${n[0]}` : 'Disband', icon: 'cancel', data: { band: 'disband' },
+        detail: { title: n.length === 1 ? `Disband group ${n[0]}` : 'Disband the groups', icon: 'cancel', stats: [], lines: ['The units stay where they are, but are selected one by one again.'] } });
     }
   }
 
@@ -3033,6 +3098,19 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
     ctx.beginPath();
     ctx.ellipse(sx, sy, 13, 6.5, 0, 0, Math.PI * 2);
     ctx.stroke();
+  }
+  // A member of a group: its number on a small pennant at the feet.
+  const band = v.owner === me ? bands.get(v.id) : undefined;
+  if (band !== undefined) {
+    ctx.fillStyle = '#1a140c';
+    ctx.fillRect(Math.round(sx + 8), Math.round(sy - 4), 9, 9);
+    ctx.fillStyle = '#e8c25a';
+    ctx.fillRect(Math.round(sx + 9), Math.round(sy - 3), 7, 7);
+    ctx.fillStyle = '#1a140c';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(band), Math.round(sx + 12.5), Math.round(sy + 0.5));
   }
   // Walking bobs up and down; working and fighting are a quicker, smaller motion.
   // Still walking up to the work: shown walking, not yet working.

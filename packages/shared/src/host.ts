@@ -157,7 +157,7 @@ export class GameHost {
       ents.push([
         e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
         // Units: carried amount + 100 * resource + 1000 * building sites still queued.
-        building ? Math.floor(e.progress * 100) : e.carry + 100 * RESOURCES.indexOf(e.carryRes) + 1000 * Math.min(9, e.tasks?.length ?? 0) + (e.stance === 'defensive' ? 10000 : 0) + 20000 * FORMATIONS.indexOf(e.formation ?? 'line')
+        building ? Math.floor(e.progress * 100) : e.carry + 100 * RESOURCES.indexOf(e.carryRes) + 1000 * Math.min(9, e.tasks?.length ?? 0) + (e.stance === 'defensive' ? 10000 : 0) + 20000 * FORMATIONS.indexOf(e.formation ?? 'none')
           // Formation 0-4 (× 20000); trebuchets: 1 set up, 2 setting up or packing (× 100000).
           + 100000 * (e.setup ? 2 : e.deployed ? 1 : 0),
         task, target,
