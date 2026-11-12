@@ -273,6 +273,34 @@ function swordsman(p: Pen, frame: number): void {
   p.dot(sx + 2, sy + Math.floor(sh / 2) - 1, 'y');
 }
 
+/** The King's Guard: a big knight in full plate, closed great helm with a plume, a tabard and cape in team colours, and a greatsword. */
+function kingsguard(p: Pen, frame: number): void {
+  const top = GY - Math.round(LEGS * 1.2) + 1 - Math.round(TORSO * 1.2);
+  // A short cape behind, from the shoulders.
+  for (let y = top + 1; y <= GY - 4; y++) p.rect(CX - 6 - Math.round(((y - top) / (GY - top)) * 3), y, 4, 1, 'T');
+  const f = person(p, frame, 'm', { legs: 'a', scale: 1.2 });
+  // Pauldrons and a belt.
+  p.rect(f.left - 1, f.top, 3, 3, 'w');
+  p.rect(f.right - 1, f.top, 3, 3, 'w');
+  p.rect(f.left, f.hip - 2, f.right - f.left + 1, 1, 'e');
+  // The tabard with a gold crown on the chest.
+  p.rect(CX - 2, f.top + 2, 5, f.hip - f.top + 1, 't');
+  p.dot(CX - 1, f.top + 4, 'y');
+  p.dot(CX + 1, f.top + 4, 'y');
+  p.rect(CX - 1, f.top + 5, 3, 1, 'y');
+  // A closed great helm with an eye slit, and a plume.
+  for (let y = Math.floor(f.headY - HEAD); y <= Math.ceil(f.headY + HEAD); y++) {
+    for (let x = Math.floor(f.headX - HEAD); x <= Math.ceil(f.headX + HEAD); x++) if (p.get(x, y) === 's' || p.get(x, y) === 'e') p.dot(x, y, 'm');
+  }
+  p.rect(Math.round(f.headX - 1), Math.round(f.headY - 0.5), HEAD + 2, 1, 'e');
+  p.rect(Math.round(f.headX) - 2, Math.round(f.headY - HEAD) - 1, 5, 1, 'w');
+  p.line(f.headX - 1, f.headY - HEAD - 2, f.headX - 4, f.headY - HEAD - 5, 't', 2);
+  // The greatsword, held up before him with both hands.
+  p.line(f.handX, f.handY + 1, f.handX + 5, f.handY - 17, 'w', 2);
+  p.rect(f.handX - 2, f.handY - 1, 5, 1, 'y');
+  p.rect(f.handX - 1, f.handY, 2, 2, 'm');
+}
+
 function spearman(p: Pen, frame: number): void {
   const f = person(p, frame, 't', { legs: 'l' });
   p.rect(f.left, f.top, 3, 2, 'm');
@@ -497,7 +525,7 @@ function trebuchet(p: Pen, frame: number): void {
 }
 
 const UNITS: Partial<Record<Kind, (p: Pen, frame: number) => void>> = {
-  villager, king, swordsman, spearman, archer, monk, scout, rider, ram, trebuchet,
+  villager, king, swordsman, spearman, archer, monk, scout, rider, ram, trebuchet, kingsguard,
 };
 
 const unitCache = new Map<string, string[]>();

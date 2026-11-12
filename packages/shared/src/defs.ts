@@ -6,7 +6,7 @@ export type Cost = Partial<Record<Res, number>>;
 export const KINDS = [
   'villager', 'king', 'swordsman', 'spearman', 'archer', 'rider', 'scout',
   'towncenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'farm', 'barracks', 'range', 'stable', 'tower', 'castle',
-  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery', 'catapulttower', 'trebuchet',
+  'blacksmith', 'market', 'workshop', 'wall', 'ram', 'gate', 'monk', 'monastery', 'catapulttower', 'trebuchet', 'kingsguard',
 ] as const;
 export type Kind = (typeof KINDS)[number];
 
@@ -71,7 +71,7 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   spearman: {
     label: 'Spearman', hp: 45, cost: { food: 35, wood: 25 }, time: 12, speed: 2.2,
-    attack: 4, range: MELEE, cooldown: 1.5, sight: 6, bonus: { rider: 20, scout: 12 },
+    attack: 4, range: MELEE, cooldown: 1.5, sight: 6, bonus: { rider: 20, scout: 12, kingsguard: 12 },
   },
   archer: {
     label: 'Archer', hp: 30, cost: { wood: 25, gold: 45 }, time: 14, age: 2, speed: 2.2,
@@ -133,7 +133,12 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   castle: {
     label: 'Castle', building: true, hp: 1500, cost: { stone: 450, wood: 200 }, time: 90, age: 3, size: 4, armor: 4,
-    attack: 7, range: 7, cooldown: 2, sight: 9, garrison: 15,
+    attack: 7, range: 7, cooldown: 2, sight: 9, garrison: 15, trains: ['kingsguard'],
+  },
+  // The elite of the last age: a knight in full plate. Slow, very hard to kill and hits hard, at a price.
+  kingsguard: {
+    label: "King's Guard", hp: 190, cost: { food: 150, gold: 150 }, time: 30, age: 3, speed: 1.6,
+    attack: 13, range: MELEE, cooldown: 2, armor: 5, sight: 6, vsBuildings: 4,
   },
   // Slow, heavy shots that crush a whole group, but it cannot aim at anyone right at its foot.
   catapulttower: {

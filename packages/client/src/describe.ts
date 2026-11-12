@@ -29,6 +29,7 @@ const ROLE: Record<Kind, string> = {
   rider: 'Fast, heavy cavalry. Runs down archers; beware of spearmen.',
   scout: 'Very fast and sees far. Use it to explore and to raid unguarded villagers.',
   ram: 'Slow siege engine that smashes buildings. Almost harmless to units, and hard to kill with arrows.',
+  kingsguard: "The king's own knights, trained at the castle: full plate, a greatsword and a long cape. Slow, but they shrug off arrows and blows and cut down almost anything. Very costly. Masses of spearmen bring them down, and monks can still win them over.",
   trebuchet: 'Siege engine that hurls great stones at walls and buildings from very far away. It must set up before it can shoot and pack up before it can move again (4 s each), cannot hit anything close by and is helpless against units: keep soldiers with it.',
   towncenter: 'Trains villagers, advances the age and takes every resource. Shelters up to 10 villagers and the king.',
   house: 'Gives room for 5 more people. Build more when the population counter turns red.',
@@ -86,7 +87,7 @@ export function describeTech(id: TechId, has: Has, age: number): Detail {
   const tech = TECHS[id];
   const lines = [`${tech.effect}.`];
   if (id === 'age2' || id === 'age3') {
-    const unlocks = [...BUILDABLE, 'spearman', 'swordsman', 'archer', 'rider', 'scout', 'monk', 'ram', 'trebuchet']
+    const unlocks = [...BUILDABLE, 'spearman', 'swordsman', 'archer', 'rider', 'scout', 'monk', 'ram', 'trebuchet', 'kingsguard']
       .filter((k) => (DEFS[k as Kind].age ?? 1) === (id === 'age2' ? 2 : 3)).map((k) => DEFS[k as Kind].label);
     lines[0] = `Unlocks ${list(unlocks)}.`;
   }
