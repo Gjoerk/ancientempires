@@ -62,7 +62,7 @@ const MELEE = 1.45;
 
 export const DEFS: Record<Kind, KindDef> = {
   villager: { label: 'Villager', hp: 25, cost: { food: 50 }, time: 12, speed: 2.2, attack: 3, range: MELEE, cooldown: 1.5, sight: 5 },
-  king: { label: 'King', hp: 100, cost: {}, time: 0, speed: 2.6, sight: 6 },
+  king: { label: 'King', hp: 100, cost: {}, time: 0, speed: 2.2, sight: 6 },
   swordsman: {
     label: 'Swordsman', hp: 55, cost: { food: 60, gold: 20 }, time: 14, age: 2, speed: 2.0,
     attack: 7, range: MELEE, cooldown: 1.5, armor: 1, sight: 6, bonus: { spearman: 3 }, vsBuildings: 2,

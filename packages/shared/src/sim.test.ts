@@ -950,6 +950,12 @@ test('a group set to a box walks there as a box', () => {
   const s = createGame(5);
   addPlayer(s, 0);
   const tc = owned(s, 0, 'towncenter')[0];
+  // Open ground, so that nothing bends the shapes.
+  for (let y = tc.y + 3; y < tc.y + 26; y++) for (let x = tc.x - 6; x < tc.x + 16; x++) {
+    const i = y * s.map.size + x;
+    if (!s.map.blocked[i] && s.map.tiles[i] !== Tile.Grass) { s.map.tiles[i] = Tile.Grass; s.map.amount[i] = 0; }
+  }
+  s.map.version++;
   const ids: number[] = [];
   for (let i = 0; i < 8; i++) ids.push(spawn(s, 0, 'swordsman', tc.x + 4 + (i % 4), tc.y + 4 + Math.floor(i / 4))!.id);
   for (let i = 0; i < 4; i++) ids.push(spawn(s, 0, 'archer', tc.x + 4 + i, tc.y + 6)!.id);
@@ -964,4 +970,10 @@ test('a group set to a box walks there as a box', () => {
   const archers = units.filter((e) => e.kind === 'archer');
   const swords = units.filter((e) => e.kind === 'swordsman');
   assert.ok(Math.max(...archers.map(d)) <= Math.max(...swords.map(d)), 'archers are not on the outside');
+  // Pressing a formation button lines a standing group up straight away.
+  const closest = () => Math.min(...units.flatMap((a, i) => units.slice(i + 1).map((b) => Math.hypot(a.x - b.x, a.y - b.y))));
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'staggered' });
+  assert.ok(units.some((e) => e.order.t === 'move'), 'the group moves into the new shape');
+  run(s, 200);
+  assert.ok(closest() >= 1.4, `spread out: ${closest().toFixed(2)}`);
 });

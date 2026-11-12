@@ -1570,10 +1570,14 @@ function rightClick(sx: number, sy: number, attackMove: boolean): void {
     play(`order.${action}`);
     return;
   }
-  const tile = resourceTileAt(sx, sy);
+  // Only villagers gather; soldiers sent at a tree or a mine just walk up to it.
+  const gatherers = units.filter((v) => v.kind === 'villager').map((v) => v.id);
+  const others = ids.filter((id) => !gatherers.includes(id));
+  const tile = gatherers.length > 0 ? resourceTileAt(sx, sy) : -1;
   play(tile >= 0 && map ? `order.gather.${PROP_NAME[map.tiles[tile]] ?? 'wood'}` : moveSound(units));
   if (tile >= 0) {
-    send({ type: 'gather', ids, tile });
+    send({ type: 'gather', ids: gatherers, tile });
+    if (others.length) send({ type: 'move', ids: others, x: tx, y: ty });
     tileFlash = { tile, t: performance.now() };
     marker = undefined;
   } else send({ type: 'move', ids, x: tx, y: ty });
@@ -3091,7 +3095,9 @@ function frame(now: number): void {
     ctx.lineWidth = width;
     ctx.stroke();
   };
-  const hovered = mouse.onMap && !placing && !drag ? resourceTileAt(mouse.x, mouse.y) : -1;
+  // Resources light up under the cursor unless only soldiers are selected, who cannot gather.
+  const soldiersOnly = ownSelectedUnits().length > 0 && !ownSelectedUnits().some((v) => v.kind === 'villager');
+  const hovered = mouse.onMap && !placing && !drag && !soldiersOnly ? resourceTileAt(mouse.x, mouse.y) : -1;
   if (selectedTile >= 0 && props.has(selectedTile)) outline(selectedTile, '#ffffff', 2);
   if (hovered >= 0) outline(hovered, ownSelectedUnits().some((v) => v.kind === 'villager') ? '#ffe45c' : 'rgba(255,255,255,.75)', 2);
   if (tileFlash) {
