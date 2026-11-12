@@ -126,6 +126,9 @@ export function describeAction(id: string): Detail {
   if (id === 'eject') {
     return { title: 'Send everyone out', icon: id, stats: [], lines: ['Everyone sheltering inside comes out. Outside they can be attacked, the king too.'] };
   }
+  if (id === 'back') {
+    return { title: 'Back', icon: id, stats: [], lines: ['Puts the building away without placing it, and brings back the menu from before (same as Esc or right-click).'] };
+  }
   return { title: 'Cancel last', icon: 'cancel', stats: [], lines: ['Removes the last unit or research from the queue and gives back what it cost.'] };
 }
 

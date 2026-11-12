@@ -121,6 +121,13 @@
     #hpbar { position: relative; height: 15px; background: #2a0c0c; border: 1px solid #000; border-radius: 3px; overflow: hidden; flex: none; }
     #hpbar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(#7fe07a, #2f9a3a); }
     #hpbar.build i { background: linear-gradient(#f5d56a, #c99a2a); }
+    #resbar { position: relative; height: 15px; background: #1d1810; border: 1px solid #000; border-radius: 3px; overflow: hidden; flex: none; }
+    #resbar i { position: absolute; left: 0; top: 0; bottom: 0; transition: width .3s; }
+    #resbar[data-res="food"] i { background: linear-gradient(#f29a6a, #b8462a); }
+    #resbar[data-res="wood"] i { background: linear-gradient(#c79a62, #7a5230); }
+    #resbar[data-res="gold"] i { background: linear-gradient(#ffe27a, #c99a2a); }
+    #resbar[data-res="stone"] i { background: linear-gradient(#d6d6d0, #7d8088); }
+    #resbar span { position: relative; display: block; font-size: 11px; line-height: 15px; text-align: center; color: #fff; text-shadow: 0 1px 1px #000; font-variant-numeric: lining-nums tabular-nums; }
     #hpbar span { position: relative; display: block; font-size: 11px; line-height: 15px; text-align: center; color: #fff; text-shadow: 0 1px 1px #000; }
     #sel-stats { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 13.5px; }
     .st { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -170,7 +177,7 @@
     #idle button.none { opacity: .45; }
     #idle button.none b { display: none; }
     #map-frame { grid-area: map; align-self: center; padding: 3px; background: var(--edge); box-shadow: 0 0 0 1px var(--trim); border-radius: 3px; line-height: 0; }
-    #minimap { width: var(--map-w, 300px); height: calc(var(--map-w, 300px) / 2); cursor: pointer; background: #0b0e0a; image-rendering: pixelated; touch-action: none; }
+    #minimap { width: var(--map-w, 300px); height: calc(var(--map-w, 300px) / 2); cursor: pointer; background: #7d7252; image-rendering: pixelated; touch-action: none; }
 
     /* Square command tiles on the left, the selection in the middle, details, then the map. */
     /* The minimap takes the full height of the bar on wide screens (canvas 420 × 210 inside the 236px bar). */
@@ -218,8 +225,19 @@
     #err.fade { animation: err-fade 2.6s ease-in forwards; }
     @keyframes err-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
     #toast { position: fixed; top: 52px; right: 10px; padding: 6px 12px; border-color: #b3261a; }
-    #chat-log { position: fixed; top: 52px; left: 10px; display: grid; gap: 2px; pointer-events: none; max-width: 60vw; color: #fff;
-      text-shadow: 0 1px 2px #000; font-variant: normal; }
+    #chat-log { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; display: flex; flex-direction: column; gap: 2px;
+      align-items: flex-start; pointer-events: none; max-width: min(560px, 60vw); max-height: 34vh; overflow: hidden; color: #fff;
+      text-shadow: 0 1px 2px #000; font-variant: normal; z-index: 4; }
+    #chat-log div.old { display: none; }
+    #chat-log div.gone { animation: chat-fade .6s ease-in forwards; }
+    @keyframes chat-fade { to { opacity: 0; } }
+    /* With the chat box open the log above it becomes the history: every line, scrollable. */
+    body.chatting #chat-log { bottom: calc(var(--bottom-h, 226px) + 48px); pointer-events: auto; overflow-y: auto; max-height: 40vh;
+      background: rgba(6, 14, 10, .78); border: 1px solid var(--trim, #3a4a32); border-radius: 4px; padding: 6px; box-sizing: border-box;
+      width: min(460px, calc(100vw - 20px)); max-width: none; scrollbar-width: thin; }
+    body.chatting #chat-log div.old, body.chatting #chat-log div.gone { display: block; animation: none; opacity: .85; }
+    #chat-log small.when { color: #9fb39a; font-style: normal; font-size: 11px; }
+    #chat-log .empty { color: #b8b8a8; font-style: italic; background: none; }
     #chat-log div { background: rgba(0, 0, 0, .5); padding: 1px 8px; border-radius: 3px; }
     #chat-log div.notice { font-style: italic; background: rgba(20, 40, 28, .7); border-left: 2px solid var(--accent); }
     /* Only for you: news about your own things. */
@@ -350,7 +368,7 @@
       body[data-bar] #portrait, body[data-bar] #sel-sub, body[data-bar] #sel-stats, body[data-bar] #queue, body[data-bar] #group { display: none; }
       body[data-bar] #sel-text { flex-direction: row; align-items: center; gap: 8px; }
       body[data-bar] #sel-name { font-size: 13px; line-height: 18px; flex: none; max-width: 50%; display: block; white-space: nowrap; text-overflow: ellipsis; }
-      body[data-bar] #hpbar { flex: 1; max-width: 140px; }
+      body[data-bar] #hpbar, body[data-bar] #resbar { flex: 1; max-width: 140px; }
       body[data-bar] #actions { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 3px; gap: 4px; }
       /* 70px tall = 2 + 2 + icon 26 + name 14 + cost 16 + 3 + 2, with 5px to spare. */
       body[data-bar] #actions button { flex: none; width: 80px; height: 70px; font-size: 11px; padding: 2px 3px 3px;
@@ -426,7 +444,7 @@
       <button id="switch-btn" type="button" title="Play the other side (Tab)">Switch team (Tab)</button>
       <button id="end-btn" type="button">End game</button>
     </span>
-    <button id="chat-btn" type="button">Chat (Enter)</button>
+    <button id="chat-btn" type="button">Chat &amp; history (Enter)</button>
     <button id="mute-btn" type="button">Sound on (M)</button>
     <button id="full-btn" type="button">Fullscreen (F)</button>
     <button id="help-btn" type="button">Help (H)</button>
@@ -442,6 +460,7 @@
           <div id="sel-name"></div>
           <div id="sel-sub"></div>
           <div id="hpbar" hidden><i></i><span></span></div>
+          <div id="resbar" hidden><i></i><span></span></div>
         </div>
       </div>
       <div id="sel-stats"></div>

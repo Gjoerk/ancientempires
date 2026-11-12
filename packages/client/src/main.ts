@@ -38,6 +38,7 @@ import {
   rangeOf,
   TRADE_SELL,
   RESEED_COST,
+  FARM_FOOD,
   FALLOW_SECONDS,
 } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, Session } from './net';
@@ -1096,8 +1097,7 @@ function showChat(from: number, text: string): void {
   who.textContent = `${roster.find((p) => p.slot === from)?.name ?? 'Someone'}: `;
   who.style.color = PLAYER_COLORS[from] ?? '';
   line.append(who, text);
-  $('chat-log').append(line);
-  setTimeout(() => line.remove(), 12000);
+  logLine(line);
   play('chat', 0);
 }
 
@@ -1148,8 +1148,50 @@ function showNotice(from: number, text: string): void {
     line.append(text);
   }
   else line.append(who, ` ${text}`);
-  $('chat-log').append(line);
-  setTimeout(() => line.remove(), 12000);
+  logLine(line);
+}
+
+/** Adds a line to the chat log. It fades from view after a while but stays in the history. */
+const CHAT_HISTORY = 200;
+function logLine(line: HTMLElement): void {
+  const log = $('chat-log');
+  log.querySelector('.empty')?.remove();
+  const stamp = document.createElement('small');
+  const s = Math.floor((gameTick * TICK_MS) / 1000);
+  stamp.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} `;
+  stamp.className = 'when';
+  line.prepend(stamp);
+  const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 8;
+  log.append(line);
+  while (log.children.length > CHAT_HISTORY) log.firstElementChild!.remove();
+  if (atEnd || !document.body.classList.contains('chatting')) log.scrollTop = log.scrollHeight;
+  setTimeout(() => line.classList.add('gone'), 11400);
+  setTimeout(() => line.classList.replace('gone', 'old'), 12000);
+}
+
+/** Opens the chat box, with the whole history above it to scroll through. */
+function openChat(): void {
+  const box = $<HTMLInputElement>('chat-input');
+  const log = $('chat-log');
+  box.hidden = false;
+  document.body.classList.add('chatting');
+  if (!log.children.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No messages yet.';
+    log.append(empty);
+  }
+  log.scrollTop = log.scrollHeight;
+  box.focus();
+}
+function closeChat(): void {
+  const box = $<HTMLInputElement>('chat-input');
+  box.value = '';
+  box.hidden = true;
+  document.body.classList.remove('chatting');
+  $('chat-log').querySelector('.empty')?.remove();
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+  box.blur();
 }
 
 /** Tells the player when something of theirs is attacked where they are not looking. */
@@ -1197,7 +1239,7 @@ function resetGame(): void {
   $('touch-tools').hidden = true;
   selectedTile = -1;
   $('chat-log').textContent = '';
-  $('chat-input').hidden = true;
+  closeChat();
   hudSignature = panelSignature = detailSignature = idleSignature = lastButtons = '';
   $('top').hidden = true;
   document.body.append($('music'));
@@ -1795,9 +1837,7 @@ window.addEventListener('keydown', (ev) => {
   }
   if (key === 'enter' && me >= 0) {
     ev.preventDefault();
-    const box = $<HTMLInputElement>('chat-input');
-    box.hidden = false;
-    box.focus();
+    openChat();
     return;
   }
   if (key === ',') selectIdleSoldiers();
@@ -1951,13 +1991,15 @@ $('resign-btn').addEventListener('click', () => {
 $('chat-input').addEventListener('keydown', (ev) => {
   const box = ev.target as HTMLInputElement;
   if (ev.key === 'Enter' && box.value.trim()) session?.send({ t: 'chat', text: box.value });
-  if (ev.key === 'Enter' || ev.key === 'Escape') {
-    box.value = '';
-    box.hidden = true;
-    box.blur();
-  }
+  if (ev.key === 'Enter' || ev.key === 'Escape') closeChat();
   ev.stopPropagation();
 });
+// Clicking elsewhere closes the chat; scrolling or clicking in the history keeps it open.
+$('chat-input').addEventListener('blur', () => {
+  if (document.body.classList.contains('chatting')) closeChat();
+});
+$('chat-log').addEventListener('mousedown', (ev) => ev.preventDefault());
+$('chat-log').addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
 for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
 installMenuArt();
@@ -1969,9 +2011,7 @@ $('mute-btn').addEventListener('click', switchEffects);
 $('help-close').addEventListener('click', () => ($('help').hidden = true));
 $('chat-btn').addEventListener('click', () => {
   $('menu').hidden = true;
-  const box = $<HTMLInputElement>('chat-input');
-  box.hidden = false;
-  box.focus();
+  openChat();
 });
 
 $('help-btn').addEventListener('click', () => {
@@ -1988,7 +2028,8 @@ $('actions').addEventListener('click', (ev) => {
   // Not enough resources: nothing is queued or placed.
   if (button.classList.contains('poor') && (button.dataset.train || button.dataset.build)) return refuse(button.dataset.why || 'Not enough resources.');
   if (!button.dataset.train) play('click', 60);
-  const { build, train, cancel, eject, sell, buy, stance, bell } = button.dataset;
+  const { build, train, cancel, eject, sell, buy, stance, bell, back } = button.dataset;
+  if (back) placing = wallStart = undefined;
   if (bell) {
     send({ type: 'bell' });
     play('bell', 300);
@@ -2103,6 +2144,8 @@ interface SelCard {
   /** Health (or building progress when `building` is set) as [value, max]. */
   bar?: [number, number];
   building?: boolean;
+  /** What is left to gather, as [left, full, resource]. */
+  res?: [number, number, string];
   stats: [string, string][];
   /** Training or research queue: icon ids, the first with its progress 0-100. */
   queue: string[];
@@ -2188,9 +2231,10 @@ function renderPanel(): void {
 
   if (placing) {
     card.name = `Placing ${DEFS[placing].label}`;
-    card.sub = placing === 'wall' ? 'Drag a line and release · Shift for more · Esc cancels' : 'Click to build · Shift for several · Esc or right-click cancels';
+    card.sub = placing === 'wall' ? 'Drag a line and release · Shift for more · Back or Esc cancels' : 'Click to build · Shift for several · Back, Esc or right-click cancels';
     card.portrait = icon(placing, me);
     detail = describeKind(placing, has, age);
+    buttons.push({ label: 'Back', icon: 'back', detail: describeAction('back'), data: { back: '1' } });
   } else if (selectedTile >= 0 && map) {
     // A resource: what it is and how much is left.
     const tile = map.tiles[selectedTile];
@@ -2198,8 +2242,7 @@ function renderPanel(): void {
     card.name = TILE_NAMES[tile];
     card.sub = `${map.amount[selectedTile]} ${res} left`;
     card.portrait = icon(res);
-    card.bar = [map.amount[selectedTile], TILE_RESOURCE[tile as Tile]!.amount];
-    card.building = true;
+    card.res = [map.amount[selectedTile], TILE_RESOURCE[tile as Tile]!.amount, res];
     detail = { title: TILE_NAMES[tile], icon: res, stats: [[res, `${map.amount[selectedTile]} left`]], lines: [TILE_HINTS[tile]] };
   } else if (chosen.length === 1) {
     const v = chosen[0];
@@ -2227,8 +2270,9 @@ function renderPanel(): void {
       if (v.task & 2) {
         card.sub = `Lies fallow · lost in ${v.target} s unless sown again`;
         card.stats.push(['food', 'no food left']);
+        card.res = [0, FARM_FOOD, 'food'];
         if (v.owner === me) detail.lines.push(`Send a villager to sow it again for ${RESEED_COST} wood.`);
-      } else card.stats.push(['food', `${v.target} food left`]);
+      } else card.res = [v.target, FARM_FOOD, 'food'];
     }
     if (v.kind === 'castle' && v.extra >= 100) {
       card.sub = v.task & 2 ? `The king is inside${v.target > 1 ? ` with ${v.target - 1} more` : ''}` : v.owner === me ? 'Right-click it with your king to shelter him' : card.sub;
@@ -2366,6 +2410,14 @@ function renderCard(card: SelCard): void {
     bar.classList.toggle('build', !!card.building);
     (bar.firstElementChild as HTMLElement).style.width = `${Math.max(0, Math.min(100, (card.bar[0] / card.bar[1]) * 100))}%`;
     bar.lastElementChild!.textContent = card.building && card.bar[1] === 100 ? `${card.bar[0]}%` : `${card.bar[0]} / ${card.bar[1]}`;
+  }
+  const resbar = $('resbar');
+  resbar.hidden = !card.res;
+  if (card.res) {
+    const [left, full, kind] = card.res;
+    resbar.dataset.res = kind;
+    (resbar.firstElementChild as HTMLElement).style.width = `${Math.max(0, Math.min(100, (left / Math.max(left, full)) * 100))}%`;
+    resbar.lastElementChild!.textContent = `${left} ${kind} left`;
   }
   const stats = $('sel-stats');
   stats.textContent = '';
@@ -2605,7 +2657,9 @@ function renderMinimap(): void {
   minimapTime = t;
   const [a, b] = miniScale();
   mctx.setTransform(1, 0, 0, 1, 0, 0);
-  mctx.clearRect(0, 0, minimap.width, minimap.height);
+  // Outside the map: light parchment, so the dark unexplored land never blends into the corners.
+  mctx.fillStyle = '#7d7252';
+  mctx.fillRect(0, 0, minimap.width, minimap.height);
   mctx.imageSmoothingEnabled = false;
   mctx.setTransform(a, b, -a, b, minimap.width / 2, 0);
   mctx.drawImage(miniTerrain, 0, 0);
@@ -2623,6 +2677,10 @@ function renderMinimap(): void {
     mctx.drawImage(miniFog, 0, 0);
     mctx.imageSmoothingEnabled = false;
   }
+  // The edge of the map, drawn as a thin golden line.
+  mctx.strokeStyle = '#e8c25a';
+  mctx.lineWidth = 1 / a;
+  mctx.strokeRect(0, 0, map.size, map.size);
   // The relic, over the fog and big enough to find at a glance: where it lies once that spot has
   // been seen, with whoever carries it while they are in sight, or in a monastery that has been seen.
   for (const [x, y, carrier, monastery] of relics) {

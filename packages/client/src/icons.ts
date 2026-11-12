@@ -391,6 +391,29 @@ export function icon(id: string, owner = 0): string {
     c.restore();
   } else if (id === 'stance.defensive') {
     glyph(c, 'shield', team, 4, 4, 4);
+  } else if (id === 'back') {
+    // A curved arrow pointing back.
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.strokeStyle = '#2a2018';
+    c.lineWidth = 9;
+    const arrow = () => {
+      c.beginPath();
+      c.moveTo(18, 14);
+      c.lineTo(32, 14);
+      c.arc(32, 26, 12, -Math.PI / 2, Math.PI / 2);
+      c.lineTo(14, 38);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(20, 5);
+      c.lineTo(9, 14);
+      c.lineTo(20, 23);
+      c.stroke();
+    };
+    arrow();
+    c.strokeStyle = '#f0d88a';
+    c.lineWidth = 4;
+    arrow();
   } else if (id === 'allclear') {
     // The bell with a little arrow: back to work.
     glyph(c, 'bell', team, 4, 2, 4);
