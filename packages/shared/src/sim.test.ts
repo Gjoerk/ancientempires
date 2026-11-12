@@ -978,3 +978,29 @@ test('a group set to a box walks there as a box', () => {
   run(s, 200);
   assert.ok(closest() >= 1.4, `spread out: ${closest().toFixed(2)}`);
 });
+
+test('with three or more players, the first to fall loses his troops and his killer takes his buildings', () => {
+  const s = createGame(11);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  addPlayer(s, 2);
+  const king = owned(s, 1, 'king')[0];
+  const theirBuildings = [...s.entities.values()].filter((e) => e.owner === 1 && DEFS[e.kind].building).map((e) => e.id);
+  assert.ok(theirBuildings.length > 0);
+  const woodBefore = s.players.get(0)!.res.wood;
+  for (let i = 0; i < 4; i++) spawn(s, 0, 'swordsman', Math.floor(king.x) + 2, Math.floor(king.y) + 1 + (i % 2));
+  applyCommand(s, 0, { type: 'interact', ids: owned(s, 0, 'swordsman').map((e) => e.id), target: king.id });
+  run(s, 300);
+  assert.equal(s.players.get(1)!.defeated, true);
+  assert.equal(s.winner, -1, 'the game goes on');
+  assert.equal([...s.entities.values()].filter((e) => e.owner === 1).length, 0, 'nothing is left to the fallen player');
+  for (const id of theirBuildings) {
+    const b = s.entities.get(id);
+    assert.ok(b, 'the buildings still stand');
+    assert.equal(b!.owner, 0, 'and belong to the killer');
+    assert.equal(b!.queue.length, 0);
+  }
+  assert.ok(owned(s, 0, 'towncenter').length >= 2);
+  assert.ok(s.players.get(0)!.res.wood <= woodBefore + 50, 'no resources are handed over');
+  assert.ok(owned(s, 2, 'towncenter').length === 1, 'the third player keeps his own town');
+});

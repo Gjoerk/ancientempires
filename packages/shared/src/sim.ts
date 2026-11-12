@@ -137,6 +137,8 @@ export interface GameState {
   contested: boolean;
   /** The last team with a king standing, or -1. */
   winner: number;
+  /** Who struck down each player's king: fallen slot → slayer slot. */
+  slayers: Map<number, number>;
   /** Notes the computer opponents keep between their turns. */
   ai: Map<number, { lastAttack: number; waves: number }>;
   relics: Relic[];
@@ -181,7 +183,7 @@ export function createGame(seed: number, size?: number, popLimit = POP_MAX): Gam
   return {
     popLimit, blessings: [],
     tick: 0, seed, map: generateMap(seed, size), entities: new Map(), players: new Map(), nextId: 1,
-    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, ai: new Map(), occupied: new Map(), relics: [],
+    changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, slayers: new Map(), ai: new Map(), occupied: new Map(), relics: [],
   };
 }
 
@@ -982,10 +984,16 @@ function strike(state: GameState, e: Entity, target: Entity): void {
       if (other === target || isBuilding(other) || other.inside >= 0 || !isEnemy(state, other.owner, e.owner)) continue;
       if (Math.hypot(other.x - cx, other.y - cy) > def.splash) continue;
       other.hp -= Math.max(1, Math.round((attackOf(e.kind, has) + relicBonus(state, e)) * SPLASH_SHARE) - armorOf(other.kind, hasTech(state, other.owner)));
-      if (other.hp <= 0) kill(state, other);
+      if (other.hp <= 0) {
+        if (other.kind === 'king') state.slayers.set(other.owner, e.owner);
+        kill(state, other);
+      }
     }
   }
-  if (target.hp <= 0) return kill(state, target);
+  if (target.hp <= 0) {
+    if (target.kind === 'king') state.slayers.set(target.owner, e.owner);
+    return kill(state, target);
+  }
   if (!isBuilding(target) && !isBuilding(e)) fightBack(state, target, e);
 }
 
@@ -1725,8 +1733,40 @@ export function step(state: GameState): void {
     const alive = new Set([...state.players.values()].filter((p) => !p.defeated).map((p) => p.team));
     if (alive.size === 1) state.winner = [...alive][0];
   }
-  // Mid-game a fallen player's town crumbles; at the end it is left standing for everyone to look at.
-  if (state.winner < 0) for (const p of fallen) for (const e of [...state.entities.values()]) if (e.owner === p.slot) kill(state, e);
+  // Mid-game a fallen player's troops are gone and their buildings go to whoever killed the king.
+  // At the end everything is left standing for everyone to look at.
+  if (state.winner < 0) for (const p of fallen) conquer(state, p.slot);
+}
+
+/**
+ * A player knocked out while the game goes on: every unit of theirs is gone, and the buildings
+ * pass to the enemy who killed their king, empty of queues and of anyone inside. Without such an
+ * enemy (the king was given up, say) the buildings fall too.
+ */
+function conquer(state: GameState, fallen: number): void {
+  const by = state.slayers.get(fallen);
+  const heir = by === undefined ? undefined : state.players.get(by);
+  const taker = heir && !heir.defeated && isEnemy(state, fallen, heir.slot) ? heir.slot : -1;
+  const theirs = [...state.entities.values()].filter((e) => e.owner === fallen);
+  for (const e of theirs) if (!isBuilding(e)) kill(state, e);
+  const loser = state.players.get(fallen);
+  for (const b of theirs) {
+    if (!isBuilding(b)) continue;
+    if (taker < 0) {
+      kill(state, b);
+      continue;
+    }
+    for (const item of b.queue) if (isTech(item)) loser?.researching.delete(item);
+    b.owner = taker;
+    b.queue = [];
+    b.trainTicks = 0;
+    b.order = { t: 'idle' };
+    delete b.rally;
+    if (b.kind === 'gate') {
+      state.map.gate[b.y * state.map.size + b.x] = teamOf(state, taker) + 1;
+      state.map.version++;
+    }
+  }
 }
 
 /** Activity code sent to clients: 0 idle, 1 moving, 2 working, 3 fighting. */

@@ -149,6 +149,9 @@ let blessings: { from: number; to: number; kind: number; t: number }[] = [];
 let shots: { from: [number, number]; to: [number, number]; t: number; boulder?: boolean; landed?: boolean }[] = [];
 const BOULDER_MS = 750;
 let winner = -1;
+/** Buildings that changed hands in this snapshot (old owner → new), and players whose town has been taken. */
+const takenOver = new Map<number, number>();
+const announcedTakeover = new Set<number>();
 /** Highest population anyone may reach in this game. */
 let popLimit = 100;
 /** Villagers that were given orders, most recent last, for copying a job with T. */
@@ -944,7 +947,9 @@ function onMessage(msg: ServerMessage): void {
           showNotice(-1, `A farm has run out of food. Sow it again with a villager (${RESEED_COST} wood) within ${FALLOW_SECONDS} s, or it is lost.`);
           play('collapse.farm', 300);
         }
-        // A monk may have converted it, so the owner can change too.
+        // A monk may have converted it, so the owner can change too; a building changes hands
+        // when its owner falls and the one who killed their king takes the town.
+        if (owner !== v.owner && isBuilding(v.kind)) takenOver.set(v.owner, owner);
         Object.assign(v, { owner, x, y, hp, act, extra, task, target });
       } else {
         const created: View = { id, owner, kind: KINDS[kindIdx], hp, act, extra, task, target, ox: 0, oy: 0, struck: 0, hurt: 0, face: 1, px: x, py: y, x, y };
@@ -1074,6 +1079,14 @@ function onMessage(msg: ServerMessage): void {
         workers: { food: w0, wood: w1, gold: w2, stone: w3 }, bell: bell === 1,
       });
     }
+    for (const [from, to] of takenOver) {
+      if (!players.get(from)?.defeated || announcedTakeover.has(from)) continue;
+      announcedTakeover.add(from);
+      const name = roster.find((p) => p.slot === from)?.name ?? 'Someone';
+      showNotice(to, `killed ${name}'s king and takes over their buildings.`);
+      if (to === me) play('age', 0);
+    }
+    takenOver.clear();
     if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
     if (defeatChanged) renderPlayers();
     // The end: the last sounds above still play, then the game is silent and frozen.
@@ -1226,6 +1239,7 @@ function resetGame(): void {
   placing = undefined;
   winner = -1;
   silence(false);
+  announcedTakeover.clear();
   map = undefined;
   views.clear();
   players.clear();
