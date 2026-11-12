@@ -529,6 +529,18 @@ function formation(state: GameState, units: Entity[], x: number, y: number, face
   let dx = x - cx;
   let dy = y - cy;
   const len = Math.hypot(dx, dy);
+  // A short step keeps everyone where they stand relative to each other, instead of forcing the shape.
+  if (!face && n > 1 && len < SHORT_MOVE) {
+    const taken = new Set<number>();
+    const out = new Map<Entity, [number, number]>();
+    for (const e of units) {
+      const spot = freeTilesNear(state.map, Math.floor(e.x + x - cx), Math.floor(e.y + y - cy), 12).find(([sx, sy]) => !taken.has(sy * state.map.size + sx));
+      if (!spot) continue;
+      taken.add(spot[1] * state.map.size + spot[0]);
+      out.set(e, spot);
+    }
+    return out;
+  }
   if (face) [dx, dy] = face;
   else if (len < 0.5) [dx, dy] = units[0]?.facing ?? [1, 1].map((v) => v / Math.SQRT2) as [number, number];
   else [dx, dy] = [dx / len, dy / len];
@@ -561,6 +573,9 @@ function formation(state: GameState, units: Entity[], x: number, y: number, face
   return out;
 }
 
+/** A group sent less than this far just shifts over as it stands. */
+const SHORT_MOVE = 6;
+
 /** The formation most of the soldiers in a group have been given. */
 function groupFormation(units: Entity[]): Formation {
   const votes = new Map<Formation, number>();
@@ -590,7 +605,7 @@ export function formationSlots(kind: Formation, ranks: number[]): [number, numbe
   };
   if (kind === 'staggered') {
     // Two tiles apart and offset row by row: one boulder hits one soldier.
-    return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2)))), 2, true);
+    return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n)))), 2, true);
   }
   if (kind === 'flank') {
     // Two wings side by side with a gap of four tiles; each wing keeps soldiers in front.
@@ -599,10 +614,10 @@ export function formationSlots(kind: Formation, ranks: number[]): [number, numbe
     ranks.forEach((_, i) => (i % 2 === 0 ? left : right).push(i));
     const out: [number, number][] = new Array(n);
     for (const [wing, side] of [[left, -1], [right, 1]] as const) {
-      const cols = Math.max(1, Math.ceil(Math.sqrt(wing.length * 1.5)));
+      const cols = Math.max(1, Math.ceil(Math.sqrt(wing.length)));
       const spots = rows(wing.length, cols, 1, false);
       const half = (Math.min(cols, wing.length) - 1) / 2;
-      wing.forEach((idx, k) => (out[idx] = [spots[k][0], spots[k][1] + side * (half + 2.5)]));
+      wing.forEach((idx, k) => (out[idx] = [spots[k][0], spots[k][1] + side * (half + 1.5)]));
     }
     return out;
   }
@@ -632,7 +647,7 @@ export function formationSlots(kind: Formation, ranks: number[]): [number, numbe
   // None: a loose, roughly square crowd around the spot.
   if (kind === 'none') return rows(n, Math.max(1, Math.ceil(Math.sqrt(n))), 1, false);
   // Line: a wide front, soldiers in front and archers behind.
-  return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5)))), 1, false);
+  return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 1.6)))), 1, false);
 }
 
 function moveUnits(state: GameState, units: Entity[], x: number, y: number, face?: [number, number]): void {

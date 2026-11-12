@@ -79,7 +79,7 @@ export const DEFS: Record<Kind, KindDef> = {
   },
   rider: {
     label: 'Rider', hp: 90, cost: { food: 80, gold: 40 }, time: 18, age: 2, speed: 3.4,
-    attack: 9, range: MELEE, cooldown: 1.6, armor: 1, sight: 6, bonus: { archer: 4 },
+    attack: 9, range: MELEE, cooldown: 1.6, armor: 1, sight: 6, bonus: { archer: 4, trebuchet: 12 },
   },
   scout: {
     label: 'Scout', hp: 50, cost: { food: 80 }, time: 14, age: 2, speed: 3.6,

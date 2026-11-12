@@ -1473,8 +1473,11 @@ function unitAt(sx: number, sy: number): View | undefined {
     const [x, y] = unitScreen(v);
     const dx = Math.abs(x - sx);
     const dy = sy - y;
-    if (dx > 13 || dy > 6 || dy < -34) continue;
-    const d = Math.hypot(dx, (dy + 14) / 2);
+    // Bigger pictures, bigger targets: a set-up trebuchet stands tall, horses and siege are wide.
+    const tall = v.kind === 'trebuchet' ? (Math.floor(v.extra / 100000) > 0 ? 50 : 22) : 34;
+    const wide = v.kind === 'trebuchet' ? 22 : v.kind === 'ram' || v.kind === 'rider' || v.kind === 'scout' || v.kind === 'kingsguard' ? 16 : 13;
+    if (dx > wide || dy > 6 || dy < -tall) continue;
+    const d = Math.hypot(dx * (13 / wide), ((dy + tall * 0.4) / 2) * (34 / tall));
     if (d < bestD) {
       bestD = d;
       best = v;

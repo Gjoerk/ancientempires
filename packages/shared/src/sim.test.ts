@@ -942,7 +942,7 @@ test('formations give every member its own spot; a box keeps the archers inside'
   const outside = Math.min(...box.slice(0, 12).map(ring));
   assert.ok(Math.max(...box.slice(12).map(ring)) < outside, 'archers in the middle');
   // A flank leaves a gap in the middle; staggered spreads out.
-  assert.ok(formationSlots('flank', Array(8).fill(0)).every(([, c]) => Math.abs(c) >= 2));
+  assert.ok(formationSlots('flank', Array(8).fill(0)).every(([, c]) => Math.abs(c) >= 1.5));
   const st = formationSlots('staggered', Array(9).fill(0));
   for (let i = 0; i < st.length; i++) for (let j = i + 1; j < st.length; j++) assert.ok(Math.hypot(st[i][0] - st[j][0], st[i][1] - st[j][1]) >= 1.9);
 });
