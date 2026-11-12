@@ -33,9 +33,10 @@ export type Order =
   | { t: 'deliver'; id: number };
 
 /**
- * A formation on the march. It first forms up where it stands, then moves as one block: a centre
+ * A formation on the march. It moves as one block: a centre
  * point walks the route at the pace of the slowest member, and each member keeps to its own place
- * around that point, stepping round trees and walls on its own. At the end everyone takes their spot.
+ * around that point. One whose place runs into trees or a wall leaves the block and walks on by itself.
+ * At the end everyone takes their spot.
  */
 export interface Group {
   id: number;
@@ -47,10 +48,12 @@ export interface Group {
   centre: [number, number];
   /** The centre's route, as tile pairs. */
   path: number[];
-  phase: 'form' | 'march';
+  /** When the block last kept up (the centre waits only briefly otherwise). */
   since: number;
   pace: number;
   team: number;
+  /** Where each member was when it last got anywhere, and when. */
+  moved: Map<number, [number, number, number]>;
 }
 
 /** A relic: lying on the ground, carried by a monk, or kept in a monastery. */
@@ -712,29 +715,20 @@ function formGroup(state: GameState, units: Entity[], finals: Map<Entity, [numbe
   // No way through for the block as a whole: everyone finds their own way instead.
   if (path.length < 2 || path[path.length - 2] !== dest[0] || path[path.length - 1] !== dest[1]) return;
   const g: Group = { id: state.nextGroup++, members: [], off: new Map(), final: new Map(), centre: [start[0] + 0.5, start[1] + 0.5], path,
-    phase: 'form', since: state.tick, pace: Math.min(...members.map((e) => DEFS[e.kind].speed ?? 1)), team };
-  const taken = new Set<number>();
-  for (const e of members) {
+    since: state.tick, pace: Math.min(...members.map((e) => DEFS[e.kind].speed ?? 1)), team, moved: new Map() };
+  // Members in order from the middle of the shape outwards: in a narrow pass they file through in this order.
+  const order = members.map((e) => {
     const f = finals.get(e)!;
-    const off: [number, number] = [f[0] - dest[0], f[1] - dest[1]];
-    // Form up first: the same shape, around the middle of where the group stands now.
-    const spot = freeTilesNear(map, start[0] + off[0], start[1] + off[1], 8).find(([sx, sy]) => !taken.has(sy * map.size + sx)
-      && canReach(map, Math.floor(e.x), Math.floor(e.y), sx, sy, team));
-    if (!spot) continue;
-    taken.add(spot[1] * map.size + spot[0]);
+    return { e, off: [f[0] - dest[0], f[1] - dest[1]] as [number, number], f };
+  }).sort((a, b) => Math.hypot(...a.off) - Math.hypot(...b.off));
+  for (const { e, off, f } of order) {
     g.members.push(e.id);
     g.off.set(e.id, off);
     g.final.set(e.id, f);
+    g.moved.set(e.id, [e.x, e.y, state.tick]);
     e.group = g.id;
-    e.path = findPath(map, Math.floor(e.x), Math.floor(e.y), spot[0], spot[1], team);
   }
-  if (g.members.length >= 2) state.groups.set(g.id, g);
-  else for (const id of g.members) {
-    const e = state.entities.get(id)!;
-    delete e.group;
-    const f = g.final.get(id)!;
-    e.path = findPath(map, Math.floor(e.x), Math.floor(e.y), f[0], f[1], team);
-  }
+  state.groups.set(g.id, g);
 }
 
 /** Still marching with group `g`: the order is still the one it was given with the group. */
@@ -744,42 +738,71 @@ function inGroup(e: Entity | undefined, g: Group): e is Entity {
   return o.t === 'move' || o.t === 'amove' || (o.t === 'attack' && !!o.march);
 }
 
+/** Every tile on the straight line between two tiles can be walked on. */
+function lineClear(map: GameMap, x0: number, y0: number, x1: number, y1: number, team: number): boolean {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  for (let i = 1; i <= n; i++) {
+    if (!isWalkable(map, Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), team)) return false;
+  }
+  return true;
+}
+
+/** A member that has not got anywhere for this long leaves the block and finds its own way. */
+const GROUP_STUCK_TICKS = 3 * TICK_RATE;
+
 function stepGroups(state: GameState): void {
   const map = state.map;
   for (const g of [...state.groups.values()]) {
     g.members = g.members.filter((id) => inGroup(state.entities.get(id), g));
-    const members = g.members.map((id) => state.entities.get(id)!);
-    const finish = () => {
-      for (const e of members) {
-        delete e.group;
-        e.pace = undefined;
-        const f = g.final.get(e.id)!;
-        e.path = findPath(map, Math.floor(e.x), Math.floor(e.y), f[0], f[1], g.team);
-      }
-      state.groups.delete(g.id);
+    let members = g.members.map((id) => state.entities.get(id)!);
+    const release = (e: Entity) => {
+      delete e.group;
+      e.pace = undefined;
+      const f = g.final.get(e.id)!;
+      e.path = findPath(map, Math.floor(e.x), Math.floor(e.y), f[0], f[1], g.team);
     };
-    if (members.length === 0) {
+    if (members.length <= 1 || g.path.length < 2) {
+      members.forEach(release);
       state.groups.delete(g.id);
       continue;
     }
-    if (members.length === 1) {
-      finish();
+    // Where each member should be now: its place beside the centre. One whose place is blocked or cut
+    // off by trees or a wall (a wood, a gate, a narrow pass) leaves the block and finds its own way, so a
+    // formation keeps its shape in the open and never holds the army up in tight ground.
+    const ctx = Math.floor(g.centre[0]);
+    const cty = Math.floor(g.centre[1]);
+    const targets = new Map<number, [number, number]>();
+    for (const e of members) {
+      const o = g.off.get(e.id)!;
+      const sx = ctx + o[0];
+      const sy = cty + o[1];
+      if (isWalkable(map, sx, sy, g.team) && lineClear(map, ctx, cty, sx, sy, g.team)) targets.set(e.id, [sx, sy]);
+      else release(e);
+    }
+    members = members.filter((e) => e.group === g.id);
+    // Stuck for a while (wedged behind something): that one goes its own way.
+    for (const e of members) {
+      const m = g.moved.get(e.id)!;
+      if (Math.hypot(e.x - m[0], e.y - m[1]) > 0.5) g.moved.set(e.id, [e.x, e.y, state.tick]);
+      else {
+        const [tx, ty] = targets.get(e.id)!;
+        if (state.tick - m[2] > GROUP_STUCK_TICKS && Math.hypot(tx + 0.5 - e.x, ty + 0.5 - e.y) > 2) release(e);
+      }
+    }
+    members = members.filter((e) => e.group === g.id);
+    g.members = members.map((e) => e.id);
+    if (members.length <= 1) {
+      members.forEach(release);
+      state.groups.delete(g.id);
       continue;
     }
-    if (g.phase === 'form') {
-      // Everyone in place, or long enough waiting for the slow ones: off they go.
-      if (members.every((e) => e.path.length === 0) || state.tick - g.since > 6 * TICK_RATE) {
-        g.phase = 'march';
-        g.since = state.tick;
-      } else continue;
-    }
-    // The centre walks on while the block keeps up, and waits for it otherwise (not for ever).
+    // The centre walks on while the block keeps up, and only waits a moment for stragglers.
     const lag = members.reduce((a, e) => {
-      const o = g.off.get(e.id)!;
-      return a + Math.hypot(g.centre[0] + o[0] - e.x, g.centre[1] + o[1] - e.y);
+      const [tx, ty] = targets.get(e.id)!;
+      return a + Math.hypot(tx + 0.5 - e.x, ty + 0.5 - e.y);
     }, 0) / members.length;
-    if (lag < 1.6 || state.tick - g.since > 3 * TICK_RATE) {
-      g.since = lag < 1.6 ? state.tick : g.since;
+    if (lag < 2 || state.tick - g.since > TICK_RATE) {
+      if (lag < 2) g.since = state.tick;
       let budget = g.pace / TICK_RATE;
       while (budget > 0 && g.path.length >= 2) {
         const wx = g.path[0] + 0.5;
@@ -796,19 +819,12 @@ function stepGroups(state: GameState): void {
       }
     }
     if (g.path.length < 2) {
-      finish();
+      members.forEach(release);
+      state.groups.delete(g.id);
       continue;
     }
-    // Each member heads for its place beside the centre.
     for (const e of members) {
-      const o = g.off.get(e.id)!;
-      let tx = Math.floor(g.centre[0] + o[0]);
-      let ty = Math.floor(g.centre[1] + o[1]);
-      if (!isWalkable(map, tx, ty, g.team)) {
-        const near = freeTilesNear(map, tx, ty, 1)[0];
-        if (!near) continue;
-        [tx, ty] = near;
-      }
+      const [tx, ty] = targets.get(e.id)!;
       const ex = Math.floor(e.x);
       const ey = Math.floor(e.y);
       const far = Math.hypot(tx + 0.5 - e.x, ty + 0.5 - e.y);
