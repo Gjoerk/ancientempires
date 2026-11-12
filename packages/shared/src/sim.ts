@@ -1126,7 +1126,8 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
     } else e.order = { t: 'idle' };
     return;
   }
-  e.work += ((o.farm >= 0 ? FARM_RATE : GATHER_RATE) * (has(GATHER_TECH[o.res]) ? 1.2 : 1)) / TICK_RATE;
+  const relic = 1 + relicsKept(state, e.owner) * RELIC_GATHER;
+  e.work += ((o.farm >= 0 ? FARM_RATE : GATHER_RATE) * (has(GATHER_TECH[o.res]) ? 1.2 : 1) * relic) / TICK_RATE;
   while (e.work >= 1 && e.carry < capacity) {
     e.work -= 1;
     e.carry++;
@@ -1269,6 +1270,8 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
 
 /** The relic, kept in a player's monastery, adds this to the attack of their whole army. */
 export const RELIC_ATTACK = 2;
+/** ...and makes their villagers gather every resource this much faster. */
+export const RELIC_GATHER = 0.1;
 export const RELIC_MAX = 1;
 
 /** How many relics a player keeps, counted up to RELIC_MAX. */
@@ -1716,15 +1719,14 @@ export function step(state: GameState): void {
   // A player whose king is dead is out, and everything they own goes with them.
   const kings = new Set<number>();
   for (const e of state.entities.values()) if (e.kind === 'king') kings.add(e.owner);
-  for (const p of state.players.values()) {
-    if (p.defeated || kings.has(p.slot)) continue;
-    p.defeated = true;
-    for (const e of [...state.entities.values()]) if (e.owner === p.slot) kill(state, e);
-  }
+  const fallen = [...state.players.values()].filter((p) => !p.defeated && !kings.has(p.slot));
+  for (const p of fallen) p.defeated = true;
   if (state.contested && state.winner < 0) {
     const alive = new Set([...state.players.values()].filter((p) => !p.defeated).map((p) => p.team));
     if (alive.size === 1) state.winner = [...alive][0];
   }
+  // Mid-game a fallen player's town crumbles; at the end it is left standing for everyone to look at.
+  if (state.winner < 0) for (const p of fallen) for (const e of [...state.entities.values()]) if (e.owner === p.slot) kill(state, e);
 }
 
 /** Activity code sent to clients: 0 idle, 1 moving, 2 working, 3 fighting. */

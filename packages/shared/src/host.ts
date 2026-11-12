@@ -124,7 +124,8 @@ export class GameHost {
   /** Advances the game one tick and returns the snapshot to send to everyone (nothing while in the lobby). */
   tick(): ServerMessage | undefined {
     const s = this.state;
-    if (!s || this.pause?.phase === 'paused') return undefined;
+    // Paused, or over: once there is a winner the game stands still.
+    if (!s || this.pause?.phase === 'paused' || s.winner >= 0) return undefined;
     // Computer opponents think about once a second, each on its own tick.
     for (const player of this.players.values()) if (player.ai && (s.tick + player.slot * 3) % 10 === 0) runAi(s, player.slot);
     step(s);

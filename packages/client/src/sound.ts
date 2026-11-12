@@ -245,8 +245,14 @@ function loadCustomSounds(): void {
  * into noise. `name` may carry details after dots, like "built.farm": the most detailed sound
  * file there is gets played, else the general one, else the built-in sound.
  */
+/** Once a game is over everything stands still, and no more sounds are made. */
+let silenced = false;
+export function silence(on: boolean): void {
+  silenced = on;
+}
+
 export function play(name: SoundName | FileOnly | `${SoundName | FileOnly}.${string}`, gap = 90): void {
-  if (muted || !ctx) return;
+  if (muted || silenced || !ctx) return;
   const base = name.split('.')[0];
   const now = performance.now();
   if (now - (lastPlayed.get(base) ?? -1e9) < gap) return;
@@ -283,7 +289,7 @@ function playFile(name: string): boolean {
  * that are only heard when they were made, like clicking a building.
  */
 export function playFirstFile(names: string[], gap = 150): void {
-  if (muted || !ctx) return;
+  if (muted || silenced || !ctx) return;
   const now = performance.now();
   if (now - (lastPlayed.get('select') ?? -1e9) < gap) return;
   for (const name of names) {

@@ -114,7 +114,8 @@ test('soldiers attack on their own, counters matter, and losing the king ends th
   applyCommand(s, 0, { type: 'interact', ids: owned(s, 0, 'swordsman').map((e) => e.id), target: king.id });
   run(s, 300);
   assert.equal(s.players.get(1)!.defeated, true);
-  assert.equal([...s.entities.values()].filter((e) => e.owner === 1).length, 0);
+  // The game is over: the loser's town is left standing, so everyone can see what they built.
+  assert.ok(owned(s, 1, 'towncenter').length > 0);
   assert.equal(s.winner, 0);
 
   const duel = createGame(11);

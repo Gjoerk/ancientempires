@@ -572,12 +572,13 @@ const DESIGNS: Partial<Record<Kind, Design>> = {
 
   // Tall stone tower with a jutting platform and a pointed roof in the owner's colour.
   tower(pen, team) {
-    pen.box(0.22, 0.22, 0.78, 0.78, 0, 40, STONE);
-    pen.onU(0.78, 0.46, 0.54, 18, 28, DARK);
-    pen.onV(0.78, 0.46, 0.54, 18, 28, DARK);
-    pen.box(0.13, 0.13, 0.87, 0.87, 40, 46, STONE_DARK);
-    pen.crenels(0.13, 0.13, 0.87, 0.87, 46, STONE_DARK);
-    pen.pyramid(0.26, 0.26, 0.74, 0.74, 46, 15, team);
+    // As wide as a wall, so it sits flush in a wall line.
+    pen.box(0, 0, 1, 1, 0, 40, STONE, '#74747e');
+    pen.onU(1, 0.42, 0.58, 18, 28, DARK);
+    pen.onV(1, 0.42, 0.58, 18, 28, DARK);
+    pen.box(0, 0, 1, 1, 40, 46, STONE_DARK);
+    pen.crenels(0, 0, 1, 1, 46, STONE_DARK);
+    pen.pyramid(0.12, 0.12, 0.88, 0.88, 46, 17, team);
   },
 
   // A squat brick bastion on a dressed-stone plinth, with a timber catapult on its battlements,
@@ -894,14 +895,14 @@ const AGE_DESIGNS: Record<1 | 3, Partial<Record<Kind, Design>>> = {
     },
     // A stone-footed brick tower with stone battlements and a slate spire.
     tower(pen, team) {
-      pen.box(0.18, 0.18, 0.82, 0.82, 0, 8, DRESSED);
-      pen.box(0.22, 0.22, 0.78, 0.78, 8, 42, BRICK);
-      quoins(pen, 0.22, 0.22, 0.78, 0.78, 8, 42);
-      pen.onU(0.78, 0.44, 0.56, 22, 32, DARK);
-      pen.onV(0.78, 0.44, 0.56, 22, 32, DARK);
-      pen.box(0.12, 0.12, 0.88, 0.88, 42, 47, DRESSED);
-      pen.crenels(0.12, 0.12, 0.88, 0.88, 47, DRESSED);
-      pen.pyramid(0.24, 0.24, 0.76, 0.76, 47, 18, team);
+      pen.box(0, 0, 1, 1, 0, 4, DRESSED);
+      pen.box(0.04, 0.04, 0.96, 0.96, 4, 42, BRICK, '#74747e');
+      quoins(pen, 0.04, 0.04, 0.96, 0.96, 4, 42);
+      pen.onU(0.96, 0.42, 0.58, 22, 32, DARK);
+      pen.onV(0.96, 0.42, 0.58, 22, 32, DARK);
+      pen.box(0, 0, 1, 1, 42, 47, DRESSED);
+      pen.crenels(0, 0, 1, 1, 47, DRESSED);
+      pen.pyramid(0.12, 0.12, 0.88, 0.88, 47, 19, team);
     },
     // A brick tower mill with a tiled cap.
     mill(pen, team, state) {

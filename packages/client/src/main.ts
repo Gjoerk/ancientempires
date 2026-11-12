@@ -23,6 +23,7 @@ import {
   MAX_TEAMS,
   Res,
   RELIC_ATTACK,
+  RELIC_GATHER,
   RELIC_MAX,
   Stance,
   FORMATIONS,
@@ -52,7 +53,7 @@ import { paintGround } from './ground';
 import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
-import { effectsState, musicState, nextTrack, play, playFirstFile, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
+import { effectsState, musicState, nextTrack, play, playFirstFile, silence, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
 import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setPlayerColors, TEAM_COLORS, TEAM_NAMES, unitHeight } from './sprites';
 
 interface View {
@@ -1032,7 +1033,7 @@ function onMessage(msg: ServerMessage): void {
       if (monastery >= 0 && before[3] < 0) {
         const home = views.get(monastery);
         if (home) {
-          showNotice(home.owner, `brought the relic to their monastery (+${RELIC_ATTACK} attack).`);
+          showNotice(home.owner, `brought the relic to their monastery (+${RELIC_ATTACK} attack, ${Math.round(RELIC_GATHER * 100)}% faster gathering).`);
           play('relic', 500);
         }
       }
@@ -1075,6 +1076,8 @@ function onMessage(msg: ServerMessage): void {
     }
     if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
     if (defeatChanged) renderPlayers();
+    // The end: the last sounds above still play, then the game is silent and frozen.
+    if (msg.winner >= 0) silence(true);
     winner = msg.winner;
     snapTime = now;
     if (!centred) {
@@ -1222,6 +1225,7 @@ function resetGame(): void {
   centred = false;
   placing = undefined;
   winner = -1;
+  silence(false);
   map = undefined;
   views.clear();
   players.clear();
@@ -2305,8 +2309,8 @@ function renderPanel(): void {
     }
     if (v.kind === 'monastery' && v.extra >= 100) {
       const kept = relics.filter((r) => r[3] === v.id).length;
-      if (kept) card.stats.push(['relic', `Relic: +${RELIC_ATTACK} attack`]);
-      card.sub = kept ? `Keeps the relic: +${relicsKept(v.owner) * RELIC_ATTACK} attack for the whole army` : v.owner === me ? 'Bring the relic here with a monk for +2 attack' : card.sub;
+      if (kept) card.stats.push(['relic', `Relic: +${RELIC_ATTACK} attack, +${Math.round(RELIC_GATHER * 100)}% gathering`]);
+      card.sub = kept ? `Keeps the relic: +${relicsKept(v.owner) * RELIC_ATTACK} attack for the army, ${Math.round(RELIC_GATHER * 100)}% faster gathering` : v.owner === me ? `Bring the relic here with a monk for +${RELIC_ATTACK} attack and ${Math.round(RELIC_GATHER * 100)}% faster gathering` : card.sub;
     }
     const queue = v.owner === me ? queues.get(v.id) : undefined;
     if (queue) {
@@ -2657,7 +2661,7 @@ function renderHud(): void {
   const pop = stat('house', `${p.pop}/${p.cap}`, `Population / housing — at most ${popLimit} in this game`, `max ${popLimit}`);
   if (p.pop >= p.cap && p.cap < popLimit) pop.classList.add('warn');
   const kept = relicsKept(me);
-  if (kept) stat('relic', `+${kept * RELIC_ATTACK}`, `The relic is in your monastery: +${kept * RELIC_ATTACK} attack for your troops and towers`);
+  if (kept) stat('relic', `+${kept * RELIC_ATTACK}`, `The relic is in your monastery: +${kept * RELIC_ATTACK} attack for your troops and towers, and your villagers gather ${Math.round(RELIC_GATHER * 100)}% faster`);
   stat('', AGE_NAMES[p.age] ?? '', 'Your age').classList.add('age');
   stat('', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Game time');
 
