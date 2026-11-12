@@ -136,6 +136,10 @@ export function describeAction(id: string): Detail {
       staggered: ['Staggered', 'Everyone keeps two tiles apart, row by row offset. Catapult towers and massed arrows hit far fewer at once.'],
       flank: ['Flank', 'Two wings with a gap in the middle, ready to close in on an enemy from both sides.'],
     };
+    if (f === 'none') {
+      return { title: 'No formation', icon: id, stats: [], lines: ['Everyone makes their own way there at their own speed, the fast ones first, and they end up in a loose crowd.',
+        'Quickest through woods and narrow ground, but the group arrives strung out.'] };
+    }
     const [title, line] = text[f] ?? text.line;
     return { title: `${title} formation`, icon: id, stats: [], lines: [line, 'The group keeps it whenever you send it somewhere together, and walks at the pace of its slowest member.'] };
   }

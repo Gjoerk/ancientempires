@@ -1044,3 +1044,19 @@ test('a monk heals everyone hurt around the one he tends', () => {
   run(s, 50);
   for (const u of hurt) assert.ok(u.hp > 22, `healed: ${u.hp}`);
 });
+
+test('without a formation everyone goes their own way at their own speed', () => {
+  const s = createGame(5);
+  addPlayer(s, 0);
+  const tc = owned(s, 0, 'towncenter')[0];
+  const ids = [0, 1, 2, 3].map((i) => spawn(s, 0, i < 2 ? 'swordsman' : 'rider', tc.x + 4 + i, tc.y + 5)!.id);
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'none' });
+  applyCommand(s, 0, { type: 'move', ids, x: tc.x + 4, y: tc.y + 20 });
+  const units = ids.map((id) => s.entities.get(id)!);
+  assert.equal(s.groups.size, 0, 'no marching block');
+  assert.ok(units.every((e) => e.pace === undefined), 'nobody waits for the slowest');
+  run(s, 30);
+  const rider = units.filter((e) => e.kind === 'rider')[0];
+  const sword = units.filter((e) => e.kind === 'swordsman')[0];
+  assert.ok(rider.y > sword.y + 1, 'the riders pull ahead');
+});

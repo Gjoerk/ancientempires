@@ -398,20 +398,24 @@ export function icon(id: string, owner = 0): string {
     if (f === 'line') for (let k = 0; k < 5; k++) { dots.push([6 + k * 8, 18, false]); dots.push([6 + k * 8, 30, true]); }
     if (f === 'staggered') for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) dots.push([6 + k * 14 + (r % 2) * 7, 12 + r * 12, r === 2]);
     if (f === 'flank') for (let r = 0; r < 2; r++) for (let k = 0; k < 2; k++) { dots.push([4 + k * 8, 18 + r * 12, r === 1]); dots.push([30 + k * 8, 18 + r * 12, r === 1]); }
-    if (f === 'box') for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) dots.push([8 + k * 9, 12 + r * 9, r > 0 && r < 3 && k > 0 && k < 3]);
+    // Scattered dots, no arrow: no formation.
+    if (f === 'none') for (const [x, y, bow] of [[6, 10, false], [22, 6, false], [36, 14, true], [12, 26, true], [28, 24, false], [40, 34, false], [8, 38, false], [22, 38, true]] as [number, number, boolean][]) dots.push([x, y, bow]);
+        if (f === 'box') for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) dots.push([8 + k * 9, 12 + r * 9, r > 0 && r < 3 && k > 0 && k < 3]);
     for (const [x, y, bow] of dots) {
       c.fillStyle = '#1a140c';
       c.fillRect(x - 1, y - 1, 8, 8);
       c.fillStyle = bow ? '#f0d88a' : team;
       c.fillRect(x, y, 6, 6);
     }
-    c.fillStyle = '#f0d88a';
-    c.beginPath();
-    c.moveTo(24, 1);
-    c.lineTo(31, 8);
-    c.lineTo(17, 8);
-    c.closePath();
-    c.fill();
+    if (f !== 'none') {
+      c.fillStyle = '#f0d88a';
+      c.beginPath();
+      c.moveTo(24, 1);
+      c.lineTo(31, 8);
+      c.lineTo(17, 8);
+      c.closePath();
+      c.fill();
+    }
   } else if (id === 'back') {
     // A curved arrow pointing back.
     c.lineCap = 'round';

@@ -2263,7 +2263,7 @@ const TIPS = [
   'A mill, lumber camp or mining camp next to a resource saves your villagers a long walk.',
 ];
 
-const FORMATION_NAMES: Record<Formation, string> = { line: 'Line', box: 'Box', staggered: 'Staggered', flank: 'Flank' };
+const FORMATION_NAMES: Record<Formation, string> = { line: 'Line', box: 'Box', staggered: 'Staggered', flank: 'Flank', none: 'No formation' };
 
 /** Button whose details stay in the box until something else is selected. */
 let focusKey = '';
@@ -2413,7 +2413,7 @@ function renderPanel(): void {
   // Formations: how a group lines up whenever it is sent somewhere together.
   const marchers = mine.filter((v) => !isBuilding(v.kind) && v.kind !== 'villager');
   if (!placing && marchers.length >= 2) {
-    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000) % 4] ?? 'line';
+    const formationOf = (v: View) => FORMATIONS[Math.floor(v.extra / 20000) % 5] ?? 'line';
     for (const f of FORMATIONS) {
       buttons.push({ label: FORMATION_NAMES[f], icon: `formation.${f}`, detail: describeAction(`formation.${f}`),
         data: { formation: f }, active: marchers.every((v) => formationOf(v) === f) });
@@ -2991,7 +2991,7 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   // A trebuchet: packed (rolling or standing), halfway, set up, or just after a throw.
   let frame: number | undefined;
   if (v.kind === 'trebuchet') {
-    const setup = Math.floor(v.extra / 80000);
+    const setup = Math.floor(v.extra / 100000);
     frame = setup === 2 ? 5 : setup === 1 ? (now - v.struck < 900 ? 4 : 3) : act === 1 ? 1 + (Math.floor(now / 200) % 2) : 0;
   }
   drawUnit(ctx, v.kind, v.owner, sx, sy, work || v.kind === 'trebuchet' ? 0 : bob, work, carried, act, now, slash ? slash.dir : foeDir || v.face, frame);

@@ -119,8 +119,9 @@ export interface Entity {
 
 export type Stance = 'aggressive' | 'defensive';
 /** Line: a wide front. Box: soldiers all around the archers and siege. Staggered: spread out
- *  against catapult fire. Flank: two wings with a gap in the middle. */
-export const FORMATIONS = ['line', 'box', 'staggered', 'flank'] as const;
+ *  against catapult fire. Flank: two wings with a gap in the middle. None: everyone just makes
+ *  their own way there at their own speed, ending up in a loose crowd. */
+export const FORMATIONS = ['line', 'box', 'staggered', 'flank', 'none'] as const;
 export type Formation = (typeof FORMATIONS)[number];
 
 export interface PlayerState {
@@ -657,6 +658,8 @@ export function formationSlots(kind: Formation, ranks: number[]): [number, numbe
       return [row - mid, col - mid] as [number, number];
     });
   }
+  // None: a loose, roughly square crowd around the spot.
+  if (kind === 'none') return rows(n, Math.max(1, Math.ceil(Math.sqrt(n))), 1, false);
   // Line: a wide front, soldiers in front and archers behind.
   return rows(n, Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5)))), 1, false);
 }
@@ -664,7 +667,9 @@ export function formationSlots(kind: Formation, ranks: number[]): [number, numbe
 function moveUnits(state: GameState, units: Entity[], x: number, y: number, face?: [number, number]): void {
   // A group keeps formation and walks at the pace of its slowest member.
   const slots = formation(state, units, x, y, face);
-  const pace = units.length > 1 ? Math.min(...units.map((e) => DEFS[e.kind].speed ?? 1)) : undefined;
+  // No formation: everyone at their own speed, each on their own.
+  const loose = groupFormation(units) === 'none';
+  const pace = units.length > 1 && !loose ? Math.min(...units.map((e) => DEFS[e.kind].speed ?? 1)) : undefined;
   const nearby = new Map<string, { spots: [number, number][]; next: number }>();
   const finals = new Map<Entity, [number, number]>();
   for (const e of units) {
@@ -693,7 +698,7 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
     delete e.group;
     finals.set(e, spot);
   }
-  if (units.length >= 2) formGroup(state, units, finals, x, y);
+  if (units.length >= 2 && !loose) formGroup(state, units, finals, x, y);
 }
 
 /** Below this distance a group simply walks to its spots; further off it forms up and marches. */
@@ -890,7 +895,7 @@ const CHARGE_DISTANCE = 4;
  */
 function marchOn(state: GameState, all: Entity[], target: Entity): void {
   const units = all.filter((e) => e.order.t === 'attack' && e.order.id === target.id && e.kind !== 'villager' && !isBuilding(e));
-  if (units.length < 2) return;
+  if (units.length < 2 || groupFormation(units) === 'none') return;
   const [tx, ty] = isBuilding(target) ? centre(target) : [target.x, target.y];
   const cx = units.reduce((a, e) => a + e.x, 0) / units.length;
   const cy = units.reduce((a, e) => a + e.y, 0) / units.length;
@@ -1104,7 +1109,8 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
       // Those standing about or on the march line up at once; fights carry on.
       if (e.order.t === 'idle' || e.order.t === 'move') group.push(e);
     }
-    if (group.length < 2) return;
+    // Without a formation there is no shape to take.
+    if (group.length < 2 || cmd.formation === 'none') return;
     const marching = group.find((e) => e.order.t === 'move' && e.path.length >= 2);
     if (marching) {
       // On the march: the same destination, in the new shape.
