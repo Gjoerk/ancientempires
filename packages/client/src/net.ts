@@ -56,15 +56,17 @@ export async function prepareNetwork(): Promise<void> {
     const timer = setTimeout(() => ctrl.abort(), 3000);
     const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
     clearTimeout(timer);
-    if (!res.ok) return;
+    if (!res.ok) return void console.warn(`Kingsfall: relay servers unavailable (${res.status}); trying direct connections only.`);
     const data = (await res.json()) as { iceServers?: RTCIceServer[] };
     if (Array.isArray(data.iceServers) && data.iceServers.length) {
       // Google's public STUN first (finds direct routes), then Cloudflare's servers (STUN and the relay).
       iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, ...data.iceServers];
       iceFetched = Date.now();
+      console.info('Kingsfall: relay servers ready.');
     }
   } catch {
     // No relay this time: direct connections still work on most networks.
+    console.warn('Kingsfall: relay servers could not be reached; trying direct connections only.');
   }
 }
 
