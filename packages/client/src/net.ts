@@ -38,16 +38,51 @@ export interface Handlers {
   onClose(reason: string): void;
 }
 
+/**
+ * Relay servers for strict networks (university Wi-Fi, some offices) where browsers cannot reach each
+ * other directly: short-lived TURN logins from a small Cloudflare Worker (cloudflare/turn-worker.js),
+ * whose address is VITE_TURN_URL. Without it, or if it does not answer, only direct connections are tried.
+ */
+let iceServers: RTCIceServer[] | undefined;
+let iceFetched = 0;
+const ICE_REFRESH_MS = 4 * 60 * 60 * 1000;
+
+/** Fetches relay logins, waiting at most a few seconds. Called before hosting or joining. */
+export async function prepareNetwork(): Promise<void> {
+  const url = import.meta.env.VITE_TURN_URL as string | undefined;
+  if (!url || (iceServers && Date.now() - iceFetched < ICE_REFRESH_MS)) return;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    clearTimeout(timer);
+    if (!res.ok) return;
+    const data = (await res.json()) as { iceServers?: RTCIceServer[] };
+    if (Array.isArray(data.iceServers) && data.iceServers.length) {
+      // Google's public STUN first (finds direct routes), then Cloudflare's servers (STUN and the relay).
+      iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, ...data.iceServers];
+      iceFetched = Date.now();
+    }
+  } catch {
+    // No relay this time: direct connections still work on most networks.
+  }
+}
+
 function peerOptions(): PeerOptions {
   const host = import.meta.env.VITE_PEER_HOST as string | undefined;
-  if (!host) return {};
+  const config = iceServers ? { config: { iceServers } } : {};
+  if (!host) return config;
   return {
+    ...config,
     host,
     port: Number(import.meta.env.VITE_PEER_PORT) || 443,
     path: (import.meta.env.VITE_PEER_PATH as string | undefined) ?? '/',
     secure: import.meta.env.VITE_PEER_SECURE !== 'false',
   };
 }
+
+/** Shown when the room was found but no connection to the host could be made. */
+const BLOCKED = 'Found the game, but could not connect to the host. This network may block direct connections between players: try another network (a phone hotspot works).';
 
 /** Chat text as it is passed on: plain, single-line and short. */
 function cleanChat(text: unknown): string {
@@ -227,12 +262,14 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
   let conn: DataConnection | undefined;
   let closed = false;
   let joined = false;
+  /** The room exists and the host answered the handshake, but the connection itself is not up yet. */
+  let reached = false;
   let lastHeard = Date.now();
   // The host sends something at least every second, so silence means it is gone
   // (a closed tab does not always close the connection cleanly) or was never there.
   const watchdog = setInterval(() => {
     if (Date.now() - lastHeard < SILENCE_LIMIT_MS) return;
-    close(joined ? 'The host left the game.' : 'No game with that code. Check the code or host a new game.');
+    close(joined ? 'The host left the game.' : reached ? BLOCKED : 'No game with that code. Check the code or host a new game.');
   }, 1000);
   const close = (reason: string) => {
     if (closed) return;
@@ -245,6 +282,11 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
   peer.on('open', () => {
     const c = peer.connect(ID_PREFIX + code, { reliable: true, serialization: 'json' });
     conn = c;
+    // The host's browser answering at all means the code is right; a failure after that is the network.
+    c.on('iceStateChanged', (state) => {
+      if (state === 'checking' || state === 'connected') reached = true;
+      if (state === 'failed' && !joined) close(BLOCKED);
+    });
     c.on('open', () => c.send({ t: 'join', name } satisfies ClientMessage));
     c.on('data', (data) => {
       const msg = data as ServerMessage;
@@ -254,7 +296,7 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
       if (msg.t !== 'ping') handlers.onMessage(msg);
     });
     c.on('close', () => close('The host left the game.'));
-    c.on('error', () => close('Connection to the host failed.'));
+    c.on('error', () => close(reached && !joined ? BLOCKED : 'Connection to the host failed.'));
   });
   peer.on('error', (err) => {
     close(err.type === 'peer-unavailable' ? 'No game with that code. Check the code or host a new game.'

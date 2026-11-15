@@ -47,7 +47,7 @@ import {
   FARM_FOOD,
   FALLOW_SECONDS,
 } from '@kingsfall/shared';
-import { hostGame, joinGame, normaliseCode, Session } from './net';
+import { hostGame, joinGame, normaliseCode, prepareNetwork, Session } from './net';
 import { loadSprites } from './assets';
 import { clearBuildingCache, drawBuilding } from './buildings';
 import { clearIcons, icon, setIconAge } from './icons';
@@ -1437,7 +1437,7 @@ $('copy-link-btn').addEventListener('click', async () => {
   setTimeout(() => (button.textContent = 'Copy'), 1500);
 });
 
-$<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
+$<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const hosting = (ev as SubmitEvent).submitter?.id === 'host-btn';
   const name = $<HTMLInputElement>('name').value;
@@ -1449,6 +1449,9 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', (ev) => {
   if (!code) code = normaliseCode(Math.random().toString(36).slice(2, 7));
   $('lobby-msg').textContent = 'Connecting…';
   session?.close();
+  session = undefined;
+  // Relay servers for strict networks, if there are any (a moment at most).
+  await prepareNetwork();
   const handlers = { onMessage, onClose: showLobby };
   session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers);
 });
