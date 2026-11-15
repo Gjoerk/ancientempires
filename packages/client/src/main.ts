@@ -47,7 +47,7 @@ import {
   FARM_FOOD,
   FALLOW_SECONDS,
 } from '@kingsfall/shared';
-import { hostGame, joinGame, normaliseCode, prepareNetwork, Session } from './net';
+import { hostGame, joinGame, normaliseCode, prepareNetwork, RelayMode, Session, setRelayMode } from './net';
 import { loadSprites } from './assets';
 import { clearBuildingCache, drawBuilding } from './buildings';
 import { clearIcons, icon, setIconAge } from './icons';
@@ -1310,7 +1310,11 @@ function showLobby(message: string): void {
 /** The waiting room: who is in, and for the host the controls to set up and start. */
 function renderRoom(room: string, you: number, host: number, settings: GameSettings): void {
   const hosting = !!session?.host;
-  $('room-title').textContent = `Room ${room}`;
+  const title = $('room-title');
+  const code = document.createElement('span');
+  code.className = 'code';
+  code.textContent = room;
+  title.replaceChildren('Room ', code);
   $<HTMLInputElement>('room-link').value = `${location.origin}${location.pathname}?room=${room}`;
   const list = $('room-players');
   list.textContent = '';
@@ -1347,11 +1351,24 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
       else session?.send({ t: 'team', team: Number(team.value) });
     });
     li.append(chip, name);
+    // A computer opponent's difficulty: the host picks it, everyone sees it.
+    if (p.ai) {
+      const level = document.createElement('select');
+      level.className = 'team level';
+      for (const [value, label] of [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']]) level.add(new Option(label, value));
+      level.value = p.level ?? 'normal';
+      level.disabled = !hosting;
+      level.title = 'How well the computer plays. Easy: small army, rare attacks, no upgrades. Hard: big economy, early and large attacks, siege and King\'s Guards, gathers 15% faster.';
+      level.addEventListener('change', () => session?.host?.setLevel(p.slot, level.value));
+      li.append(level);
+    }
     // Remove sits before the team dropdown, so that every row's dropdown lines up on the right.
     if ((p.test || p.ai) && hosting) {
       const remove = document.createElement('button');
       remove.type = 'button';
-      remove.textContent = 'Remove';
+      remove.textContent = '✕';
+      remove.className = 'remove';
+      remove.title = 'Remove this player';
       remove.addEventListener('click', () => session?.host?.removeExtra(p.slot));
       li.append(remove);
     }
@@ -1446,7 +1463,8 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
     $('lobby-msg').textContent = 'Enter the room code your host gave you.';
     return;
   }
-  if (!code) code = normaliseCode(Math.random().toString(36).slice(2, 7));
+  // A new code leaves out letters and digits that look alike (0 and O, 1, I and L).
+  if (!code) code = Array.from({ length: 5 }, () => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 31)]).join('');
   $('lobby-msg').textContent = 'Connecting…';
   session?.close();
   session = undefined;
@@ -1456,6 +1474,25 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers);
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
+// How to connect, remembered in this browser.
+{
+  const select = $<HTMLSelectElement>('relay-select');
+  try {
+    const kept = localStorage.getItem('kingsfall.relay');
+    if (kept === 'auto' || kept === 'off' || kept === 'always') select.value = kept;
+  } catch {
+    // Storage blocked: the default it is.
+  }
+  setRelayMode(select.value as RelayMode);
+  select.addEventListener('change', () => {
+    setRelayMode(select.value as RelayMode);
+    try {
+      localStorage.setItem('kingsfall.relay', select.value);
+    } catch {
+      // Not remembered.
+    }
+  });
+}
 // Enter in the room-code field joins; anywhere else in the form it hosts.
 $('room').addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter') return;

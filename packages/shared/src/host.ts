@@ -1,6 +1,6 @@
 import { DEFS, FALLOW_SECONDS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
 import { MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
-import { runAi } from './ai';
+import { AI_LEVELS, AI_STYLES, AiLevel, runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, FORMATIONS, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
 
@@ -76,7 +76,10 @@ export class GameHost {
     const clean = (typeof name === 'string' ? name : '').trim().slice(0, 16);
     const player: PlayerInfo = { slot, name: clean || `Player ${slot + 1}`, team: slot };
     if (kind === 'test') player.test = true;
-    if (kind === 'ai') player.ai = true;
+    if (kind === 'ai') {
+      player.ai = true;
+      player.level = 'normal';
+    }
     this.players.set(slot, player);
     return player;
   }
@@ -91,10 +94,21 @@ export class GameHost {
     if (player && !this.state && Number.isInteger(team) && team >= 0 && team < MAX_TEAMS) player.team = team;
   }
 
+  /** How well a computer opponent plays. */
+  setLevel(slot: number, level: unknown): void {
+    const player = this.players.get(slot);
+    if (player?.ai && !this.state && AI_LEVELS.includes(level as AiLevel)) player.level = level as AiLevel;
+  }
+
   /** Starts a fresh game with everyone who is in the lobby. */
   start(seed: number): void {
     this.state = createGame(seed, MAP_SIZES[this.settings.mapSize], this.settings.popLimit);
-    for (const slot of [...this.players.keys()].sort()) addPlayer(this.state, slot, this.players.get(slot)!.team, this.settings.quick);
+    for (const slot of [...this.players.keys()].sort()) {
+      const info = this.players.get(slot)!;
+      addPlayer(this.state, slot, info.team, this.settings.quick);
+      // A hard computer gathers a little faster.
+      if (info.ai) this.state.players.get(slot)!.gather = AI_STYLES[info.level ?? 'normal'].gather;
+    }
     placeRelics(this.state);
     this.pause = undefined;
   }
@@ -127,7 +141,11 @@ export class GameHost {
     // Paused, or over: once there is a winner the game stands still.
     if (!s || this.pause?.phase === 'paused' || s.winner >= 0) return undefined;
     // Computer opponents think about once a second, each on its own tick.
-    for (const player of this.players.values()) if (player.ai && (s.tick + player.slot * 3) % 10 === 0) runAi(s, player.slot);
+    for (const player of this.players.values()) {
+      if (!player.ai) continue;
+      const level = player.level ?? 'normal';
+      if ((s.tick + player.slot * 3) % AI_STYLES[level].every === 0) runAi(s, player.slot, level);
+    }
     step(s);
     const round = (v: number) => Math.round(v * 100) / 100;
     const ents: EntitySnapshot[] = [];

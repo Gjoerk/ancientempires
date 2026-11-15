@@ -10,6 +10,8 @@ export interface PlayerInfo {
   test?: boolean;
   /** A computer opponent, played by the host's browser. */
   ai?: boolean;
+  /** How well the computer opponent plays. */
+  level?: 'easy' | 'normal' | 'hard';
 }
 
 export interface GameSettings {

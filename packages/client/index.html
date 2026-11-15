@@ -9,7 +9,7 @@
   <title>Kingsfall</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=PT+Sans:wght@400;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=PT+Sans:wght@400;700&family=Roboto+Mono:wght@500;700&display=swap">
   <style>
     /* Dark green and gold. Everything below is styled through these variables. */
     body {
@@ -287,10 +287,16 @@
     .card select { padding: 4px 8px; font-size: 13px; }
     .card .check { display: flex; align-items: center; gap: 8px; }
     #room-host { display: grid; gap: 10px; }
+    /* Room codes in a plain monospaced face where every letter and digit is told apart easily. */
+    .code, #room-code, #room { font-family: "Roboto Mono", ui-monospace, Consolas, monospace; font-variant: normal; letter-spacing: .08em; }
+    #room, .code { text-transform: uppercase; font-weight: 700; }
+    #room-title .code { font-size: .9em; color: #fff; background: rgba(0, 0, 0, .3); padding: 0 .35em; border-radius: 6px; }
     #room-players { list-style: none; margin: 4px 0; padding: 8px; display: grid; gap: 6px; background: rgba(0, 0, 0, .22); border-radius: 6px;
       border: 1px solid rgba(201, 165, 74, .2); }
     #room-players li { display: flex; align-items: center; gap: 5px; min-width: 0; }
     #room-players select.team { font-size: 12px; padding-left: 6px; }
+    #room-players select.level { flex: none; width: 76px; padding-right: 18px; background-position: right 3px center; }
+    #room-players button.remove { flex: none; padding: 2px 7px; font-size: 13px; line-height: 1.2; }
     #room-players .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* ---------- Menu card: a heraldic banner hanging from a gold rod ---------- */
     /* Narrow enough that the rod and its knobs stay on screen. */
@@ -300,7 +306,7 @@
     .card input, .card select { min-width: 0; box-sizing: border-box; }
     .card { grid-template-columns: minmax(0, 1fr); }
     .card .row { grid-template-columns: minmax(0, 1fr) auto; }
-    .card label.field input { width: 100%; }
+    .card label.field input, .card label.field select { width: 100%; box-sizing: border-box; }
     body[data-menu] .card select { appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer; }
 
     body[data-menu="1"] .card-wrap { padding-top: 14px; filter: drop-shadow(2px 0 0 #c9a54a) drop-shadow(-2px 0 0 #c9a54a) drop-shadow(0 2px 0 #c9a54a)
@@ -605,7 +611,14 @@
         <button id="join-btn" class="plain">Join</button>
       </div>
       <p id="lobby-msg" role="status"></p>
-      <p class="fine">The host's browser runs the game; it ends if the host closes the tab.</p>
+      <label class="field">Connection
+        <select id="relay-select" title="How players connect to each other">
+          <option value="auto">Automatic: direct, Cloudflare relay only if needed</option>
+          <option value="off">Direct only (no Cloudflare)</option>
+          <option value="always">Always through the Cloudflare relay</option>
+        </select>
+      </label>
+      <p class="fine">The host's browser runs the game; it ends if the host closes the tab. Strict networks such as university Wi-Fi need the relay.</p>
     </form></div>
   </div>
   <script type="module" src="/src/main.ts"></script>

@@ -115,6 +115,8 @@ export interface PlayerState {
   techs: Set<TechId>;
   /** Technologies sitting in a queue, so they cannot be ordered twice. */
   researching: Set<TechId>;
+  /** Gathering speed (a hard computer opponent's bonus); 1 when unset. */
+  gather?: number;
 }
 
 export interface GameState {
@@ -1506,7 +1508,7 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
     } else e.order = { t: 'idle' };
     return;
   }
-  const relic = 1 + relicsKept(state, e.owner) * RELIC_GATHER;
+  const relic = (1 + relicsKept(state, e.owner) * RELIC_GATHER) * (state.players.get(e.owner)?.gather ?? 1);
   e.work += ((o.farm >= 0 ? FARM_RATE : GATHER_RATE) * (has(GATHER_TECH[o.res]) ? 1.2 : 1) * relic) / TICK_RATE;
   while (e.work >= 1 && e.carry < capacity) {
     e.work -= 1;

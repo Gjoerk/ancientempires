@@ -18,6 +18,8 @@ export interface HostControls {
   /** Removes a test or computer opponent from the lobby. */
   removeExtra(slot: number): void;
   setTeam(slot: number, team: number): void;
+  /** How well a computer opponent plays. */
+  setLevel(slot: number, level: string): void;
   setQuickStart(on: boolean): void;
   setMapSize(size: string): void;
   setPopLimit(limit: number): void;
@@ -45,12 +47,33 @@ export interface Handlers {
  */
 let iceServers: RTCIceServer[] | undefined;
 let iceFetched = 0;
-const ICE_REFRESH_MS = 4 * 60 * 60 * 1000;
+/** Logins are valid for six hours; they are reused for five, also across reloads, to ask the Worker rarely. */
+const ICE_REFRESH_MS = 5 * 60 * 60 * 1000;
+const ICE_STORE = 'kingsfall.ice';
 
-/** Fetches relay logins, waiting at most a few seconds. Called before hosting or joining. */
+/**
+ * How players connect. 'auto': directly where the network allows it, through Cloudflare's relay
+ * otherwise. 'off': only directly, Cloudflare is never asked. 'always': everything through the relay.
+ */
+export type RelayMode = 'auto' | 'off' | 'always';
+let relayMode: RelayMode = 'auto';
+export function setRelayMode(mode: RelayMode): void {
+  relayMode = mode;
+}
+
+/** Fetches relay logins (or reuses recent ones), waiting at most a few seconds. Called before hosting or joining. */
 export async function prepareNetwork(): Promise<void> {
   const url = import.meta.env.VITE_TURN_URL as string | undefined;
-  if (!url || (iceServers && Date.now() - iceFetched < ICE_REFRESH_MS)) return;
+  if (!url || relayMode === 'off' || (iceServers && Date.now() - iceFetched < ICE_REFRESH_MS)) return;
+  try {
+    const kept = JSON.parse(localStorage.getItem(ICE_STORE) ?? 'null') as { at: number; servers: RTCIceServer[] } | null;
+    if (kept && Date.now() - kept.at < ICE_REFRESH_MS && Array.isArray(kept.servers)) {
+      [iceServers, iceFetched] = [kept.servers, kept.at];
+      return;
+    }
+  } catch {
+    // Nothing kept, or storage is blocked: ask the Worker.
+  }
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3000);
@@ -62,6 +85,11 @@ export async function prepareNetwork(): Promise<void> {
       // Google's public STUN first (finds direct routes), then Cloudflare's servers (STUN and the relay).
       iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, ...data.iceServers];
       iceFetched = Date.now();
+      try {
+        localStorage.setItem(ICE_STORE, JSON.stringify({ at: iceFetched, servers: iceServers }));
+      } catch {
+        // Not kept: asked again next time.
+      }
       console.info('Kingsfall: relay servers ready.');
     }
   } catch {
@@ -72,7 +100,9 @@ export async function prepareNetwork(): Promise<void> {
 
 function peerOptions(): PeerOptions {
   const host = import.meta.env.VITE_PEER_HOST as string | undefined;
-  const config = iceServers ? { config: { iceServers } } : {};
+  const config = iceServers && relayMode !== 'off'
+    ? { config: { iceServers, iceTransportPolicy: relayMode === 'always' ? 'relay' as const : 'all' as const } }
+    : {};
   if (!host) return config;
   return {
     ...config,
@@ -233,6 +263,10 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       },
       setTeam(slot, team) {
         game.setTeam(slot, team);
+        sendLobby();
+      },
+      setLevel(slot, level) {
+        game.setLevel(slot, level);
         sendLobby();
       },
       setPopLimit(limit) {
