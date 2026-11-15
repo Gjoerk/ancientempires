@@ -12,6 +12,8 @@ export interface PlayerInfo {
   ai?: boolean;
   /** How well the computer opponent plays. */
   level?: 'easy' | 'normal' | 'hard';
+  /** Lost their connection during the game; their side waits for them to come back. */
+  away?: boolean;
 }
 
 export interface GameSettings {
@@ -42,7 +44,8 @@ export type QueueSnapshot = number[];
 
 /** Sent by a player to the host. */
 export type ClientMessage =
-  | { t: 'join'; name: string }
+  /** `token` is the guest's own random key for the room: with it, someone who lost their connection gets their place back. */
+  | { t: 'join'; name: string; token?: string }
   | { t: 'cmd'; cmd: Command }
   | { t: 'chat'; text: string }
   /** A player picks their own team (and with it their colour) in the lobby. */
@@ -90,4 +93,6 @@ export type ServerMessage =
       /** The winning team, or -1. */
       winner: number;
     }
+  /** For someone coming back into a running game: tiles changed so far, [tile index, tile, amount left]. */
+  | { t: 'catchup'; tiles: [number, number, number][] }
   | { t: 'error'; message: string };

@@ -231,6 +231,8 @@
     #err[hidden] { display: none; }
     #err.fade { animation: err-fade 2.6s ease-in forwards; }
     @keyframes err-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+    #reconnect { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 10px 18px; text-align: center; border-color: #e8c25a; }
+    #reconnect b { color: var(--accent); }
     #toast { position: fixed; top: 52px; right: 10px; padding: 6px 12px; border-color: #b3261a; }
     #chat-log { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; display: flex; flex-direction: column; gap: 2px;
       align-items: flex-start; pointer-events: none; max-width: min(560px, 60vw); max-height: 34vh; overflow: hidden; color: #fff;
@@ -522,6 +524,7 @@
     </div>
   </div>
   <div id="toast" class="frame" hidden></div>
+  <div id="reconnect" class="frame" hidden role="status"><b>Connection lost: reconnecting…</b> <span id="reconnect-why" class="dim"></span><br><span class="dim">The game goes on at the host; you get your place back as soon as you are reconnected.</span></div>
   <div id="err" hidden role="status" aria-live="polite"></div>
   <div id="chat-log"></div>
   <input id="chat-input" maxlength="140" placeholder="Message to everyone — Enter to send" enterkeyhint="send" hidden>

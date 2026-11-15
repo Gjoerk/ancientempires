@@ -914,7 +914,7 @@ function renderPlayers(): void {
     chip.className = 'chip';
     chip.style.setProperty('--gem', `var(--gem-${p.team})`);
     const label = document.createElement('span');
-    label.textContent = p.name + (p.slot === me ? (p.slot === myOwnSlot ? ' (you)' : ' (playing)') : '');
+    label.textContent = p.name + (p.slot === me ? (p.slot === myOwnSlot ? ' (you)' : ' (playing)') : '') + (p.away ? ' (connection lost)' : '');
     label.style.marginRight = '14px';
     if (players.get(p.slot)?.defeated) label.style.textDecoration = 'line-through';
     el.append(chip, label);
@@ -952,8 +952,21 @@ function onMessage(msg: ServerMessage): void {
     $('host-tools').hidden = !session?.host;
     $('switch-btn').hidden = !roster.some((p) => p.test);
   } else if (msg.t === 'players') {
+    // Someone lost their connection, or is back.
+    for (const p of msg.players) {
+      const was = roster.find((q) => q.slot === p.slot);
+      if (!was || p.slot === myOwnSlot) continue;
+      if (p.away && !was.away) showNotice(p.slot, 'lost their connection. Their side waits for them to come back.');
+      if (!p.away && was.away) showNotice(p.slot, 'is back in the game.');
+    }
     roster = msg.players;
     renderPlayers();
+  } else if (msg.t === 'catchup') {
+    // Back in a running game: the map as it is now, trees felled and mines dug out included.
+    for (const [index, tile, amount] of msg.tiles) {
+      setTile(index, tile);
+      if (map) map.amount[index] = amount;
+    }
   } else if (msg.t === 'snap') {
     const now = performance.now();
     const alpha = Math.min(1, (now - snapTime) / TICK_MS);
@@ -1181,6 +1194,16 @@ function showPause(msg: Extract<ServerMessage, { t: 'pause' }>): void {
   $('pause-no').hidden = !(mine && asking);
 }
 
+/** The banner while the connection to the host is being restored. */
+function showReconnect(reason: string | undefined): void {
+  const banner = $('reconnect');
+  banner.hidden = reason === undefined;
+  if (reason !== undefined) {
+    $('reconnect-why').textContent = `(${reason})`;
+    showNotice(-1, `Connection to the host lost (${reason}). Reconnecting…`);
+  } else showNotice(-1, 'Reconnected: back in the game.');
+}
+
 /** A line in the chat from the game itself, such as another player reaching a new age. */
 function showNotice(from: number, text: string): void {
   const line = document.createElement('div');
@@ -1283,6 +1306,7 @@ function resetGame(): void {
   puffs = [];
   alert = attackFlash = undefined;
   $('toast').hidden = true;
+  $('reconnect').hidden = true;
   $('menu').hidden = true;
   $('touch-tools').hidden = true;
   selectedTile = -1;
@@ -1470,7 +1494,7 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   session = undefined;
   // Relay servers for strict networks, if there are any (a moment at most).
   await prepareNetwork();
-  const handlers = { onMessage, onClose: showLobby };
+  const handlers = { onMessage, onClose: showLobby, onReconnect: showReconnect };
   session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers);
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';

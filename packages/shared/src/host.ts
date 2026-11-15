@@ -1,5 +1,5 @@
 import { DEFS, FALLOW_SECONDS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
-import { MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
+import { generateMap, MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
 import { AI_LEVELS, AI_STYLES, AiLevel, runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, FORMATIONS, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
@@ -23,9 +23,47 @@ export class GameHost {
 
   constructor(readonly room: string) {}
 
-  /** The people who have to agree: everyone but computer and stand-in opponents. */
+  /** Each guest's key for the room (see ClientMessage join), so they can come back after losing their connection. */
+  private tokens = new Map<string, number>();
+
+  /** The people who have to agree: everyone but computer and stand-in opponents, and those who are away. */
   private voters(): number[] {
-    return [...this.players.values()].filter((p) => !p.ai && !p.test).map((p) => p.slot);
+    return [...this.players.values()].filter((p) => !p.ai && !p.test && !p.away).map((p) => p.slot);
+  }
+
+  /** Remembers whose key `token` is. */
+  bindToken(token: unknown, slot: number): void {
+    if (typeof token === 'string' && token.length >= 8 && token.length <= 64) this.tokens.set(token, slot);
+  }
+
+  /** Someone coming back into the running game with their key: their player, if they are away. */
+  rejoin(token: unknown): PlayerInfo | undefined {
+    if (!this.state || typeof token !== 'string') return undefined;
+    const slot = this.tokens.get(token);
+    const player = slot === undefined ? undefined : this.players.get(slot);
+    if (!player?.away) return undefined;
+    player.away = false;
+    return player;
+  }
+
+  /** A player lost their connection in the running game: their side stays, waiting for them. */
+  setAway(slot: number): ServerMessage | undefined {
+    const player = this.players.get(slot);
+    if (!player || !this.state) return undefined;
+    player.away = true;
+    return this.pause ? this.settlePause() : undefined;
+  }
+
+  /** Every tile that differs from the start of the game, for someone coming back in. */
+  catchUp(): ServerMessage | undefined {
+    if (!this.state) return undefined;
+    const start = generateMap(this.state.seed, this.state.map.size);
+    const now = this.state.map;
+    const tiles: [number, number, number][] = [];
+    for (let i = 0; i < now.tiles.length; i++) {
+      if (now.tiles[i] !== start.tiles[i] || now.amount[i] !== start.amount[i]) tiles.push([i, now.tiles[i], now.amount[i]]);
+    }
+    return { t: 'catchup', tiles };
   }
 
   pauseMessage(declinedBy = -1): ServerMessage {
@@ -55,7 +93,7 @@ export class GameHost {
   }
 
   /** Moves the pause on once everyone has agreed (also after someone leaves). */
-  private settlePause(): ServerMessage {
+  settlePause(): ServerMessage {
     const p = this.pause;
     if (p && this.voters().every((slot) => p.agreed.has(slot))) {
       if (p.phase === 'asking') this.pause = { phase: 'paused', by: p.by, agreed: new Set() };
@@ -117,6 +155,8 @@ export class GameHost {
   backToLobby(): void {
     this.state = undefined;
     this.pause = undefined;
+    // Whoever is still away when the game ends is gone.
+    for (const [slot, p] of [...this.players]) if (p.away) this.players.delete(slot);
   }
 
   command(slot: number, cmd: Command): void {

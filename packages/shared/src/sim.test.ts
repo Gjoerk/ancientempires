@@ -1115,3 +1115,27 @@ test('without a formation, a scattered group gathers tightly round the spot clic
     assert.ok(Math.hypot(e.x - 30.5, e.y - 30.5) < 2.5, `close to the spot: ${e.x.toFixed(1)}, ${e.y.toFixed(1)}`);
   }
 });
+
+test('a guest who loses the connection keeps their side and gets it back with their key', () => {
+  const host = new GameHost('ROOM');
+  host.join('Host');
+  const guest = host.join('Guest')!;
+  host.bindToken('guest-key-123', guest.slot);
+  host.start(5);
+  const s = host.state!;
+  const theirs = () => [...s.entities.values()].filter((e) => e.owner === guest.slot).length;
+  const before = theirs();
+  // A tree is cut down while they are away.
+  const tree = s.map.tiles.findIndex((t) => t === Tile.Forest);
+  s.map.tiles[tree] = Tile.Grass;
+  host.setAway(guest.slot);
+  for (let i = 0; i < 50; i++) host.tick();
+  assert.equal(theirs(), before, 'their town stays');
+  assert.equal(host.players.get(guest.slot)!.away, true);
+  assert.equal(host.rejoin('someone-else-1'), undefined, 'a wrong key gets nothing');
+  const back = host.rejoin('guest-key-123');
+  assert.equal(back?.slot, guest.slot, 'the right key gets their place back');
+  assert.equal(host.players.get(guest.slot)!.away, false);
+  const catchUp = host.catchUp() as Extract<ReturnType<GameHost['catchUp']>, { t: 'catchup' }>;
+  assert.ok(catchUp.tiles.some(([i, t]) => i === tree && t === Tile.Grass), 'the felled tree is in the catch-up');
+});
