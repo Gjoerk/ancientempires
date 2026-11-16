@@ -4,14 +4,22 @@ import { drawSprite, findSprite } from './assets';
 
 /** The team colours: blue, red, green, yellow, purple, orange, teal and pink. */
 export const TEAM_COLORS = ['#3b6fd4', '#d43b3b', '#3bb85a', '#e0c12f', '#9a4fd6', '#e8832a', '#2fb8b0', '#e05aa8'];
+const NORMAL_COLORS = [...TEAM_COLORS];
+/** Okabe and Ito's colours, told apart with every common kind of colour blindness, in the same order of names. */
+const COLORBLIND_COLORS = ['#0072b2', '#d55e00', '#009e73', '#f0e442', '#cc79a7', '#e69f00', '#56b4e9', '#ffffff'];
+/** Switches every team colour (they are changed in place, so everyone holding the list sees it). */
+export function setColorblind(on: boolean): void {
+  (on ? COLORBLIND_COLORS : NORMAL_COLORS).forEach((c, i) => (TEAM_COLORS[i] = c));
+  unitPalettes.clear();
+}
 
 /** Each player's colour, by slot: the colour of their team, set when a game starts. */
 export const TEAM_NAMES = ['Blue', 'Red', 'Green', 'Yellow', 'Purple', 'Orange', 'Teal', 'Pink'];
 export const PLAYER_COLORS = TEAM_COLORS.slice(0, 4);
 
 /** Gives every player their team's colour; `teams` is the team of each slot. */
-export function setPlayerColors(teams: Map<number, number>): void {
-  let changed = false;
+export function setPlayerColors(teams: Map<number, number>, force = false): void {
+  let changed = force;
   for (const [slot, team] of teams) {
     const color = TEAM_COLORS[team % TEAM_COLORS.length];
     if (PLAYER_COLORS[slot] !== color) {
@@ -167,7 +175,7 @@ const unitPalettes = new Map<number, Record<string, string>>();
 function unitPalette(owner: number): Record<string, string> {
   let palette = unitPalettes.get(owner);
   if (!palette) {
-    palette = { ...UNIT_COLORS, t: PLAYER_COLORS[owner % PLAYER_COLORS.length] };
+    palette = { ...UNIT_COLORS, t: PLAYER_COLORS[Math.max(0, owner) % PLAYER_COLORS.length] };
     for (const [key, color] of Object.entries(palette)) palette[key.toUpperCase()] = shade(color, 0.72);
     unitPalettes.set(owner, palette);
   }
@@ -187,7 +195,7 @@ export function drawUnit(
   const custom = findSprite([`unit.${kind}.${state}`, `unit.${kind}.${state.split('.')[0]}`, `unit.${kind}`]);
   if (custom) {
     if (custom.def.shadow !== false) shadow(ctx, x, y, big ? 12 : 8, big ? 5 : 4);
-    drawSprite(ctx, custom, PLAYER_COLORS[owner % PLAYER_COLORS.length], x, y - bob, now, flip);
+    drawSprite(ctx, custom, PLAYER_COLORS[Math.max(0, owner) % PLAYER_COLORS.length], x, y - bob, now, flip);
     // Without a dedicated working image, the built-in tool is swung over the sprite.
     if (work && !custom.key.includes('.work')) drawTool(ctx, x, y - bob, work);
     return;

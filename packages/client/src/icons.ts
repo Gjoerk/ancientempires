@@ -351,7 +351,7 @@ export function icon(id: string, owner = 0): string {
   canvas.width = canvas.height = SIZE;
   const c = canvas.getContext('2d')!;
   c.imageSmoothingEnabled = false;
-  const team = PLAYER_COLORS[owner % PLAYER_COLORS.length];
+  const team = PLAYER_COLORS[Math.max(0, owner) % PLAYER_COLORS.length];
   const custom = findSprite([`icon.${id}`]);
   if (custom) {
     const frames = Math.max(1, custom.def.frames ?? 1);

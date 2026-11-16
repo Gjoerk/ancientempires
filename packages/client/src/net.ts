@@ -40,6 +40,24 @@ export interface Handlers {
   onClose(reason: string): void;
   /** Guests: the connection to the host dropped and is being restored (a reason), or is back (undefined). */
   onReconnect?(reason: string | undefined): void;
+  /** The host vanished and this player now hosts the game (or went back to being a guest): the new session. */
+  onMigrate?(session: Session, hosting: boolean): void;
+}
+
+/** How often the host sends a backup of the game to the players who would take over, and in what pieces. */
+const BACKUP_TICKS = 5 * TICK_RATE;
+const BACKUP_PIECE = 48_000;
+/** How long the host must be gone before the first heir takes over; each further heir waits this much longer. */
+const MIGRATE_AFTER_MS = 12_000;
+const MIGRATE_STEP_MS = 15_000;
+/** A new host that cannot take over the room's name in this time gives up: the old host is probably still there. */
+const MIGRATE_GIVE_UP_MS = 60_000;
+
+/** Carrying on a game from a backup, as its new host. */
+interface Resume {
+  game: GameHost;
+  slot: number;
+  oldHost: number;
 }
 
 /** How often a guest tries to get back into a game after losing the connection (it keeps trying until it gives up itself). */
@@ -161,9 +179,13 @@ function startTicker(ms: number, fn: () => void): () => void {
   return () => worker.terminate();
 }
 
-export function hostGame(code: string, name: string, handlers: Handlers): Session {
+export function hostGame(code: string, name: string, handlers: Handlers, resume?: Resume): Session {
   const peer = new Peer(ID_PREFIX + code, peerOptions());
-  const game = new GameHost(code);
+  const game = resume?.game ?? new GameHost(code);
+  /** The host has a key too: if it loses its connection and someone else takes over, it can come back as a guest. */
+  const token = roomToken(code);
+  let registered = false;
+  let backupId = 0;
   const guests = new Map<DataConnection, number>();
   if (import.meta.env.DEV) Object.assign(window, { __host: game, __hostOffline: () => listener.disconnect() });
   let stopTicker: (() => void) | undefined;
@@ -173,33 +195,85 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   let ticks = 0;
   let closed = false;
 
+  /** Spectators: they get what everyone gets, as player -1, and take no part. */
+  const watchers = new Map<DataConnection, string>();
+  const updateWatching = () => (game.watching = [...watchers.values()]);
   const toGuests = (make: (slot: number) => ServerMessage) => {
     for (const [conn, slot] of guests) if (conn.open) conn.send(make(slot));
+    for (const conn of watchers.keys()) if (conn.open) conn.send(make(-1));
   };
   const broadcast = (msg: ServerMessage) => {
     handlers.onMessage(msg);
     toGuests(() => msg);
   };
+  /** To the sender's team only (team chat, map signals): the host sees it only if it is on that team. */
+  const toTeam = (from: number, msg: ServerMessage) => {
+    const team = game.players.get(from)?.team;
+    if (game.players.get(mySlot)?.team === team) handlers.onMessage(msg);
+    for (const [conn, slot] of guests) if (conn.open && game.players.get(slot)?.team === team) conn.send(msg);
+  };
+  const chat = (from: number, text: unknown, team: unknown) => {
+    const clean = cleanChat(text);
+    if (!clean) return;
+    const msg: ServerMessage = { t: 'chat', from, text: clean, team: team === true || undefined };
+    if (team === true) toTeam(from, msg);
+    else broadcast(msg);
+  };
+  const signal = (from: number, x: unknown, y: unknown) => {
+    if (!game.state || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    toTeam(from, { t: 'signal', from, x: x as number, y: y as number });
+  };
   const sendLobby = () => {
     handlers.onMessage(game.lobbyMessage(mySlot, mySlot));
     toGuests((slot) => game.lobbyMessage(slot, mySlot));
   };
-  const close = (reason: string) => {
+  const close = (reason: string, quietly = false) => {
     if (closed) return;
     closed = true;
     stopTicker?.();
     peer.destroy();
     if (listener !== peer) listener.destroy();
-    handlers.onClose(reason);
+    if (!quietly) handlers.onClose(reason);
+  };
+
+  /** Sends a backup of the game to the first two players in line to take over. */
+  const sendBackup = () => {
+    if (!game.state || game.state.winner >= 0) return;
+    const heirs = [...game.players.values()].filter((p) => !p.ai && !p.test && !p.away && p.slot !== mySlot).map((p) => p.slot).sort((a, b) => a - b);
+    const to = [...guests].filter(([conn, slot]) => conn.open && heirs.slice(0, 2).includes(slot)).map(([conn]) => conn);
+    if (to.length === 0) return;
+    const text = game.backup()!;
+    const n = Math.ceil(text.length / BACKUP_PIECE);
+    const id = ++backupId;
+    for (let i = 0; i < n; i++) {
+      const msg: ServerMessage = { t: 'backup', id, i, n, part: text.slice(i * BACKUP_PIECE, (i + 1) * BACKUP_PIECE), heirs, host: mySlot };
+      for (const conn of to) conn.send(msg);
+    }
   };
 
   /** When each guest was last heard from. */
   const heard = new Map<DataConnection, number>();
-  peer.on('open', () => {
-    // Also emitted again after the link to the matchmaking service came back: set up only once.
-    if (mySlot >= 0) return;
-    mySlot = controlSlot = game.join(name)!.slot;
-    sendLobby();
+  const setup = () => {
+    if (resume) {
+      // Carrying on from a backup: the old host is away (it can come back as a guest with its key).
+      mySlot = controlSlot = resume.slot;
+      game.setAway(resume.oldHost);
+      game.bindToken(token, mySlot);
+      handlers.onMessage(game.startMessage(mySlot));
+      const tiles = game.catchUp();
+      if (tiles) handlers.onMessage(tiles);
+      handlers.onMessage(game.playersMessage());
+      // Unable to take over the room's name for a long time: the old host is still there after all.
+      setTimeout(() => {
+        if (closed || registered) return;
+        close('', true);
+        handlers.onMigrate?.(joinGame(code, name, handlers), false);
+      }, MIGRATE_GIVE_UP_MS);
+    } else {
+      mySlot = controlSlot = game.join(name)!.slot;
+      game.bindToken(token, mySlot);
+      sendLobby();
+    }
     // A guest whose connection died without closing (a dead Wi-Fi) counts as away, so they can come back.
     setInterval(() => {
       if (closed) return;
@@ -215,10 +289,20 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       const snap = game.tick();
       if (snap) broadcast(snap);
       else if (++ticks % TICK_RATE === 0) toGuests(() => ({ t: 'ping' }));
+      if (snap && game.state!.tick % BACKUP_TICKS === 0) sendBackup();
     });
     // Closing the tab should disconnect guests right away.
-    window.addEventListener('pagehide', () => peer.destroy());
+    window.addEventListener('pagehide', () => {
+      peer.destroy();
+      if (listener !== peer) listener.destroy();
+    });
+  };
+  peer.on('open', () => {
+    registered = true;
+    // Also emitted again after the link to the matchmaking service came back: set up only once.
+    if (mySlot < 0) setup();
   });
+  if (resume) setup();
 
   const drops = new Map<DataConnection, () => void>();
   const accept = (conn: DataConnection) => {
@@ -228,6 +312,22 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       heard.set(conn, Date.now());
       if (!msg || typeof msg !== 'object' || msg.t === 'ping') return;
       const slot = guests.get(conn);
+      if (msg.t === 'join' && slot === undefined && msg.watch) {
+        // A spectator: welcome at any time, also into a running game.
+        watchers.set(conn, (typeof msg.name === 'string' ? msg.name : '').trim().slice(0, 16) || 'Spectator');
+        updateWatching();
+        if (game.state) {
+          conn.send(game.startMessage(-1));
+          const tiles = game.catchUp();
+          if (tiles) conn.send(tiles);
+          broadcast(game.playersMessage());
+        } else sendLobby();
+        return;
+      }
+      if (watchers.has(conn)) {
+        if (msg.t === 'chat' && cleanChat(msg.text)) broadcast({ t: 'chat', from: -1, name: watchers.get(conn), text: cleanChat(msg.text) });
+        return;
+      }
       if (msg.t === 'join' && slot === undefined) {
         // Someone who lost their connection coming back: their own place, and the game as it stands.
         const back = game.rejoin(msg.token);
@@ -258,8 +358,10 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
         sendLobby();
       } else if (msg.t === 'cmd' && slot !== undefined) {
         game.command(slot, msg.cmd);
-      } else if (msg.t === 'chat' && slot !== undefined && cleanChat(msg.text)) {
-        broadcast({ t: 'chat', from: slot, text: cleanChat(msg.text) });
+      } else if (msg.t === 'chat' && slot !== undefined) {
+        chat(slot, msg.text, msg.team);
+      } else if (msg.t === 'signal' && slot !== undefined) {
+        signal(slot, msg.x, msg.y);
       } else if (msg.t === 'team' && slot !== undefined) {
         game.setTeam(slot, msg.team);
         sendLobby();
@@ -269,6 +371,12 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       }
     });
     const drop = () => {
+      if (watchers.delete(conn)) {
+        updateWatching();
+        if (game.state) broadcast(game.playersMessage());
+        else sendLobby();
+        return;
+      }
       const slot = guests.get(conn);
       if (slot === undefined) return;
       guests.delete(conn);
@@ -317,6 +425,10 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
     tries = 0;
     if (!listener.destroyed && !listener.disconnected) return;
     const fresh = new Peer(ID_PREFIX + code, peerOptions());
+    fresh.on('open', () => {
+      registered = true;
+      if (resume) broadcast({ t: 'chat', from: mySlot, text: '(the host left: I am hosting the game now)' });
+    });
     fresh.on('connection', accept);
     fresh.on('disconnected', () => setTimeout(relisten, 3000));
     fresh.on('error', () => setTimeout(relisten, 5000));
@@ -336,7 +448,8 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   return {
     send: (msg) => {
       if (msg.t === 'cmd' && controlSlot >= 0) game.command(controlSlot, msg.cmd);
-      if (msg.t === 'chat' && mySlot >= 0) broadcast({ t: 'chat', from: mySlot, text: cleanChat(msg.text) });
+      if (msg.t === 'chat' && mySlot >= 0) chat(mySlot, msg.text, msg.team);
+      if (msg.t === 'signal' && mySlot >= 0) signal(mySlot, msg.x, msg.y);
       if (msg.t === 'pause' && mySlot >= 0) {
         const news = game.answerPause(mySlot, msg.answer);
         if (news) broadcast(news);
@@ -401,7 +514,7 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   };
 }
 
-export function joinGame(code: string, name: string, handlers: Handlers): Session {
+export function joinGame(code: string, name: string, handlers: Handlers, watch = false): Session {
   const token = roomToken(code);
   let peer!: Peer;
   /** Tests only: a connection that has silently died. */
@@ -417,6 +530,12 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
   let lostAt = 0;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let lastHeard = Date.now();
+  /** This guest's player, and the latest backup of the game if this guest is in line to take over. */
+  let mySlot = -1;
+  let backup: { text: string; heirs: number[]; host: number } | undefined;
+  let pieces: { id: number; parts: string[]; got: number } | undefined;
+  /** The matchmaking service said the host's room is not there any more. */
+  let hostGone = false;
   // The host sends something at least every second, so silence means it is gone
   // (a closed tab does not always close the connection cleanly) or was never there.
   const watchdog = setInterval(() => {
@@ -450,8 +569,22 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     clearTimeout(retry);
     retry = setTimeout(attempt, RECONNECT_EVERY_MS);
   };
+  /** Takes over the game from the latest backup, as its new host. */
+  const migrate = () => {
+    if (closed || !backup) return;
+    closed = true;
+    clearInterval(watchdog);
+    clearTimeout(retry);
+    peer.destroy();
+    console.warn('Kingsfall: the host is gone; taking over the game from the last backup.');
+    const game = GameHost.fromBackup(backup.text);
+    handlers.onMigrate?.(hostGame(code, name, handlers, { game, slot: mySlot, oldHost: backup.host }), true);
+  };
   const attempt = () => {
     if (closed || !lostAt) return;
+    // The host is gone for good and this guest is next in line (the first heir soonest, the next a bit later).
+    const place = backup ? backup.heirs.indexOf(mySlot) : -1;
+    if (hostGone && place >= 0 && Date.now() - lostAt > MIGRATE_AFTER_MS + place * MIGRATE_STEP_MS) return migrate();
     conn?.close();
     conn = undefined;
     // Each try starts afresh with the matchmaking service, so a dead link to it never gets in the way.
@@ -469,7 +602,7 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
       if (state === 'checking' || state === 'connected') reached = true;
       if (state === 'failed' || (state === 'disconnected' && playing)) lost(`network ${state}`);
     });
-    c.on('open', () => c.send({ t: 'join', name, token } satisfies ClientMessage));
+    c.on('open', () => c.send({ t: 'join', name, token, watch: watch || undefined } satisfies ClientMessage));
     c.on('data', (data) => {
       if (c !== conn || c === deaf) return;
       const msg = data as ServerMessage;
@@ -477,7 +610,19 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
       // While coming back, a refusal means the host has not let go of the old connection yet: try again.
       if (msg.t === 'error') return lostAt ? lost('the host is still letting go of the old connection') : close(msg.message);
       joined = true;
-      if (msg.t === 'start') playing = true;
+      if (msg.t === 'backup') {
+        // Pieces of a backup, kept until a whole one is in; nothing to show.
+        if (!pieces || pieces.id !== msg.id) pieces = { id: msg.id, parts: new Array(msg.n), got: 0 };
+        if (pieces.parts[msg.i] === undefined) pieces.got++;
+        pieces.parts[msg.i] = msg.part;
+        if (pieces.got === msg.n) backup = { text: pieces.parts.join(''), heirs: msg.heirs, host: msg.host };
+        return;
+      }
+      if (msg.t === 'start') {
+        playing = true;
+        mySlot = msg.you;
+        hostGone = false;
+      }
       if (msg.t === 'lobby') playing = false;
       if (msg.t !== 'ping') handlers.onMessage(msg);
       // Told after the host's first message, which sets the game up again.
@@ -502,6 +647,7 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     });
     p.on('error', (err) => {
       if (p !== peer) return;
+      if (err.type === 'peer-unavailable') hostGone = true;
       if (playing) return lost(`matchmaking: ${err.type}`);
       close(err.type === 'peer-unavailable' ? 'No game with that code. Check the code or host a new game.'
         : 'Could not reach the matchmaking service.');

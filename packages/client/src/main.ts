@@ -47,6 +47,7 @@ import {
   FARM_FOOD,
   FALLOW_SECONDS,
 } from '@kingsfall/shared';
+import type { PlayerStats } from '@kingsfall/shared';
 import { hostGame, joinGame, normaliseCode, prepareNetwork, RelayMode, Session, setRelayMode } from './net';
 import { loadSprites } from './assets';
 import { clearBuildingCache, drawBuilding } from './buildings';
@@ -57,7 +58,7 @@ import { Breeze } from './breeze';
 import { installCursorLock } from './cursor-lock';
 import { Detail, describeAction, describeKind, describeTech } from './describe';
 import { effectsState, musicState, nextTrack, play, playFirstFile, silence, setEffectsVolume, setMusicVolume, toggleMusic, toggleMute, unlockSound } from './sound';
-import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setPlayerColors, TEAM_COLORS, TEAM_NAMES, unitHeight } from './sprites';
+import { drawProp, drawRelic, drawUnit, HH, HW, PLAYER_COLORS, setColorblind, setPlayerColors, TEAM_COLORS, TEAM_NAMES, unitHeight } from './sprites';
 
 interface View {
   id: number;
@@ -154,6 +155,71 @@ let blessings: { from: number; to: number; kind: number; t: number }[] = [];
 let shots: { from: [number, number]; to: [number, number]; t: number; boulder?: boolean; landed?: boolean }[] = [];
 const BOULDER_MS = 750;
 let winner = -1;
+/** What happened over the game, sent by the host at the end. */
+let finalStats: [number, PlayerStats][] | undefined;
+
+/** Player preferences, kept in this browser (see the settings dialog). */
+const prefs = {
+  /** Letter keys press the command buttons; the view scrolls with the arrow keys. Off: WASD scroll, as before. */
+  hotkeys: true,
+  /** How fast the view scrolls with keys and at the window edge (1 = normal). */
+  scroll: 1,
+  /** Scrolling when the cursor touches the window edge. */
+  edge: true,
+  /** Size of the interface, 0.8 to 1.3. */
+  ui: 1,
+  /** Team colours that are easy to tell apart with colour blindness. */
+  colorblind: false,
+  /** Hints for the first games. */
+  hints: true,
+  ...(() => {
+    try {
+      return JSON.parse(localStorage.getItem('kingsfall.prefs') ?? '{}') as object;
+    } catch {
+      return {};
+    }
+  })(),
+};
+function savePrefs(): void {
+  try {
+    localStorage.setItem('kingsfall.prefs', JSON.stringify(prefs));
+  } catch {
+    // Not kept this time.
+  }
+}
+
+/** Applies the preferences that change how things look. */
+function applyPrefs(): void {
+  document.documentElement.style.setProperty('--ui', String(prefs.ui));
+  setColorblind(prefs.colorblind);
+  clearBuildingCache();
+  clearIcons();
+  if (roster.length) setPlayerColors(new Map(roster.map((p) => [p.slot, p.team])), true);
+  lastButtons = '';
+  panelSignature = '';
+  hudSignature = '';
+  // The bar may have changed size; things floating above it follow.
+  requestAnimationFrame(() => document.documentElement.style.setProperty('--bottom-h', `${$('bottom').getBoundingClientRect().height}px`));
+}
+
+/** The settings dialog: every control writes its preference straight away. */
+function openSettings(): void {
+  $('menu').hidden = true;
+  $('settings').hidden = false;
+  $<HTMLInputElement>('set-hotkeys').checked = prefs.hotkeys;
+  $<HTMLInputElement>('set-edge').checked = prefs.edge;
+  $<HTMLInputElement>('set-colorblind').checked = prefs.colorblind;
+  $<HTMLInputElement>('set-hints').checked = prefs.hints;
+  $<HTMLInputElement>('set-scroll').value = String(prefs.scroll);
+  $<HTMLInputElement>('set-ui').value = String(prefs.ui);
+  $('set-scroll-v').textContent = `${Math.round(prefs.scroll * 100)}%`;
+  $('set-ui-v').textContent = `${Math.round(prefs.ui * 100)}%`;
+}
+
+/** The keys for the command buttons, in order: the top letter row, then the two below. */
+const HOTKEYS = 'QWERTYUIOPASDFGZXCVB';
+/** The names of those watching the game. */
+let watching: string[] = [];
 /** The seed of the game being played, to tell coming back into it from a new game. */
 let gameSeed = -1;
 /** Buildings that changed hands in this snapshot (old owner → new), and players whose town has been taken. */
@@ -348,7 +414,9 @@ function canSee(v: View): boolean {
 }
 
 function updateFog(now: number): void {
-  if (!map || now - fogTime < 200 || !players.has(me)) return;
+  // A spectator (no player of their own) sees the whole map.
+  const spectator = me < 0;
+  if (!map || now - fogTime < 200 || (!spectator && !players.has(me))) return;
   fogTime = now;
   const n = map.size;
   if (visible.length !== n * n) visible = new Uint8Array(n * n);
@@ -356,13 +424,13 @@ function updateFog(now: number): void {
   exploredBy.set(me, explored);
   remembered = rememberedBy.get(me) ?? new Map();
   rememberedBy.set(me, remembered);
-  const p = players.get(me)!;
+  const p = players.get(me);
   // Once the game is decided, or for someone who is out, the whole map is shown.
   // An ally who is still in the game keeps the fog on for a fallen player.
   const teamAlive = roster.some((q) => q.team === teamOf(me) && players.get(q.slot)?.defeated === false);
-  revealAll = winner >= 0 || (p.defeated && !teamAlive);
+  revealAll = spectator || winner >= 0 || (!!p?.defeated && !teamAlive);
   // Allies share what they see.
-  sharedSight = new Set([me, ...controllable(), ...roster.filter((q) => q.team === teamOf(me)).map((q) => q.slot)]);
+  sharedSight = spectator ? new Set() : new Set([me, ...controllable(), ...roster.filter((q) => q.team === teamOf(me)).map((q) => q.slot)]);
   if (revealAll) {
     visible.fill(1);
     explored.fill(1);
@@ -921,12 +989,26 @@ function renderPlayers(): void {
     if (players.get(p.slot)?.defeated) label.style.textDecoration = 'line-through';
     el.append(chip, label);
   }
+  if (myOwnSlot < 0 && session) {
+    const you = document.createElement('b');
+    you.textContent = 'Spectating';
+    you.style.marginRight = '14px';
+    el.append(you);
+  }
+  if (watching.length) {
+    const w = document.createElement('span');
+    w.className = 'dim';
+    w.textContent = `${watching.length} watching`;
+    w.title = watching.join(', ');
+    el.append(w);
+  }
 }
 
 function onMessage(msg: ServerMessage): void {
   if (msg.t === 'lobby') {
     resetGame();
     roster = msg.players;
+    watching = msg.watching ?? [];
     renderRoom(msg.room, msg.you, msg.host, msg.settings);
     history.replaceState(null, '', `?room=${msg.room}`);
     $('lobby').style.display = 'none';
@@ -935,12 +1017,17 @@ function onMessage(msg: ServerMessage): void {
     // Back in the same game after a lost connection: everything on screen stays as it was
     // (what was explored, the chat, the view); the next snapshot brings it up to date.
     roster = msg.players;
+    watching = msg.watching ?? watching;
     renderPlayers();
   } else if (msg.t === 'start') {
     resetGame();
     gameSeed = msg.seed;
+    watching = msg.watching ?? [];
     play('start');
     me = myOwnSlot = msg.you;
+    // A spectator sees the whole map, and has no buttons of their own.
+    revealAll = msg.you < 0;
+    document.body.classList.toggle('spectating', msg.you < 0);
     map = generateMap(msg.seed, msg.size);
     popLimit = msg.popLimit;
     buildTerrain(map);
@@ -960,6 +1047,7 @@ function onMessage(msg: ServerMessage): void {
     $('host-tools').hidden = !session?.host;
     $('switch-btn').hidden = !roster.some((p) => p.test);
   } else if (msg.t === 'players') {
+    watching = msg.watching ?? watching;
     // Someone lost their connection, or is back.
     for (const p of msg.players) {
       const was = roster.find((q) => q.slot === p.slot);
@@ -1135,6 +1223,7 @@ function onMessage(msg: ServerMessage): void {
       if (to === me) play('age', 0);
     }
     takenOver.clear();
+    if (msg.stats) finalStats = msg.stats;
     if (msg.winner >= 0 && winner < 0 && msg.winner === teamOf(me)) play('victory');
     if (defeatChanged) renderPlayers();
     // The end: the last sounds above still play, then the game is silent and frozen.
@@ -1142,14 +1231,23 @@ function onMessage(msg: ServerMessage): void {
     winner = msg.winner;
     snapTime = now;
     if (!centred) {
-      const king = [...views.values()].find((v) => v.owner === me && v.kind === 'king');
+      // A spectator starts at the first player's town.
+      const king = [...views.values()].find((v) => (me < 0 || v.owner === me) && v.kind === 'king');
       if (king) {
         [cam.x, cam.y] = tileToWorld(king.x, king.y);
         centred = true;
       }
     }
   } else if (msg.t === 'chat') {
-    showChat(msg.from, msg.text);
+    showChat(msg.from, msg.text, msg.team, msg.name);
+  } else if (msg.t === 'signal') {
+    // An ally marked a spot: a pulsing flag there and on the minimap, and Space jumps to it.
+    signals.push({ x: msg.x, y: msg.y, from: msg.from, t: performance.now() });
+    lastSignal = { x: msg.x, y: msg.y, t: performance.now() };
+    if (msg.from !== myOwnSlot) {
+      showNotice(msg.from, 'marked a spot on the map (Space to look).');
+      play('chat', 0);
+    }
   } else if (msg.t === 'pause') {
     showPause(msg);
   } else if (msg.t === 'error') {
@@ -1157,11 +1255,12 @@ function onMessage(msg: ServerMessage): void {
   }
 }
 
-function showChat(from: number, text: string): void {
+function showChat(from: number, text: string, team = false, name?: string): void {
   const line = document.createElement('div');
   const who = document.createElement('b');
-  who.textContent = `${roster.find((p) => p.slot === from)?.name ?? 'Someone'}: `;
+  who.textContent = `${team ? '[Team] ' : ''}${from < 0 ? `${name ?? 'Spectator'} (watching)` : roster.find((p) => p.slot === from)?.name ?? 'Someone'}: `;
   who.style.color = PLAYER_COLORS[from] ?? '';
+  if (team) line.className = 'team';
   line.append(who, text);
   logLine(line);
   play('chat', 0);
@@ -1200,6 +1299,33 @@ function showPause(msg: Extract<ServerMessage, { t: 'pause' }>): void {
   $('pause-yes').textContent = asking ? 'Accept' : 'Continue';
   $('pause-yes').hidden = !mine;
   $('pause-no').hidden = !(mine && asking);
+}
+
+/** Chat to the team only, instead of everyone. */
+let teamChat = false;
+function chatPlaceholder(): void {
+  const box = $<HTMLInputElement>('chat-input');
+  box.placeholder = teamChat ? 'Message to your team · Tab: to everyone' : 'Message to everyone · Tab: to your team only';
+  box.classList.toggle('team', teamChat);
+}
+
+/** Spots allies marked on the map (Alt-click), shown for a few seconds. */
+let signals: { x: number; y: number; from: number; t: number }[] = [];
+let lastSignal: { x: number; y: number; t: number } | undefined;
+const SIGNAL_MS = 5000;
+function sendSignal(x: number, y: number): void {
+  if (!map || x < 0 || y < 0 || x >= map.size || y >= map.size) return;
+  session?.send({ t: 'signal', x, y });
+}
+
+/** The host vanished: this player now hosts the game from the last backup (or, if that failed, is a guest again). */
+function takeOver(next: Session, hosting: boolean): void {
+  session = next;
+  $('reconnect').hidden = true;
+  $('host-tools').hidden = !hosting;
+  showNotice(-1, hosting ? 'The host is gone: you are hosting the game now, carried on from a few seconds ago. The others are coming back in.'
+    : 'Could not take over the game: trying to reach the host again.');
+  if (!hosting) $('reconnect').hidden = false;
 }
 
 /** The banner while the connection to the host is being restored. */
@@ -1297,6 +1423,7 @@ function resetGame(): void {
   placing = undefined;
   winner = -1;
   gameSeed = -1;
+  finalStats = undefined;
   bands.clear();
   silence(false);
   announcedTakeover.clear();
@@ -1351,6 +1478,9 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
   $<HTMLInputElement>('room-link').value = `${location.origin}${location.pathname}?room=${room}`;
   const list = $('room-players');
   list.textContent = '';
+  const watchLine = $('room-watching');
+  watchLine.hidden = watching.length === 0;
+  watchLine.textContent = `Watching: ${watching.join(', ')}${you < 0 ? ' (you are watching)' : ''}`;
   for (const p of roster) {
     const li = document.createElement('li');
     const chip = document.createElement('span');
@@ -1490,6 +1620,7 @@ $('copy-link-btn').addEventListener('click', async () => {
 $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const hosting = (ev as SubmitEvent).submitter?.id === 'host-btn';
+  const watching = (ev as SubmitEvent).submitter?.id === 'watch-btn';
   const name = $<HTMLInputElement>('name').value;
   let code = normaliseCode($<HTMLInputElement>('room').value);
   if (!hosting && !code) {
@@ -1503,8 +1634,8 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   session = undefined;
   // Relay servers for strict networks, if there are any (a moment at most).
   await prepareNetwork();
-  const handlers = { onMessage, onClose: showLobby, onReconnect: showReconnect };
-  session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers);
+  const handlers = { onMessage, onClose: showLobby, onReconnect: showReconnect, onMigrate: takeOver };
+  session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers, watching);
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
 // How to connect, remembered in this browser.
@@ -1891,10 +2022,14 @@ function boxSelect(box: { x0: number; y0: number; x1: number; y1: number }): voi
 }
 
 canvas.addEventListener('mousedown', (ev) => {
-  if (me < 0) return;
+  if (!map) return;
   $('menu').hidden = true;
   const x = ev.clientX / zoom;
   const y = ev.clientY / zoom;
+  if (ev.altKey && ev.button === 0) {
+    const [tx, ty] = screenToTile(x, y);
+    return sendSignal(tx, ty);
+  }
   if (ev.button === 2) {
     if (placing) placing = wallStart = undefined;
     // On open ground with troops selected, holding the button and dragging turns the formation
@@ -1971,7 +2106,7 @@ function tap(x: number, y: number): void {
 
 canvas.addEventListener('touchstart', (ev) => {
   ev.preventDefault();
-  if (me < 0) return;
+  if (!map) return;
   unlockSound();
   $('touch-tools').hidden = false;
   $('menu').hidden = true;
@@ -2002,7 +2137,7 @@ canvas.addEventListener('touchstart', (ev) => {
 
 canvas.addEventListener('touchmove', (ev) => {
   ev.preventDefault();
-  if (me < 0) return;
+  if (!map) return;
   if (ev.touches.length >= 2 && finger.pinch) {
     const [a, b] = [ev.touches[0], ev.touches[1]];
     setZoom((finger.pinch.zoom * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)) / finger.pinch.d);
@@ -2026,7 +2161,7 @@ canvas.addEventListener('touchmove', (ev) => {
 canvas.addEventListener('touchend', (ev) => {
   ev.preventDefault();
   clearTimeout(finger.hold);
-  if (me < 0 || ev.touches.length > 0) return;
+  if (!map || ev.touches.length > 0) return;
   const { x, y } = finger;
   if (finger.pinch) finger.pinch = undefined;
   else if (wallStart && placing === 'wall') finishWall(false);
@@ -2079,27 +2214,47 @@ window.addEventListener('keydown', (ev) => {
   if ((ev.target as HTMLElement).tagName === 'INPUT') return;
   const key = ev.key.toLowerCase();
   keys.add(key);
+  // A letter presses the command button marked with it (with Shift, as a Shift-click).
+  if (prefs.hotkeys && !ev.ctrlKey && !ev.metaKey && !ev.altKey && me >= 0) {
+    const index = HOTKEYS.indexOf(ev.key.toUpperCase());
+    const button = index >= 0 ? ($('actions').children[index] as HTMLButtonElement | undefined) : undefined;
+    if (button) {
+      ev.preventDefault();
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: ev.shiftKey }));
+      return;
+    }
+    if (index >= 0) return;
+  }
   if (key === 'escape') {
     placing = wallStart = undefined;
     $('help').hidden = true;
   }
-  if (key === 'enter' && me >= 0) {
+  if (key === 'enter' && session && $('top').hidden === false) {
     ev.preventDefault();
     openChat();
     return;
   }
   if (key === ',') selectIdleSoldiers();
   if (key === 'h') $('help').hidden = !$('help').hidden;
-  if (key === 'f') toggleFullscreen();
+  if (key === 'f11' || (!prefs.hotkeys && key === 'f')) {
+    ev.preventDefault();
+    toggleFullscreen();
+  }
+  if (key === 'f1') {
+    ev.preventDefault();
+    $('help').hidden = !$('help').hidden;
+  }
   if (key === 'm') switchEffects();
-  if (key === 'x') send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
-  if (key === 't') copyLastJob();
+  if (!prefs.hotkeys && key === 'x') send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
+  if (key === 'j' || (!prefs.hotkeys && key === 't')) copyLastJob();
   if (key === 'delete' || key === 'backspace') {
     for (const id of selected) if (views.get(id)?.owner === me) send({ type: 'delete', id });
   }
-  if (key === ' ' && alert) {
+  if (key === ' ' && (alert || lastSignal)) {
     ev.preventDefault();
-    [cam.x, cam.y] = tileToWorld(alert.x, alert.y);
+    // The latest of the last attack on you and the last spot an ally marked.
+    const to = !alert || (lastSignal && lastSignal.t > alert.t) ? lastSignal! : alert;
+    [cam.x, cam.y] = tileToWorld(to.x, to.y);
   }
   if (/^Digit[1-9]$/.test(ev.code)) {
     // Shift+number stores the selection as a group, the number alone recalls it.
@@ -2238,7 +2393,13 @@ $('resign-btn').addEventListener('click', () => {
 // The chat box: Enter sends, Esc closes. Keys typed here never reach the game.
 $('chat-input').addEventListener('keydown', (ev) => {
   const box = ev.target as HTMLInputElement;
-  if (ev.key === 'Enter' && box.value.trim()) session?.send({ t: 'chat', text: box.value });
+  if (ev.key === 'Enter' && box.value.trim()) session?.send({ t: 'chat', text: box.value, team: teamChat || undefined });
+  // Tab switches between everyone and the team.
+  if (ev.key === 'Tab') {
+    ev.preventDefault();
+    teamChat = !teamChat;
+    chatPlaceholder();
+  }
   if (ev.key === 'Enter' || ev.key === 'Escape') closeChat();
   ev.stopPropagation();
 });
@@ -2247,12 +2408,35 @@ $('chat-input').addEventListener('blur', () => {
   if (document.body.classList.contains('chatting')) closeChat();
 });
 $('chat-log').addEventListener('mousedown', (ev) => ev.preventDefault());
+for (const [id, key] of [['set-hotkeys', 'hotkeys'], ['set-edge', 'edge'], ['set-colorblind', 'colorblind'], ['set-hints', 'hints']] as const) {
+  $<HTMLInputElement>(id).addEventListener('change', (ev) => {
+    prefs[key] = (ev.target as HTMLInputElement).checked;
+    savePrefs();
+    applyPrefs();
+  });
+}
+for (const [id, key] of [['set-scroll', 'scroll'], ['set-ui', 'ui']] as const) {
+  $<HTMLInputElement>(id).addEventListener('input', (ev) => {
+    prefs[key] = Number((ev.target as HTMLInputElement).value);
+    $(`${id}-v`).textContent = `${Math.round(prefs[key] * 100)}%`;
+    savePrefs();
+    if (key === 'ui') applyPrefs();
+  });
+}
+$('hint-ok').addEventListener('click', () => learn($('hint').dataset.id ?? ''));
+$('hint-off').addEventListener('click', () => {
+  prefs.hints = false;
+  savePrefs();
+});
+$('settings-btn').addEventListener('click', openSettings);
+$('lobby-settings-btn').addEventListener('click', openSettings);
+$('settings-close').addEventListener('click', () => ($('settings').hidden = true));
 $('reconnect-leave').addEventListener('click', () => {
   if (confirm('Leave the game? Your side stays in it, and you can join again later with the same room code.')) session?.close();
 });
 $('chat-log').addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
-for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
+for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown'); $<HTMLImageElement>('hint-icon').src = icon('crown');
 installMenuArt();
 
 // Browsers only allow sound after the player has clicked or pressed a key.
@@ -2281,6 +2465,7 @@ $('actions').addEventListener('click', (ev) => {
   if (!button.dataset.train) play('click', 60);
   const { build, train, cancel, eject, sell, buy, stance, bell, back, formation, only, band } = button.dataset;
   if (band === 'form') formBand();
+  if (button.dataset.halt) send({ type: 'stop', ids: ownSelectedUnits().map((v) => v.id) });
   if (band === 'disband') disbandSelected();
   if (formation) send({ type: 'formation', ids: ownSelectedUnits().map((v) => v.id), formation: formation as Formation });
   if (only) {
@@ -2324,8 +2509,9 @@ function minimapTile(ev: MouseEvent): [number, number] {
 
 let minimapDrag = false;
 minimap.addEventListener('mousedown', (ev) => {
-  if (!map || me < 0) return;
+  if (!map) return;
   const [tx, ty] = minimapTile(ev);
+  if (ev.altKey && ev.button === 0) return sendSignal(tx, ty);
   if (ev.button === 2) {
     // Right-click sends the selected units there (Ctrl: attack-move), or sets a building's gathering point.
     if (tx < 0 || ty < 0 || tx >= map.size || ty >= map.size) return;
@@ -2626,6 +2812,12 @@ function renderPanel(): void {
     }
   }
 
+  // Stop: everyone selected drops what they are doing.
+  if (!placing && mine.some((v) => !isBuilding(v.kind))) {
+    buttons.push({ label: 'Stop', icon: 'cancel', data: { halt: '1' },
+      detail: { title: 'Stop', icon: 'cancel', stats: [], lines: ['The selected units stop whatever they are doing and stand where they are.'] } });
+  }
+
   // Groups: bind the selection together, or break up the groups in it.
   const units = mine.filter((v) => !isBuilding(v.kind));
   if (!placing && units.length >= 1) {
@@ -2677,7 +2869,7 @@ function renderPanel(): void {
   lastButtons = buttonSignature;
   renderButtons(buttons);
   // The panel may have grown; things floating above it follow.
-  document.documentElement.style.setProperty('--bottom-h', `${$('bottom').offsetHeight}px`);
+  document.documentElement.style.setProperty('--bottom-h', `${$('bottom').getBoundingClientRect().height}px`);
 }
 
 function costChips(cost: Cost, sign = ''): HTMLElement[] {
@@ -2786,7 +2978,9 @@ function renderButtons(buttons: PanelButton[]): void {
       label.className = 'lbl';
       const last = document.createElement('span');
       last.className = 'cost';
-      el.append(img, label, last);
+      const hk = document.createElement('span');
+      hk.className = 'hk';
+      el.append(img, label, last, hk);
       actions.append(el);
     }
   }
@@ -2808,6 +3002,8 @@ function renderButtons(buttons: PanelButton[]): void {
     // Why pressing it does nothing, said when it is pressed anyway.
     el.dataset.why = b.locked ? b.detail.warn ?? (b.short ? `Needs the ${b.short} Age.` : 'Not available yet.') : poor ? missing(b.cost!) : '';
     el.classList.toggle('focus', el.dataset.key === focusKey);
+    const hk = el.querySelector('.hk') as HTMLElement;
+    hk.textContent = prefs.hotkeys ? HOTKEYS[i] ?? '' : '';
   });
 }
 
@@ -2884,6 +3080,82 @@ $('group').addEventListener('click', (ev) => {
 });
 
 let hudSignature = '';
+/**
+ * Hints for new players: the first one that fits the moment is shown, and each goes for good once
+ * the player has done what it says (or pressed "Got it"). Kept in this browser.
+ */
+interface Hint {
+  id: string;
+  text: string;
+  /** It fits now. */
+  when: () => boolean;
+  /** The player has done it: never shown again. */
+  done?: () => boolean;
+}
+const learned = new Set<string>((() => {
+  try {
+    return JSON.parse(localStorage.getItem('kingsfall.learned') ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+})());
+function learn(id: string): void {
+  if (learned.has(id)) return;
+  learned.add(id);
+  try {
+    localStorage.setItem('kingsfall.learned', JSON.stringify([...learned]));
+  } catch {
+    // Shown again next time.
+  }
+}
+const mineOf = (kind: Kind) => [...views.values()].filter((v) => v.owner === me && v.kind === kind);
+const minutes = () => gameTick / (60 * 1000 / TICK_MS);
+const HINTS: Hint[] = [
+  { id: 'select', text: 'Click one of your villagers to select it, or drag a box around several. Press <b>.</b> to jump to an idle one.',
+    when: () => true, done: () => ownSelectedUnits().some((v) => v.kind === 'villager') },
+  { id: 'gather', text: 'With villagers selected, <b>right-click</b> a tree, berry bush or gold mine to gather from it.',
+    when: () => ownSelectedUnits().some((v) => v.kind === 'villager' && v.act === 0), done: () => mineOf('villager').filter((v) => v.act === 2).length >= 3 },
+  { id: 'train', text: 'More villagers, more of everything: click your <b>Town Centre</b> and press <b>W</b> (or the Villager button) to train one.',
+    when: () => minutes() > 0.3 && !mineOf('towncenter').some((tc) => queues.has(tc.id)), done: () => mineOf('villager').length >= 6 },
+  { id: 'house', text: 'Your population is nearly full. Select a villager, press <b>Q</b> for a house and click where it goes.',
+    when: () => { const p = players.get(me); return !!p && p.pop >= p.cap - 1 && p.cap < popLimit; }, done: () => mineOf('house').some((h) => h.extra >= 100) },
+  { id: 'camp', text: 'Villagers walk far with their wood. A <b>lumber camp</b> next to the forest saves them the trip.',
+    when: () => minutes() > 2 && mineOf('lumbercamp').length === 0, done: () => mineOf('lumbercamp').length > 0 },
+  { id: 'army', text: 'Build <b>barracks</b> and train soldiers: the enemy will come. Spearmen beat riders, archers beat soldiers on foot.',
+    when: () => minutes() > 5 && mineOf('barracks').length === 0, done: () => mineOf('barracks').length > 0 },
+  { id: 'age', text: 'Advance to the <b>Town Age</b> at your Town Centre for new buildings, troops and upgrades.',
+    when: () => minutes() > 8 && (players.get(me)?.age ?? 1) === 1, done: () => (players.get(me)?.age ?? 1) >= 2 },
+  { id: 'defend', text: 'You are under attack! Press <b>Space</b> to look. With the Town Centre selected, <b>Ring the bell</b> shelters your villagers.',
+    when: () => !!alert && performance.now() - alert.t < 8000 },
+];
+let hintShown = '';
+let hintCheck = 0;
+function updateHints(now: number): void {
+  if (now - hintCheck < 500) return;
+  hintCheck = now;
+  const box = $('hint');
+  let hint: Hint | undefined;
+  if (prefs.hints && me >= 0 && me === myOwnSlot && winner < 0) {
+    for (const h of HINTS) {
+      if (learned.has(h.id)) continue;
+      if (h.done?.()) {
+        learn(h.id);
+        continue;
+      }
+      if (h.when()) {
+        hint = h;
+        break;
+      }
+    }
+  }
+  box.hidden = !hint;
+  if (hint && hint.id !== hintShown) {
+    $('hint-text').innerHTML = hint.text;
+    box.dataset.id = hint.id;
+  }
+  hintShown = hint?.id ?? '';
+}
+
 function renderHud(): void {
   const p = players.get(me);
   if (!p) return;
@@ -2951,7 +3223,84 @@ function showEnd(won: boolean): void {
   $('rematch-btn').hidden = !host;
   $('newgame-btn').hidden = !host;
   $('end-wait').hidden = host;
+  renderScore();
   $('end').hidden = false;
+}
+
+/** The score screen: a line per player, and how villagers and armies grew over the game. */
+function renderScore(): void {
+  const box = $('score');
+  box.textContent = '';
+  box.hidden = !finalStats?.length;
+  if (!finalStats?.length) return;
+  const rows = finalStats.filter(([slot]) => roster.some((p) => p.slot === slot));
+  const sum = (r: Record<string, number>) => Object.values(r).reduce((a, b) => a + b, 0);
+  const table = document.createElement('table');
+  const head = ['', 'Gathered', 'Trained', 'Killed', 'Lost', 'Built', 'Razed', 'Upgrades'];
+  table.innerHTML = `<tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+  const best = (f: (s: PlayerStats) => number) => Math.max(...rows.map(([, st]) => f(st)));
+  const cols: ((s: PlayerStats) => number)[] = [(st) => sum(st.gathered), (st) => st.trained, (st) => st.kills, (st) => st.lost, (st) => st.built, (st) => st.razed, (st) => st.researched];
+  for (const [slot, st] of rows) {
+    const p = roster.find((q) => q.slot === slot)!;
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    name.className = 'who';
+    name.textContent = p.name + (p.slot === myOwnSlot ? ' (you)' : '');
+    name.style.color = PLAYER_COLORS[slot] ?? '';
+    if (winner >= 0 && p.team === winner) name.textContent += ' ♛';
+    tr.append(name);
+    cols.forEach((f, i) => {
+      const td = document.createElement('td');
+      td.textContent = String(f(st));
+      // The best in each column stands out (the fewest losses, for the lost column).
+      const top = i === 3 ? Math.min(...rows.map(([, q]) => f(q))) === f(st) : best(f) === f(st) && f(st) > 0;
+      if (top && rows.length > 1) td.className = 'top';
+      if (i === 0) td.title = RESOURCES.map((r) => `${r} ${st.gathered[r]}`).join(' · ');
+      tr.append(td);
+    });
+    table.append(tr);
+  }
+  // The army of each player over time.
+  const chart = document.createElement('canvas');
+  chart.width = 560;
+  chart.height = 150;
+  const c = chart.getContext('2d')!;
+  const longest = Math.max(1, ...rows.map(([, st]) => st.timeline.length));
+  const most = Math.max(5, ...rows.flatMap(([, st]) => st.timeline.map(([v, a]) => Math.max(v, a))));
+  c.strokeStyle = 'rgba(232,194,90,.25)';
+  c.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = 10 + (i / 4) * 120;
+    c.beginPath();
+    c.moveTo(30, y);
+    c.lineTo(550, y);
+    c.stroke();
+  }
+  c.fillStyle = '#a6b89f';
+  c.font = '11px sans-serif';
+  c.fillText(String(most), 2, 14);
+  c.fillText('0', 18, 134);
+  c.fillText(`${Math.round((longest * 30) / 60)} min`, 510, 146);
+  for (const [slot, st] of rows) {
+    for (const [which, dash] of [[1, []], [0, [4, 4]]] as const) {
+      c.strokeStyle = PLAYER_COLORS[slot] ?? '#fff';
+      c.lineWidth = which ? 2.5 : 1.5;
+      c.setLineDash([...dash]);
+      c.beginPath();
+      st.timeline.forEach((point, i) => {
+        const x = 30 + (i / Math.max(1, longest - 1)) * 520;
+        const y = 130 - (point[which] / most) * 120;
+        if (i === 0) c.moveTo(x, y);
+        else c.lineTo(x, y);
+      });
+      c.stroke();
+    }
+  }
+  c.setLineDash([]);
+  const caption = document.createElement('p');
+  caption.className = 'dim';
+  caption.textContent = 'Army (solid) and villagers (dashed) over the game';
+  box.append(table, chart, caption);
 }
 
 let minimapTime = 0;
@@ -3018,6 +3367,16 @@ function renderMinimap(): void {
       mctx.strokeRect(minimapPing.x - 1 - k * 3, minimapPing.y - 1 - k * 3, 2 + k * 6, 2 + k * 6);
     }
   }
+  signals = signals.filter((sg) => t - sg.t < SIGNAL_MS);
+  for (const sg of signals) {
+    // A spot an ally marked: rings in their colour, pulsing out.
+    const k = ((t - sg.t) % 900) / 900;
+    mctx.strokeStyle = PLAYER_COLORS[sg.from] ?? '#fff';
+    mctx.lineWidth = 2;
+    mctx.strokeRect(sg.x - 2 - k * 6, sg.y - 2 - k * 6, 4 + k * 12, 4 + k * 12);
+    mctx.fillStyle = '#fff';
+    mctx.fillRect(sg.x - 1, sg.y - 1, 2, 2);
+  }
   if (alert && performance.now() - alert.t < 6000) {
     // A pulsing ring where the player was attacked.
     const k = ((performance.now() - alert.t) % 1000) / 1000;
@@ -3040,14 +3399,16 @@ function updateCamera(dt: number): void {
   // The view scrolls while the cursor rests near an edge of the window, faster the closer it is.
   const zone = 44;
   const push = (distance: number) => (mouse.inside && !mouse.onButton && distance < zone ? 0.35 + 0.65 * (1 - Math.max(0, distance) / zone) : 0);
-  let dx = push(viewW() - mouse.x) - push(mouse.x);
-  let dy = push(viewH() - mouse.y) - push(mouse.y);
-  if (keys.has('a') || keys.has('arrowleft')) dx = -1;
-  if (keys.has('d') || keys.has('arrowright')) dx = 1;
-  if (keys.has('w') || keys.has('arrowup')) dy = -1;
-  if (keys.has('s') || keys.has('arrowdown')) dy = 1;
-  cam.x += dx * 1000 * dt;
-  cam.y += dy * 1000 * dt;
+  let dx = prefs.edge ? push(viewW() - mouse.x) - push(mouse.x) : 0;
+  let dy = prefs.edge ? push(viewH() - mouse.y) - push(mouse.y) : 0;
+  // Arrow keys; with the letter hotkeys turned off, WASD too.
+  const wasd = !prefs.hotkeys;
+  if ((wasd && keys.has('a')) || keys.has('arrowleft')) dx = -1;
+  if ((wasd && keys.has('d')) || keys.has('arrowright')) dx = 1;
+  if ((wasd && keys.has('w')) || keys.has('arrowup')) dy = -1;
+  if ((wasd && keys.has('s')) || keys.has('arrowdown')) dy = 1;
+  cam.x += dx * 1000 * prefs.scroll * dt;
+  cam.y += dy * 1000 * prefs.scroll * dt;
   clampCamera();
 }
 
@@ -3326,9 +3687,9 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
   ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
   // Beyond the mist around the map: more of the same dark mist.
-  ctx.fillStyle = me < 0 ? '#0b0e0a' : MIST_COLOR;
+  ctx.fillStyle = !map ? '#0b0e0a' : MIST_COLOR;
   ctx.fillRect(0, 0, viewW(), viewH());
-  if (me < 0) return drawLobbyScene(now);
+  if (!map) return drawLobbyScene(now);
   if (!map) return;
   updateCamera(dt);
   if (explored.length !== map.size * map.size) explored = new Uint8Array(map.size * map.size);
@@ -3374,6 +3735,32 @@ function frame(now: number): void {
   }
 
   drawFormationPreview();
+  // Spots allies marked: a flag on the ground with rings spreading out.
+  for (const sg of signals) {
+    const age = now - sg.t;
+    if (age > SIGNAL_MS) continue;
+    const [px, py] = tileToScreen(sg.x, sg.y);
+    const color = PLAYER_COLORS[sg.from] ?? '#fff';
+    for (let r = 0; r < 2; r++) {
+      const k = ((age + r * 450) % 900) / 900;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 1 - k;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(px, py, 8 + k * 30, 4 + k * 15, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#2a2018';
+    ctx.fillRect(Math.round(px) - 1, Math.round(py) - 26, 2, 26);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(px + 1, py - 26);
+    ctx.lineTo(px + 15, py - 21);
+    ctx.lineTo(px + 1, py - 16);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // Resource tiles are outlined when pointed at, and flash when villagers are sent there.
   const outline = (tile: number, color: string, width: number) => {
@@ -3587,6 +3974,7 @@ function frame(now: number): void {
 
   renderPanel();
   renderHud();
+  updateHints(performance.now());
   renderIdle();
   renderMinimap();
 }
@@ -3602,3 +3990,6 @@ requestAnimationFrame(frame);
 if (import.meta.env.DEV) {
   Object.assign(window, { __spawn: spawn, __game: { breeze, play, effectsState, setZoom: (z: number) => setZoom(z), getZoom: () => zoom, getFog: () => ({ visible, explored }), views, players, props, queues, cam, selected, tileToScreen, getMap: () => map, getMe: () => me, getSession: () => session } });
 }
+
+// Preferences that change how things look, from the start.
+applyPrefs();

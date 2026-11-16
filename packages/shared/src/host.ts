@@ -9,6 +9,25 @@ import { activityOf, FORMATIONS, countInside, hasKingInside, taskOf, addPlayer, 
  * whoever hosts (currently one player's browser) feeds it joins and commands
  * and forwards the messages it returns.
  */
+/** A byte array as [value, how many, value, how many, ...]: short for the mostly empty building marks. */
+function runs(a: Uint8Array): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < a.length; ) {
+    let j = i;
+    while (j < a.length && a[j] === a[i]) j++;
+    out.push(a[i], j - i);
+    i = j;
+  }
+  return out;
+}
+function unruns(r: number[], into: Uint8Array): void {
+  let at = 0;
+  for (let k = 0; k < r.length; k += 2) {
+    into.fill(r[k], at, at + r[k + 1]);
+    at += r[k + 1];
+  }
+}
+
 export class GameHost {
   /** The running game, or undefined while the room waits in the lobby. */
   state: GameState | undefined;
@@ -24,7 +43,7 @@ export class GameHost {
   constructor(readonly room: string) {}
 
   /** Each guest's key for the room (see ClientMessage join), so they can come back after losing their connection. */
-  private tokens = new Map<string, number>();
+  tokens = new Map<string, number>();
 
   /** The people who have to agree: everyone but computer and stand-in opponents, and those who are away. */
   private voters(): number[] {
@@ -164,16 +183,64 @@ export class GameHost {
     if (this.state && this.pause?.phase !== 'paused' && this.players.has(slot) && cmd && typeof cmd === 'object') applyCommand(this.state, slot, cmd);
   }
 
+  /**
+   * The whole game as text, for the players who would take over if the host vanished (see fromBackup).
+   * Map tiles are sent as their changes from the generated map; building marks are run-length coded.
+   */
+  backup(): string | undefined {
+    const s = this.state;
+    if (!s) return undefined;
+    const start = generateMap(s.seed, s.map.size);
+    const tiles: [number, number, number][] = [];
+    for (let i = 0; i < s.map.tiles.length; i++) {
+      if (s.map.tiles[i] !== start.tiles[i] || s.map.amount[i] !== start.amount[i]) tiles.push([i, s.map.tiles[i], s.map.amount[i]]);
+    }
+    const { map, tileEvents, amountEvents, shots, hits, deaths, blessings, occupied, changedTiles, ...rest } = s;
+    void tileEvents; void amountEvents; void shots; void hits; void deaths; void blessings; void occupied;
+    const data = {
+      v: 1, room: this.room, settings: this.settings, players: [...this.players.values()], tokens: [...this.tokens],
+      state: rest, changed: [...changedTiles],
+      map: { size: map.size, version: map.version, tiles, blocked: runs(map.blocked), footprint: runs(map.footprint), gate: runs(map.gate) },
+    };
+    return JSON.stringify(data, (_, v) => (v instanceof Map ? { $map: [...v] } : v instanceof Set ? { $set: [...v] } : v));
+  }
+
+  /** A host for the game in a backup: to carry on where it was. */
+  static fromBackup(text: string): GameHost {
+    const data = JSON.parse(text, (_, v) => (v && typeof v === 'object' && '$map' in v ? new Map(v.$map) : v && typeof v === 'object' && '$set' in v ? new Set(v.$set) : v));
+    const host = new GameHost(data.room);
+    Object.assign(host.settings, data.settings);
+    for (const p of data.players as PlayerInfo[]) host.players.set(p.slot, p);
+    host.tokens = new Map(data.tokens);
+    const map = generateMap(data.state.seed, data.map.size);
+    for (const [i, tile, amount] of data.map.tiles as [number, number, number][]) {
+      map.tiles[i] = tile;
+      map.amount[i] = amount;
+    }
+    unruns(data.map.blocked, map.blocked);
+    unruns(data.map.footprint, map.footprint);
+    unruns(data.map.gate, map.gate);
+    map.version = data.map.version + 1;
+    host.state = {
+      ...data.state, map, changedTiles: new Map(data.changed), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], blessings: [], occupied: new Map(),
+    } as GameState;
+    return host;
+  }
+
+  /** The names of those watching (spectators take no part in the game itself). */
+  watching: string[] = [];
+
   lobbyMessage(you: number, host: number): ServerMessage {
-    return { t: 'lobby', you, host, room: this.room, players: [...this.players.values()], settings: { ...this.settings } };
+    return { t: 'lobby', you, host, room: this.room, players: [...this.players.values()], settings: { ...this.settings }, watching: [...this.watching] };
   }
 
   startMessage(you: number): ServerMessage {
-    return { t: 'start', you, room: this.room, seed: this.state!.seed, size: this.state!.map.size, popLimit: this.state!.popLimit, players: [...this.players.values()] };
+    return { t: 'start', you, room: this.room, seed: this.state!.seed, size: this.state!.map.size, popLimit: this.state!.popLimit, players: [...this.players.values()],
+      watching: [...this.watching] };
   }
 
   playersMessage(): ServerMessage {
-    return { t: 'players', players: [...this.players.values()] };
+    return { t: 'players', players: [...this.players.values()], watching: [...this.watching] };
   }
 
   /** Advances the game one tick and returns the snapshot to send to everyone (nothing while in the lobby). */
@@ -241,7 +308,7 @@ export class GameHost {
       ]),
       blessings: s.blessings,
       relics: s.relics.map((r) => [round(r.x), round(r.y), r.carrier, r.monastery, r.foundBy]),
-      tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths, rallies, winner: s.winner,
+      tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths, rallies, winner: s.winner, stats: s.winner >= 0 ? [...s.players.values()].map((p) => [p.slot, p.stats] as [number, typeof p.stats]) : undefined,
     };
   }
 }

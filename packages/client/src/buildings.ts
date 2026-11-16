@@ -1120,7 +1120,7 @@ function designFor(kind: Kind, age = 2): Design {
 
 /** Preview: draws one building as it looks in an age, with shadow and textures, at (sx, sy). */
 export function drawBuildingAge(ctx: Ctx, kind: Kind, age: number, owner: number, sx: number, sy: number): void {
-  const team = PLAYER_COLORS[owner % PLAYER_COLORS.length];
+  const team = PLAYER_COLORS[Math.max(0, owner) % PLAYER_COLORS.length];
   const design = designFor(kind, age);
   const state: BuildingState = { built: 1, kingInside: false, now: -1 };
   const shadowPen = new Pen(ctx, sx, sy, true);
@@ -1237,7 +1237,7 @@ function drawFarm(pen: Pen, team: string, state: BuildingState, seed: number): v
 
 /** Draws a building whose footprint's top corner is at (sx, sy) on screen. */
 export function drawBuilding(ctx: Ctx, kind: Kind, owner: number, seed: number, sx: number, sy: number, state: BuildingState): void {
-  const team = PLAYER_COLORS[owner % PLAYER_COLORS.length];
+  const team = PLAYER_COLORS[Math.max(0, owner) % PLAYER_COLORS.length];
   const s = DEFS[kind].size ?? 1;
   // A sprite pack may provide this building; its anchor sits on the centre of the footprint.
   const done = state.built >= 1;

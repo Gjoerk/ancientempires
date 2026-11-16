@@ -117,7 +117,28 @@ export interface PlayerState {
   researching: Set<TechId>;
   /** Gathering speed (a hard computer opponent's bonus); 1 when unset. */
   gather?: number;
+  /** What happened over the game, for the score screen. */
+  stats: PlayerStats;
 }
+
+export interface PlayerStats {
+  gathered: Record<Res, number>;
+  trained: number;
+  /** Enemy units killed, and enemy buildings destroyed. */
+  kills: number;
+  razed: number;
+  /** Own units lost, and own buildings lost. */
+  lost: number;
+  fallen: number;
+  built: number;
+  researched: number;
+  /** Every 30 s: [villagers, army]. */
+  timeline: [number, number][];
+}
+
+const newStats = (): PlayerStats => ({ gathered: { food: 0, wood: 0, gold: 0, stone: 0 }, trained: 0, kills: 0, razed: 0, lost: 0, fallen: 0, built: 0, researched: 0, timeline: [] });
+/** How often the score screen's timeline is sampled. */
+export const TIMELINE_TICKS = 30 * TICK_RATE;
 
 export interface GameState {
   tick: number;
@@ -293,7 +314,7 @@ export function hasKingInside(state: GameState, b: Entity): boolean {
 export function addPlayer(state: GameState, slot: number, team = slot, quick = false): void {
   state.players.set(slot, {
     slot, team, res: { ...(quick ? QUICK_RESOURCES : START_RESOURCES) }, pop: 0, cap: 0, defeated: false,
-    age: 1, techs: new Set(), researching: new Set(),
+    age: 1, techs: new Set(), researching: new Set(), stats: newStats(),
   });
   const [sx, sy] = state.map.starts[slot];
   spawn(state, slot, 'towncenter', sx - 4, sy - 2);
@@ -1341,6 +1362,34 @@ function nearestEnemyBuilding(state: GameState, e: Entity, x: number, y: number,
   return best;
 }
 
+/** The score screen's timeline: villagers and army of everyone, every 30 s and once more at the end. */
+function sampleTimeline(state: GameState, due: boolean): void {
+  if (!due) return;
+  for (const p of state.players.values()) {
+    let villagers = 0;
+    let army = 0;
+    for (const e of state.entities.values()) {
+      if (e.owner !== p.slot || isBuilding(e)) continue;
+      if (e.kind === 'villager') villagers++;
+      else if (e.kind !== 'king') army++;
+    }
+    p.stats.timeline.push([villagers, army]);
+  }
+}
+
+/** For the score screen: one more enemy killed or building destroyed by `by`'s side, one more lost by the other. */
+function countKill(state: GameState, by: Entity, victim: Entity): void {
+  const winner = state.players.get(by.owner)?.stats;
+  const loser = state.players.get(victim.owner)?.stats;
+  if (isBuilding(victim)) {
+    if (winner) winner.razed++;
+    if (loser) loser.fallen++;
+  } else {
+    if (winner) winner.kills++;
+    if (loser) loser.lost++;
+  }
+}
+
 const SPLASH_SHARE = 0.75;
 
 function strike(state: GameState, e: Entity, target: Entity): void {
@@ -1360,12 +1409,14 @@ function strike(state: GameState, e: Entity, target: Entity): void {
       other.hp -= Math.max(1, Math.round((attackOf(e.kind, has) + relicBonus(state, e)) * SPLASH_SHARE) - armorOf(other.kind, hasTech(state, other.owner)));
       if (other.hp <= 0) {
         if (other.kind === 'king') state.slayers.set(other.owner, e.owner);
+        countKill(state, e, other);
         kill(state, other);
       }
     }
   }
   if (target.hp <= 0) {
     if (target.kind === 'king') state.slayers.set(target.owner, e.owner);
+    countKill(state, e, target);
     return kill(state, target);
   }
   if (!isBuilding(target) && !isBuilding(e)) fightBack(state, target, e);
@@ -1444,7 +1495,9 @@ function stepGather(state: GameState, e: Entity, o: Extract<Order, { t: 'gather'
     }
     if (e.path.length > 0) return;
     if (isAdjacent(e, rectOf(drop))) {
-      state.players.get(e.owner)!.res[e.carryRes] += e.carry;
+      const owner = state.players.get(e.owner)!;
+      owner.res[e.carryRes] += e.carry;
+      owner.stats.gathered[e.carryRes] += e.carry;
       e.carry = 0;
       if (o.tile < 0 && o.farm < 0) e.order = { t: 'idle' };
       else o.phase = 'go';
@@ -1576,6 +1629,10 @@ function stepBuild(state: GameState, e: Entity, o: Extract<Order, { t: 'build' }
   else {
     site.progress = Math.min(1, site.progress + perTick);
     site.hp = Math.min(def.hp, site.hp + def.hp * perTick);
+    if (site.progress >= 1) {
+      const p = state.players.get(site.owner);
+      if (p) p.stats.built++;
+    }
   }
 }
 
@@ -1962,6 +2019,7 @@ function stepTraining(state: GameState, b: Entity): void {
     player.researching.delete(item);
     if (item === 'age2' || item === 'age3') player.age = Math.max(player.age, item === 'age2' ? 2 : 3);
     player.techs.add(item);
+    player.stats.researched++;
     // Units already in the field get the extra health at once.
     const boost = TECHS[item].boost;
     if (boost?.hp) {
@@ -1974,6 +2032,8 @@ function stepTraining(state: GameState, b: Entity): void {
     const [spot] = freeTilesNear(state.map, b.x + Math.floor(s / 2), b.y + s, 1);
     if (!spot) return;
     const unit = spawn(state, b.owner, item as Kind, spot[0], spot[1]);
+    const trainer = state.players.get(b.owner);
+    if (trainer && unit) trainer.stats.trained++;
     player.pop++;
     if (b.rally) {
       const tile = b.rally[1] * state.map.size + b.rally[0];
@@ -2117,6 +2177,8 @@ export function step(state: GameState): void {
     else if (e.kind !== 'king') p.pop++;
   }
   for (const p of state.players.values()) p.cap = Math.min(state.popLimit, p.cap);
+  sampleTimeline(state, state.tick % TIMELINE_TICKS === 0);
+
 
   for (const e of [...state.entities.values()]) {
     if (!state.entities.has(e.id) || e.inside >= 0) continue;
@@ -2192,7 +2254,10 @@ export function step(state: GameState): void {
   for (const p of fallen) p.defeated = true;
   if (state.contested && state.winner < 0) {
     const alive = new Set([...state.players.values()].filter((p) => !p.defeated).map((p) => p.team));
-    if (alive.size === 1) state.winner = [...alive][0];
+    if (alive.size === 1) {
+      state.winner = [...alive][0];
+      sampleTimeline(state, true);
+    }
   }
   // Mid-game a fallen player's troops are gone and their buildings go to whoever killed the king.
   // At the end everything is left standing for everyone to look at.

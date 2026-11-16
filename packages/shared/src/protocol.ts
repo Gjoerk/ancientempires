@@ -1,5 +1,5 @@
 import type { MapSizeName } from './map';
-import type { Command } from './sim';
+import type { Command, PlayerStats } from './sim';
 
 export interface PlayerInfo {
   slot: number;
@@ -45,9 +45,12 @@ export type QueueSnapshot = number[];
 /** Sent by a player to the host. */
 export type ClientMessage =
   /** `token` is the guest's own random key for the room: with it, someone who lost their connection gets their place back. */
-  | { t: 'join'; name: string; token?: string }
+  | { t: 'join'; name: string; token?: string; watch?: boolean }
   | { t: 'cmd'; cmd: Command }
-  | { t: 'chat'; text: string }
+  /** `team`: only for the sender's allies. */
+  | { t: 'chat'; text: string; team?: boolean }
+  /** Marks a spot on the map for the sender's allies. */
+  | { t: 'signal'; x: number; y: number }
   /** A player picks their own team (and with it their colour) in the lobby. */
   | { t: 'team'; team: number }
   /** Ask for a pause, answer someone's request, or say you are ready to continue ('yes'). */
@@ -58,11 +61,15 @@ export type ClientMessage =
 /** Sent by the host to players. */
 export type ServerMessage =
   /** The room is waiting in the lobby. Sent whenever who is in it changes. */
-  | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[]; settings: GameSettings }
+  /** `you` is -1 for a spectator; `watching` names the spectators. */
+  | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[]; settings: GameSettings; watching?: string[] }
   /** The host started the game. */
-  | { t: 'start'; you: number; room: string; seed: number; size: number; popLimit: number; players: PlayerInfo[] }
-  | { t: 'players'; players: PlayerInfo[] }
-  | { t: 'chat'; from: number; text: string }
+  | { t: 'start'; you: number; room: string; seed: number; size: number; popLimit: number; players: PlayerInfo[]; watching?: string[] }
+  | { t: 'players'; players: PlayerInfo[]; watching?: string[] }
+  /** `from` is -1 for a spectator, who is then named. */
+  | { t: 'chat'; from: number; text: string; team?: boolean; name?: string }
+  /** An ally marked a spot on the map. */
+  | { t: 'signal'; from: number; x: number; y: number }
   /**
    * Where a pause stands: 'asking' while players decide, 'paused' until everyone has pressed
    * continue, 'off' when the game runs. `waiting` lists who still has to answer.
@@ -94,7 +101,14 @@ export type ServerMessage =
       rallies: [number, number, number][];
       /** The winning team, or -1. */
       winner: number;
+      /** At the end: what happened over the game, for every player (by slot). */
+      stats?: [number, PlayerStats][];
     }
   /** For someone coming back into a running game: tiles changed so far, [tile index, tile, amount left]. */
   | { t: 'catchup'; tiles: [number, number, number][] }
+  /**
+   * A piece of a backup of the whole game (see GameHost.backup), for the players who would take over
+   * hosting if the host vanished: `heirs` in that order, the old host being `host`.
+   */
+  | { t: 'backup'; id: number; i: number; n: number; part: string; heirs: number[]; host: number }
   | { t: 'error'; message: string };

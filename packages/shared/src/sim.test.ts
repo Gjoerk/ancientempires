@@ -1139,3 +1139,47 @@ test('a guest who loses the connection keeps their side and gets it back with th
   const catchUp = host.catchUp() as Extract<ReturnType<GameHost['catchUp']>, { t: 'catchup' }>;
   assert.ok(catchUp.tiles.some(([i, t]) => i === tree && t === Tile.Grass), 'the felled tree is in the catch-up');
 });
+
+test('the score keeps count of what was gathered, trained, killed and lost', () => {
+  const s = createGame(11);
+  addPlayer(s, 0);
+  addPlayer(s, 1);
+  const villagers = owned(s, 0, 'villager');
+  const tc = owned(s, 0, 'towncenter')[0];
+  for (const [dx, dy] of [[-4, 5], [-1, 5]]) spawn(s, 0, 'house', tc.x + dx, tc.y + dy, true);
+  applyCommand(s, 0, { type: 'train', building: tc.id, kind: 'villager' });
+  const tree = s.map.tiles.findIndex((t, i) => t === Tile.Forest && Math.hypot((i % s.map.size) - tc.x, Math.floor(i / s.map.size) - tc.y) < 12);
+  applyCommand(s, 0, { type: 'gather', ids: villagers.map((e) => e.id), tile: tree });
+  const king = owned(s, 1, 'king')[0];
+  for (let i = 0; i < 3; i++) spawn(s, 0, 'swordsman', Math.floor(king.x) + 2, Math.floor(king.y) + 1);
+  const victim = spawn(s, 1, 'spearman', Math.floor(king.x) + 3, Math.floor(king.y) + 1)!;
+  applyCommand(s, 0, { type: 'interact', ids: owned(s, 0, 'swordsman').map((e) => e.id), target: victim.id });
+  run(s, 400);
+  const mine = s.players.get(0)!.stats;
+  assert.ok(mine.gathered.wood > 0, 'wood gathered');
+  assert.ok(mine.trained >= 1, 'a villager trained');
+  assert.ok(mine.kills >= 1, 'the spearman killed');
+  assert.ok(s.players.get(1)!.stats.lost >= 1, 'and lost on their side');
+  assert.ok(mine.timeline.length >= 1, 'the timeline is sampled');
+});
+
+test('a backup of a running game carries on exactly like the game itself', () => {
+  const host = new GameHost('ROOM');
+  host.join('A');
+  const b = host.join('B')!;
+  host.bindToken('key-of-b-123', b.slot);
+  host.join('Computer', 'ai');
+  host.start(21);
+  for (let i = 0; i < 1500; i++) host.tick();
+  const text = host.backup()!;
+  const copy = GameHost.fromBackup(text);
+  assert.equal(copy.rejoin('key-of-b-123')?.slot, b.slot, 'keys come along');
+  for (let i = 0; i < 600; i++) {
+    host.tick();
+    copy.tick();
+  }
+  const look = (g: GameHost) => JSON.stringify([...g.state!.entities.values()].map((e) => [e.id, e.kind, e.owner, Math.round(e.x * 100), Math.round(e.y * 100), Math.round(e.hp)]));
+  assert.equal(look(copy), look(host), 'both play on the same');
+  assert.deepEqual([...copy.state!.players.values()].map((p) => p.res), [...host.state!.players.values()].map((p) => p.res));
+  assert.ok(text.length < 400_000, `small enough to send: ${text.length} characters`);
+});

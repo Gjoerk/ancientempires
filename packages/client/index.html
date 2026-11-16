@@ -160,6 +160,9 @@
     #actions button.locked { opacity: .4; }
     body #actions button.on { background: #24493a; box-shadow: inset 0 0 0 2px var(--accent), inset 0 3px 6px rgba(0, 0, 0, .55); }
     #actions button.focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+    /* The hotkey of a command tile, small in its top-left corner. */
+    #actions button .hk { position: absolute; left: 3px; top: 2px; font: 700 10px/1 "Roboto Mono", monospace; color: var(--accent); opacity: .85; pointer-events: none; }
+    #actions button .hk:empty { display: none; }
 
     #details { grid-area: details; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
     #d-title { display: flex; align-items: center; gap: 8px; font-size: 17px; line-height: 21px; color: var(--accent); }
@@ -231,6 +234,28 @@
     #err[hidden] { display: none; }
     #err.fade { animation: err-fade 2.6s ease-in forwards; }
     @keyframes err-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+    #hint { position: fixed; right: 12px; bottom: calc(var(--bottom-h, 226px) + 12px); z-index: 5; max-width: 340px; padding: 10px 12px;
+      display: flex; gap: 10px; align-items: flex-start; font-size: 14px; border-color: var(--accent); zoom: var(--ui, 1); }
+    #hint[hidden] { display: none; }
+    #hint img { width: 34px; height: 34px; image-rendering: pixelated; flex: none; }
+    #hint b { color: var(--accent); }
+    #hint .hint-buttons { display: flex; gap: 6px; margin-top: 8px; }
+    #hint .hint-buttons button { padding: 2px 10px; font-size: 12px; }
+    #end .card:has(#score:not([hidden])) { width: min(640px, calc(100vw - 24px)); }
+    #score table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+    #score th { color: var(--dim); font-weight: 400; font-size: 12px; text-align: right; padding: 2px 6px; }
+    #score td { text-align: right; padding: 4px 6px; border-top: 1px solid rgba(201, 165, 74, .2); }
+    #score td.who { text-align: left; font-weight: 700; white-space: nowrap; }
+    #score td.top { color: var(--accent); font-weight: 700; }
+    #score canvas { width: 100%; margin-top: 10px; background: rgba(0, 0, 0, .25); border-radius: 6px; }
+    #score p { margin: 2px 0 0; font-size: 12px; text-align: center; }
+    body.spectating #idle { visibility: hidden; }
+    #settings { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: rgba(0, 0, 0, .45); }
+    #settings[hidden] { display: none; }
+    #settings h1 { margin: 0; text-align: center; }
+    #settings input[type=range] { width: 100%; }
+    /* Interface size: the bars, menus and dialogs scale together. */
+    #top, #bottom, #menu, #details, #chat-log, #chat-input, #err, #pause, #end, #help, #reconnect { zoom: var(--ui, 1); }
     #reconnect { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 10px 18px; text-align: center; border-color: #e8c25a; }
     #reconnect b { color: var(--accent); }
     #toast { position: fixed; top: 52px; right: 10px; padding: 6px 12px; border-color: #b3261a; }
@@ -251,6 +276,9 @@
     #chat-log div.notice { font-style: italic; background: rgba(20, 40, 28, .7); border-left: 2px solid var(--accent); }
     /* Only for you: news about your own things. */
     #chat-log div.notice.mine { color: #f3d77e; border-left-color: #f3d77e; }
+    /* Team chat: a green edge, in the log and on the box while writing to the team. */
+    #chat-log div.team { border-left: 2px solid #7fd16a; }
+    #chat-input.team { border-color: #7fd16a; box-shadow: 0 0 0 1px #7fd16a; }
     #chat-input { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; width: min(460px, calc(100vw - 20px)); box-sizing: border-box;
       background: var(--page); color: #fff; font-variant: normal; }
     #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; line-height: 1.6;
@@ -461,8 +489,9 @@
     </span>
     <button id="chat-btn" type="button">Chat &amp; history (Enter)</button>
     <button id="mute-btn" type="button">Sound on (M)</button>
-    <button id="full-btn" type="button">Fullscreen (F)</button>
+    <button id="full-btn" type="button">Fullscreen (F11)</button>
     <button id="help-btn" type="button">Help (H)</button>
+    <button id="settings-btn" type="button">Settings</button>
     <button id="pause-btn" type="button" title="Ask the other players to pause the game">Request pause</button>
     <button id="resign-btn" type="button">Resign</button>
     <span class="dim">Room <b id="room-code"></b></span>
@@ -506,6 +535,7 @@
       <h1 id="end-title"></h1>
       <div class="rule"></div>
       <p id="end-text"></p>
+      <div id="score" hidden></div>
       <div class="end-buttons">
         <button id="rematch-btn" type="button" class="primary" title="Play again at once with the same players and settings, on a new map">Rematch</button>
         <button id="newgame-btn" type="button" title="Back to the waiting room to change the settings">New game</button>
@@ -524,11 +554,31 @@
     </div>
   </div>
   <div id="toast" class="frame" hidden></div>
+  <div id="hint" class="frame" hidden role="status"><img alt="" src="" id="hint-icon"><div><span id="hint-text"></span>
+    <div class="hint-buttons"><button id="hint-ok" type="button" class="plain">Got it</button><button id="hint-off" type="button" class="plain">No more hints</button></div></div></div>
+  <div id="settings" hidden role="dialog" aria-labelledby="settings-title">
+    <div class="card-wrap"><div class="card">
+      <h1 id="settings-title">Settings</h1>
+      <div class="rule"></div>
+      <label class="check"><input id="set-hotkeys" type="checkbox"> Letter keys press the command buttons (the arrow keys scroll; off: WASD scroll)</label>
+      <label class="check"><input id="set-edge" type="checkbox"> Scroll when the cursor touches the window edge</label>
+      <label class="field">Scroll speed <span id="set-scroll-v" class="dim"></span>
+        <input id="set-scroll" type="range" min="0.4" max="2.5" step="0.1">
+      </label>
+      <label class="field">Interface size <span id="set-ui-v" class="dim"></span>
+        <input id="set-ui" type="range" min="0.75" max="1.3" step="0.05">
+      </label>
+      <label class="check"><input id="set-colorblind" type="checkbox"> Colour-blind friendly team colours</label>
+      <label class="check"><input id="set-hints" type="checkbox"> Hints for new players</label>
+      <p class="fine">Kept in this browser.</p>
+      <button id="settings-close" type="button" class="primary">Done</button>
+    </div></div>
+  </div>
   <div id="reconnect" class="frame" hidden role="status"><b>Connection lost: reconnecting…</b> <span id="reconnect-why" class="dim"></span><br><span class="dim">The game goes on at the host; you get your place back as soon as you are reconnected. Nothing of yours is lost.</span>
     <div><button id="reconnect-leave" type="button" class="plain">Leave the game</button></div></div>
   <div id="err" hidden role="status" aria-live="polite"></div>
   <div id="chat-log"></div>
-  <input id="chat-input" maxlength="140" placeholder="Message to everyone — Enter to send" enterkeyhint="send" hidden>
+  <input id="chat-input" maxlength="140" placeholder="Message to everyone · Tab: to your team only" enterkeyhint="send" hidden>
   <div id="help" class="frame" hidden>
     <h2>Controls</h2>
     <b>Mouse</b><br>
@@ -537,22 +587,28 @@
     Right-click and drag on open ground turns the formation to face that way (a preview shows the spots)<br>
     Form group (with troops selected) binds them together: clicking one selects them all, until you disband it<br>
     Right-click with a building selected sets where its new units gather<br>
-    Mouse wheel zooms · cursor at the window edge, WASD or arrows scroll<br>
+    Mouse wheel zooms · cursor at the window edge or the arrow keys scroll (WASD instead, when the letter hotkeys are turned off in the settings)<br>
     Minimap: left-click or drag to look there, right-click to send the selected units there<br>
     <b>Touch</b><br>
     Tap selects · with units selected, tap the map, a resource or an enemy to send them there<br>
     Drag scrolls the map · pinch zooms · “Select area” lets you drag a box · “Deselect” lets go<br>
     Press and hold to look at something without giving an order<br>
     <b>Keys</b><br>
-    X stop · Delete destroys your selection · Shift + 1–9 stores a group, 1–9 selects it<br>
+    Letters press the command buttons: each tile shows its key (Q W E R T Y U I O P, then A S D F G, then Z X C V B)<br>
+    Delete destroys your selection · Shift + 1–9 stores a group, 1–9 selects it<br>
     . next idle villager (double-click its button for all of them) · , all troops · Space jumps to the last attack on you<br>
-    T gives the selected villagers the same job as the villager you gave an order last; if that was a new building, you place another of it<br>
+    J gives the selected villagers the same job as the villager you gave an order last; if that was a new building, you place another of it<br>
     The bell at the town centre calls every villager into shelter; ring it again to send them back to work<br>
     Shift while placing buildings puts them on the villagers' list: they build one after the other<br>
     Groups walk in formation at the pace of their slowest member; fields can be walked over.<br>
     Soldiers are Aggressive (attack enemy units they see) or Defensive (fight back only when hit); they attack buildings only when told to<br>
-    Enter chat · F fullscreen (the cursor stays on the screen; Esc frees it) · M sound · H or Esc closes this<br>
+    Alt + click on the map or minimap marks a spot for your allies; Space looks at the latest marked spot or attack<br>
+    In the chat box Tab switches between everyone and your team only<br>
+    Enter chat · F11 fullscreen (the cursor stays on the screen; Esc frees it) · M sound · H, F1 or Esc closes this<br>
     <b>Good to know</b><br>
+    Watch (on the start screen) joins a room as a spectator, also into a running game: the whole map is shown, you can chat but not play<br>
+    If someone loses their connection, their side stays and they get it back by themselves, or by joining again with the same room code. If the host leaves, the next player takes over hosting and the game carries on<br>
+    Settings (in the menu or on the start screen): hotkeys, scrolling, interface size, colour-blind colours, hints<br>
     One relic lies somewhere far from the towns. Only monks can carry it: right-click it with a monk, and he takes it to your monastery. While you keep it there, all your troops and towers get +2 attack and your villagers gather every resource 10% faster. It falls where the monk dies or the monastery is destroyed, so it can be taken from you<br>
     Build a mill, lumber camp or mining camp next to food, wood, gold or stone so villagers walk less.<br>
     Walls are dragged out as a line and block everyone; a gate lets you and your allies through.<br>
@@ -573,6 +629,7 @@
         <button id="copy-link-btn" type="button" class="plain">Copy</button>
       </div>
       <ul id="room-players"></ul>
+      <p id="room-watching" class="dim" hidden></p>
       <label class="check">Map size
         <select id="size-select">
           <option value="small">Small (96 × 96)</option>
@@ -613,6 +670,7 @@
           <input id="room" placeholder="ABCD" maxlength="8">
         </label>
         <button id="join-btn" class="plain">Join</button>
+        <button id="watch-btn" class="plain" title="Watch the game without playing; the whole map is shown">Watch</button>
       </div>
       <p id="lobby-msg" role="status"></p>
       <label class="field">Connection
@@ -622,6 +680,7 @@
           <option value="always">Always through the Cloudflare relay</option>
         </select>
       </label>
+      <button id="lobby-settings-btn" type="button" class="plain">Settings</button>
       <p class="fine">The host's browser runs the game; it ends if the host closes the tab. Strict networks such as university Wi-Fi need the relay.</p>
     </form></div>
   </div>
