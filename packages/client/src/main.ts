@@ -1623,6 +1623,12 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   const hosting = (ev as SubmitEvent).submitter?.id === 'host-btn';
   const watching = (ev as SubmitEvent).submitter?.id === 'watch-btn';
   const name = $<HTMLInputElement>('name').value;
+  // Remembered for next time.
+  try {
+    localStorage.setItem('kingsfall.name', name.trim());
+  } catch {
+    // Not kept.
+  }
   let code = normaliseCode($<HTMLInputElement>('room').value);
   if (!hosting && !code) {
     $('lobby-msg').textContent = 'Enter the room code your host gave you.';
@@ -1662,6 +1668,13 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   }
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
+// The name used last time.
+try {
+  const kept = localStorage.getItem('kingsfall.name');
+  if (kept) $<HTMLInputElement>('name').value = kept;
+} catch {
+  // Storage blocked: an empty field.
+}
 // How to connect, remembered in this browser.
 {
   const select = $<HTMLSelectElement>('relay-select');
