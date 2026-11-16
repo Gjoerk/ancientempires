@@ -115,4 +115,5 @@ export type ServerMessage =
    * hosting if the host vanished: `heirs` in that order, the old host being `host`.
    */
   | { t: 'backup'; id: number; i: number; n: number; part: string; heirs: number[]; host: number }
-  | { t: 'error'; message: string };
+  /** `final`: the end for this guest (removed by the host): no trying to get back in. */
+  | { t: 'error'; message: string; final?: boolean };

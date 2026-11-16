@@ -977,7 +977,17 @@ function copyLastJob(): void {
   play('order.copy');
 }
 
+/** The host's list of players to remove in a running game (people only: the others are not in the way). */
+function renderKickList(): void {
+  const select = $<HTMLSelectElement>('kick-select');
+  const people = roster.filter((p) => !p.ai && !p.test && p.slot !== myOwnSlot);
+  select.hidden = !session?.host || people.length === 0;
+  select.length = 1;
+  for (const p of people) select.add(new Option(p.name + (p.away ? ' (connection lost)' : ''), String(p.slot)));
+}
+
 function renderPlayers(): void {
+  renderKickList();
   const el = $('players');
   el.textContent = '';
   for (const p of roster) {
@@ -1146,8 +1156,11 @@ function onMessage(msg: ServerMessage): void {
       const half = isBuilding(kind) ? sizeOf(kind) / 2 : 0;
       const seen = revealAll || tileSeen(Math.floor(x + half), Math.floor(y + half));
       if (seen) puffs.push({ x: x + half, y: y + half, t: now, big: isBuilding(kind) });
-      // Losses of your own are always heard, wherever you are looking.
-      if (seen || owner === me) play(isBuilding(kind) ? `collapse.${kind}` : `death.${kind}`, 150);
+      // Heard: your own losses, wherever you are looking, and enemies falling in a fight of yours
+      // (close to your troops or buildings). An ally's fight elsewhere stays quiet. A spectator hears what is in sight.
+      const mine = owner === me;
+      const fought = !mine && me >= 0 && isEnemy(owner) && seen && [...views.values()].some((v) => v.owner === me && Math.abs(v.x - x) < 9 && Math.abs(v.y - y) < 9);
+      if (mine || fought || (me < 0 && seen)) play(isBuilding(kind) ? `collapse.${kind}` : `death.${kind}`, 150);
       if (owner === me && kind === 'farm') showNotice(-1, 'A farm has been lost.');
     }
     rallies.clear();
@@ -1538,13 +1551,17 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
       li.append(level);
     }
     // Remove sits before the team dropdown, so that every row's dropdown lines up on the right.
-    if ((p.test || p.ai) && hosting) {
+    // The host can remove anyone but themselves: computer and test opponents, and people too.
+    if (hosting && p.slot !== host) {
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = '✕';
       remove.className = 'remove';
       remove.title = 'Remove this player';
-      remove.addEventListener('click', () => session?.host?.removeExtra(p.slot));
+      remove.addEventListener('click', () => {
+        if (p.ai || p.test) return session?.host?.removeExtra(p.slot);
+        if (confirm(`Remove ${p.name} from the room? They cannot come back in.`)) session?.host?.kick(p.slot);
+      });
       li.append(remove);
     }
     li.append(team);
@@ -2479,6 +2496,13 @@ $('hint-off').addEventListener('click', () => {
 $('settings-btn').addEventListener('click', openSettings);
 $('lobby-settings-btn').addEventListener('click', openSettings);
 $('settings-close').addEventListener('click', () => ($('settings').hidden = true));
+$<HTMLSelectElement>('kick-select').addEventListener('change', (ev) => {
+  const select = ev.target as HTMLSelectElement;
+  const slot = Number(select.value);
+  const p = roster.find((q) => q.slot === slot);
+  select.value = '';
+  if (!select.value && p && confirm(`Remove ${p.name} from the game? Their side is taken out, and they cannot come back in.`)) session?.host?.kick(slot);
+});
 $('reconnect-leave').addEventListener('click', () => {
   if (confirm('Leave the game? Your side stays in it, and you can join again later with the same room code.')) session?.close();
 });

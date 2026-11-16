@@ -18,6 +18,8 @@ export interface HostControls {
   addComputer(): void;
   /** Removes a test or computer opponent from the lobby. */
   removeExtra(slot: number): void;
+  /** Removes a player for good: from the lobby, or from the running game (their side goes too). */
+  kick(slot: number): void;
   setTeam(slot: number, team: number): void;
   /** How well a computer opponent plays. */
   setLevel(slot: number, level: string): void;
@@ -409,6 +411,10 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
         if (msg.t === 'chat' && cleanChat(msg.text)) broadcast({ t: 'chat', from: -1, name: watchers.get(conn), text: cleanChat(msg.text) });
         return;
       }
+      if (msg.t === 'join' && slot === undefined && game.isBanned(msg.token)) {
+        put(conn, { t: 'error', message: 'The host removed you from this game.', final: true });
+        return;
+      }
       if (msg.t === 'join' && slot === undefined) {
         // Someone who lost their connection coming back: their own place, and the game as it stands.
         const back = game.rejoin(msg.token);
@@ -569,6 +575,27 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       addComputer() {
         if (game.join('Computer', 'ai')) sendLobby();
       },
+      kick(slot) {
+        const player = game.players.get(slot);
+        if (!player || slot === mySlot) return;
+        if (player.ai || player.test) return void this.removeExtra(slot);
+        for (const [conn, s] of [...guests]) {
+          if (s !== slot) continue;
+          guests.delete(conn);
+          heard.delete(conn);
+          drops.delete(conn);
+          put(conn, { t: 'error', message: 'The host removed you from the game.', final: true });
+          // A moment for the message to get there before the line is cut.
+          setTimeout(() => conn.close(), 500);
+        }
+        game.ban(slot);
+        game.leave(slot);
+        if (game.state) {
+          broadcast({ t: 'chat', from: mySlot, text: `(removed ${player.name} from the game)` });
+          broadcast(game.playersMessage());
+          broadcast(game.pauseMessage());
+        } else sendLobby();
+      },
       removeExtra(slot) {
         const player = game.players.get(slot);
         if (game.state || !(player?.test || player?.ai)) return;
@@ -702,7 +729,7 @@ export function joinGame(code: string, name: string, handlers: Handlers, watch =
       if (!msg) return;
       lastHeard = Date.now();
       // While coming back, a refusal means the host has not let go of the old connection yet: try again.
-      if (msg.t === 'error') return lostAt ? lost('the host is still letting go of the old connection') : close(msg.message);
+      if (msg.t === 'error') return lostAt && !msg.final ? lost('the host is still letting go of the old connection') : close(msg.message);
       joined = true;
       if (msg.t === 'backup') {
         // Pieces of a backup, kept until a whole one is in; nothing to show.

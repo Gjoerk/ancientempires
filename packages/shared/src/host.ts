@@ -56,6 +56,19 @@ export class GameHost {
     return [...this.players.values()].filter((p) => !p.ai && !p.test && !p.away).map((p) => p.slot);
   }
 
+  /** Keys of players the host removed: they cannot come back with them. */
+  banned = new Set<string>();
+  ban(slot: number): void {
+    for (const [token, s] of [...this.tokens]) {
+      if (s !== slot) continue;
+      this.banned.add(token);
+      this.tokens.delete(token);
+    }
+  }
+  isBanned(token: unknown): boolean {
+    return typeof token === 'string' && this.banned.has(token);
+  }
+
   /** Remembers whose key `token` is. */
   bindToken(token: unknown, slot: number): void {
     if (typeof token === 'string' && token.length >= 8 && token.length <= 64) this.tokens.set(token, slot);
@@ -214,7 +227,7 @@ export class GameHost {
     const { map, tileEvents, amountEvents, shots, hits, deaths, blessings, occupied, changedTiles, ...rest } = s;
     void tileEvents; void amountEvents; void shots; void hits; void deaths; void blessings; void occupied;
     const data = {
-      v: 1, room: this.room, settings: this.settings, players: [...this.players.values()], tokens: [...this.tokens],
+      v: 1, room: this.room, settings: this.settings, players: [...this.players.values()], tokens: [...this.tokens], banned: [...this.banned],
       state: rest, changed: [...changedTiles],
       map: { size: map.size, version: map.version, tiles, blocked: runs(map.blocked), footprint: runs(map.footprint), gate: runs(map.gate) },
     };
@@ -228,6 +241,7 @@ export class GameHost {
     Object.assign(host.settings, data.settings);
     for (const p of data.players as PlayerInfo[]) host.players.set(p.slot, p);
     host.tokens = new Map(data.tokens);
+    host.banned = new Set(data.banned ?? []);
     const map = generateMap(data.state.seed, data.map.size);
     for (const [i, tile, amount] of data.map.tiles as [number, number, number][]) {
       map.tiles[i] = tile;
