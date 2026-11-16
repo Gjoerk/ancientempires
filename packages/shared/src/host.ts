@@ -36,12 +36,13 @@ export class GameHost {
     if (typeof token === 'string' && token.length >= 8 && token.length <= 64) this.tokens.set(token, slot);
   }
 
-  /** Someone coming back into the running game with their key: their player, if they are away. */
+  /** Someone coming back into the running game with their key: their player. */
   rejoin(token: unknown): PlayerInfo | undefined {
     if (!this.state || typeof token !== 'string') return undefined;
     const slot = this.tokens.get(token);
     const player = slot === undefined ? undefined : this.players.get(slot);
-    if (!player?.away) return undefined;
+    // Also when the host has not noticed yet that their old connection died: the key is proof enough.
+    if (!player || player.ai || player.test) return undefined;
     player.away = false;
     return player;
   }

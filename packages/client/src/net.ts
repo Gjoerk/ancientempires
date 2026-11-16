@@ -42,18 +42,26 @@ export interface Handlers {
   onReconnect?(reason: string | undefined): void;
 }
 
-/** How long a guest keeps trying to get back into a game after losing the connection. */
-const RECONNECT_FOR_MS = 120_000;
+/** How often a guest tries to get back into a game after losing the connection (it keeps trying until it gives up itself). */
 const RECONNECT_EVERY_MS = 4000;
+/** A guest the host has heard nothing from for this long has lost their connection, even if it never closed. */
+const GUEST_SILENCE_MS = 15000;
 
-/** This tab's key for a room: sent when joining, so that a lost connection (or a reload) gets the same place back. */
+/**
+ * This browser's key for a room: sent when joining, so that a lost connection, a reload or even a
+ * closed tab gets the same place back. Kept for the tab first, and for the browser for a day.
+ */
 function roomToken(code: string): string {
   const key = `kingsfall.token.${code}`;
   try {
-    const kept = sessionStorage.getItem(key);
-    if (kept) return kept;
-    const token = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
+    let token = sessionStorage.getItem(key);
+    if (!token) {
+      const kept = JSON.parse(localStorage.getItem(key) ?? 'null') as { token: string; at: number } | null;
+      if (kept && Date.now() - kept.at < 24 * 3600 * 1000) token = kept.token;
+    }
+    token ??= Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
     sessionStorage.setItem(key, token);
+    localStorage.setItem(key, JSON.stringify({ token, at: Date.now() }));
     return token;
   } catch {
     return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -157,7 +165,7 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
   const peer = new Peer(ID_PREFIX + code, peerOptions());
   const game = new GameHost(code);
   const guests = new Map<DataConnection, number>();
-  if (import.meta.env.DEV) Object.assign(window, { __host: game });
+  if (import.meta.env.DEV) Object.assign(window, { __host: game, __hostOffline: () => listener.disconnect() });
   let stopTicker: (() => void) | undefined;
   let mySlot = -1;
   /** The player the host's commands go to: the host, or one of their test opponents. */
@@ -181,12 +189,28 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
     closed = true;
     stopTicker?.();
     peer.destroy();
+    if (listener !== peer) listener.destroy();
     handlers.onClose(reason);
   };
 
+  /** When each guest was last heard from. */
+  const heard = new Map<DataConnection, number>();
   peer.on('open', () => {
+    // Also emitted again after the link to the matchmaking service came back: set up only once.
+    if (mySlot >= 0) return;
     mySlot = controlSlot = game.join(name)!.slot;
     sendLobby();
+    // A guest whose connection died without closing (a dead Wi-Fi) counts as away, so they can come back.
+    setInterval(() => {
+      if (closed) return;
+      const now = Date.now();
+      for (const [conn, t] of heard) {
+        if (now - t < GUEST_SILENCE_MS || !guests.has(conn)) continue;
+        heard.delete(conn);
+        drops.get(conn)?.();
+        conn.close();
+      }
+    }, 2000);
     stopTicker = startTicker(TICK_MS, () => {
       const snap = game.tick();
       if (snap) broadcast(snap);
@@ -196,18 +220,23 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
     window.addEventListener('pagehide', () => peer.destroy());
   });
 
-  peer.on('connection', (conn) => {
+  const drops = new Map<DataConnection, () => void>();
+  const accept = (conn: DataConnection) => {
+    heard.set(conn, Date.now());
     conn.on('data', (data) => {
       const msg = data as ClientMessage;
-      if (!msg || typeof msg !== 'object') return;
+      heard.set(conn, Date.now());
+      if (!msg || typeof msg !== 'object' || msg.t === 'ping') return;
       const slot = guests.get(conn);
       if (msg.t === 'join' && slot === undefined) {
         // Someone who lost their connection coming back: their own place, and the game as it stands.
         const back = game.rejoin(msg.token);
         if (back) {
+          // Their old connection, if the host still holds it, is dead: let it go quietly.
           for (const [other, s] of [...guests]) {
-            if (s !== back.slot) continue;
+            if (s !== back.slot || other === conn) continue;
             guests.delete(other);
+            heard.delete(other);
             other.close();
           }
           guests.set(conn, back.slot);
@@ -257,16 +286,46 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
       }
       else sendLobby();
     };
-    conn.on('close', drop);
+    drops.set(conn, drop);
+    conn.on('close', () => {
+      drop();
+      drops.delete(conn);
+      heard.delete(conn);
+    });
     conn.on('error', drop);
-  });
+  };
+  peer.on('connection', accept);
 
-  // The link to the matchmaking service can drop while the game runs on; get it back so that
-  // anyone who lost their connection can find the game again.
-  peer.on('disconnected', () => {
-    if (!closed) setTimeout(() => !closed && !peer.destroyed && peer.disconnected && peer.reconnect(), 1500);
-  });
+  // The link to the matchmaking service can drop while the game runs on (the connections to the guests
+  // stay up). It is got back, so that anyone who lost their connection can find the game again: by
+  // reconnecting, or, if the service has given the room's name away meanwhile, by signing in afresh
+  // under it with a second listener (the old one keeps the guests already connected).
+  let listener = peer;
+  let tries = 0;
+  const relisten = () => {
+    if (closed) return;
+    // A couple of plain reconnects first; if those fail, a fresh sign-in under the room's name.
+    if (!listener.destroyed && listener.disconnected && tries++ < 2) {
+      listener.reconnect();
+      return;
+    }
+    if (!listener.destroyed && !listener.disconnected) {
+      tries = 0;
+      return;
+    }
+    if (listener !== peer) listener.destroy();
+    tries = 0;
+    if (!listener.destroyed && !listener.disconnected) return;
+    const fresh = new Peer(ID_PREFIX + code, peerOptions());
+    fresh.on('connection', accept);
+    fresh.on('disconnected', () => setTimeout(relisten, 3000));
+    fresh.on('error', () => setTimeout(relisten, 5000));
+    listener = fresh;
+  };
+  peer.on('disconnected', () => setTimeout(relisten, 1500));
   peer.on('error', (err) => {
+    // Once the game is set up, nothing here ends it: the room's name is taken back as soon as it can be.
+    if (mySlot >= 0) return void setTimeout(relisten, 5000);
     if (err.type === 'unavailable-id') close('That room code is already in use. Pick another or join it.');
     else if (mySlot < 0) close('Could not reach the matchmaking service.');
     // Later errors (one guest failing to connect, a broker hiccup) do not end the game.
@@ -343,8 +402,10 @@ export function hostGame(code: string, name: string, handlers: Handlers): Sessio
 }
 
 export function joinGame(code: string, name: string, handlers: Handlers): Session {
-  const peer = new Peer(peerOptions());
   const token = roomToken(code);
+  let peer!: Peer;
+  /** Tests only: a connection that has silently died. */
+  let deaf: DataConnection | undefined;
   let conn: DataConnection | undefined;
   let closed = false;
   let joined = false;
@@ -359,6 +420,9 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
   // The host sends something at least every second, so silence means it is gone
   // (a closed tab does not always close the connection cleanly) or was never there.
   const watchdog = setInterval(() => {
+    if (closed) return;
+    // Tell the host this guest is still here (it lets go of guests who fall silent).
+    if (conn?.open && conn !== deaf) conn.send({ t: 'ping' } satisfies ClientMessage);
     if (lostAt || Date.now() - lastHeard < SILENCE_LIMIT_MS) return;
     if (playing) return lost(`no word from the host for ${SILENCE_LIMIT_MS / 1000} s`);
     close(joined ? 'The host left the game.' : reached ? BLOCKED : 'No game with that code. Check the code or host a new game.');
@@ -371,7 +435,10 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     peer.destroy();
     handlers.onClose(reason);
   };
-  /** The connection dropped during the game: keep trying to get back in for a while. */
+  /**
+   * The connection dropped during the game: keep trying to get back in, for as long as it takes
+   * (the player can leave from the banner). The game goes on at the host meanwhile.
+   */
   const lost = (why: string) => {
     if (closed) return;
     if (!playing) return close(reached && !joined ? BLOCKED : 'Connection to the host failed.');
@@ -384,20 +451,17 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     retry = setTimeout(attempt, RECONNECT_EVERY_MS);
   };
   const attempt = () => {
-    if (closed) return;
-    if (Date.now() - lostAt > RECONNECT_FOR_MS) return close('Lost the connection to the host and could not get it back.');
+    if (closed || !lostAt) return;
     conn?.close();
-    // The matchmaking link may have dropped too: back on it first, then try again.
-    if (peer.disconnected && !peer.destroyed) {
-      peer.reconnect();
-      retry = setTimeout(attempt, RECONNECT_EVERY_MS);
-      return;
-    }
-    connect();
-    retry = setTimeout(attempt, RECONNECT_EVERY_MS * 2);
+    conn = undefined;
+    // Each try starts afresh with the matchmaking service, so a dead link to it never gets in the way.
+    peer.destroy();
+    peer = newPeer();
+    // Try again a little later if this one gets nowhere (longer apart the longer it takes).
+    retry = setTimeout(attempt, Math.min(20000, RECONNECT_EVERY_MS * 2 + (Date.now() - lostAt) / 10));
   };
-  const connect = () => {
-    const c = peer.connect(ID_PREFIX + code, { reliable: true, serialization: 'json' });
+  const connect = (p: Peer) => {
+    const c = p.connect(ID_PREFIX + code, { reliable: true, serialization: 'json' });
     conn = c;
     // The host's browser answering at all means the code is right; a failure after that is the network.
     c.on('iceStateChanged', (state) => {
@@ -407,10 +471,11 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     });
     c.on('open', () => c.send({ t: 'join', name, token } satisfies ClientMessage));
     c.on('data', (data) => {
-      if (c !== conn) return;
+      if (c !== conn || c === deaf) return;
       const msg = data as ServerMessage;
       lastHeard = Date.now();
-      if (msg.t === 'error') return close(msg.message);
+      // While coming back, a refusal means the host has not let go of the old connection yet: try again.
+      if (msg.t === 'error') return lostAt ? lost('the host is still letting go of the old connection') : close(msg.message);
       joined = true;
       if (msg.t === 'start') playing = true;
       if (msg.t === 'lobby') playing = false;
@@ -426,25 +491,38 @@ export function joinGame(code: string, name: string, handlers: Handlers): Sessio
     c.on('close', () => c === conn && (playing ? lost('connection closed') : close('The host left the game.')));
     c.on('error', () => c === conn && lost('connection error'));
   };
-
-  peer.on('open', () => {
-    if (!conn) connect();
-  });
-  // Tests only: drop the connection as a bad network would.
-  if (import.meta.env.DEV) Object.assign(window, { __dropConnection: () => conn?.peerConnection?.close() });
-  peer.on('disconnected', () => {
-    // Only the matchmaking link: the game connection itself may well still be up.
-    if (!closed && !peer.destroyed) setTimeout(() => !closed && peer.disconnected && !peer.destroyed && peer.reconnect(), 1500);
-  });
-  peer.on('error', (err) => {
-    if (playing) return lost(`matchmaking: ${err.type}`);
-    close(err.type === 'peer-unavailable' ? 'No game with that code. Check the code or host a new game.'
-      : 'Could not reach the matchmaking service.');
-  });
+  const newPeer = (): Peer => {
+    const p = new Peer(peerOptions());
+    p.on('open', () => {
+      if (p === peer && !conn) connect(p);
+    });
+    p.on('disconnected', () => {
+      // Only the matchmaking link: the game connection itself may well still be up.
+      if (!closed && p === peer && !p.destroyed) setTimeout(() => !closed && p === peer && p.disconnected && !p.destroyed && p.reconnect(), 1500);
+    });
+    p.on('error', (err) => {
+      if (p !== peer) return;
+      if (playing) return lost(`matchmaking: ${err.type}`);
+      close(err.type === 'peer-unavailable' ? 'No game with that code. Check the code or host a new game.'
+        : 'Could not reach the matchmaking service.');
+    });
+    return p;
+  };
+  peer = newPeer();
+  // Tests only: drop the connection as a bad network would, or let it die silently (nothing gets through
+  // either way, and nothing closes).
+  if (import.meta.env.DEV) {
+    Object.assign(window, {
+      __dropConnection: () => conn?.peerConnection?.close(),
+      __deafen: () => {
+        deaf = conn;
+      },
+    });
+  }
 
   return {
     send: (msg) => {
-      if (conn?.open) conn.send(msg);
+      if (conn?.open && conn !== deaf) conn.send(msg);
     },
     close: () => close(''),
   };

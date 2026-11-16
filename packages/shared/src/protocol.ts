@@ -51,7 +51,9 @@ export type ClientMessage =
   /** A player picks their own team (and with it their colour) in the lobby. */
   | { t: 'team'; team: number }
   /** Ask for a pause, answer someone's request, or say you are ready to continue ('yes'). */
-  | { t: 'pause'; answer: 'request' | 'yes' | 'no' };
+  | { t: 'pause'; answer: 'request' | 'yes' | 'no' }
+  /** Sent every couple of seconds, so the host can tell a guest whose connection silently died. */
+  | { t: 'ping' };
 
 /** Sent by the host to players. */
 export type ServerMessage =

@@ -154,6 +154,8 @@ let blessings: { from: number; to: number; kind: number; t: number }[] = [];
 let shots: { from: [number, number]; to: [number, number]; t: number; boulder?: boolean; landed?: boolean }[] = [];
 const BOULDER_MS = 750;
 let winner = -1;
+/** The seed of the game being played, to tell coming back into it from a new game. */
+let gameSeed = -1;
 /** Buildings that changed hands in this snapshot (old owner → new), and players whose town has been taken. */
 const takenOver = new Map<number, number>();
 const announcedTakeover = new Set<number>();
@@ -929,8 +931,14 @@ function onMessage(msg: ServerMessage): void {
     history.replaceState(null, '', `?room=${msg.room}`);
     $('lobby').style.display = 'none';
     $('waiting').style.display = '';
+  } else if (msg.t === 'start' && map && gameSeed === msg.seed && myOwnSlot === msg.you && !$('top').hidden) {
+    // Back in the same game after a lost connection: everything on screen stays as it was
+    // (what was explored, the chat, the view); the next snapshot brings it up to date.
+    roster = msg.players;
+    renderPlayers();
   } else if (msg.t === 'start') {
     resetGame();
+    gameSeed = msg.seed;
     play('start');
     me = myOwnSlot = msg.you;
     map = generateMap(msg.seed, msg.size);
@@ -1288,6 +1296,7 @@ function resetGame(): void {
   centred = false;
   placing = undefined;
   winner = -1;
+  gameSeed = -1;
   bands.clear();
   silence(false);
   announcedTakeover.clear();
@@ -2238,6 +2247,9 @@ $('chat-input').addEventListener('blur', () => {
   if (document.body.classList.contains('chatting')) closeChat();
 });
 $('chat-log').addEventListener('mousedown', (ev) => ev.preventDefault());
+$('reconnect-leave').addEventListener('click', () => {
+  if (confirm('Leave the game? Your side stays in it, and you can join again later with the same room code.')) session?.close();
+});
 $('chat-log').addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
 for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown');
