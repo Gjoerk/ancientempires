@@ -53,6 +53,53 @@ const MIGRATE_STEP_MS = 15_000;
 /** A new host that cannot take over the room's name in this time gives up: the old host is probably still there. */
 const MIGRATE_GIVE_UP_MS = 60_000;
 
+/**
+ * The host keeps a copy of the running game in this browser, so that closing the tab (or a crash)
+ * loses nothing: hosting or joining the same room code again carries it on. Kept for a day.
+ */
+const SAVE_FOR_MS = 24 * 3600 * 1000;
+const saveKey = (code: string) => `kingsfall.save.${code}`;
+interface Saved {
+  at: number;
+  slot: number;
+  text: string;
+}
+export function savedGame(code: string): Saved | undefined {
+  try {
+    const saved = JSON.parse(localStorage.getItem(saveKey(code)) ?? 'null') as Saved | null;
+    if (saved && Date.now() - saved.at < SAVE_FOR_MS && typeof saved.text === 'string') return saved;
+  } catch {
+    // Nothing kept, or storage is blocked.
+  }
+  return undefined;
+}
+function saveGame(code: string, game: GameHost, slot: number): void {
+  const text = game.backup();
+  if (!text) return;
+  try {
+    localStorage.setItem(saveKey(code), JSON.stringify({ at: Date.now(), slot, text } satisfies Saved));
+  } catch {
+    // Storage full or blocked: the other players' backups still keep the game.
+  }
+}
+export function forgetGame(code: string): void {
+  try {
+    localStorage.removeItem(saveKey(code));
+  } catch {
+    // Nothing to do.
+  }
+}
+
+/** Carries on the game kept in this browser for a room code, as its host: everyone else comes back in. */
+export function resumeGame(code: string, name: string, handlers: Handlers): Session | undefined {
+  const saved = savedGame(code);
+  if (!saved) return undefined;
+  const game = GameHost.fromBackup(saved.text);
+  if (!game.players.has(saved.slot)) return undefined;
+  for (const p of game.players.values()) if (!p.ai && !p.test && p.slot !== saved.slot) p.away = true;
+  return hostGame(code, name, handlers, { game, slot: saved.slot, oldHost: -1 });
+}
+
 /** Carrying on a game from a backup, as its new host. */
 interface Resume {
   game: GameHost;
@@ -257,7 +304,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
     if (resume) {
       // Carrying on from a backup: the old host is away (it can come back as a guest with its key).
       mySlot = controlSlot = resume.slot;
-      game.setAway(resume.oldHost);
+      if (resume.oldHost >= 0) game.setAway(resume.oldHost);
       game.bindToken(token, mySlot);
       handlers.onMessage(game.startMessage(mySlot));
       const tiles = game.catchUp();
@@ -289,10 +336,17 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       const snap = game.tick();
       if (snap) broadcast(snap);
       else if (++ticks % TICK_RATE === 0) toGuests(() => ({ t: 'ping' }));
-      if (snap && game.state!.tick % BACKUP_TICKS === 0) sendBackup();
+      if (snap && game.state!.tick % BACKUP_TICKS === 0) {
+        sendBackup();
+        saveGame(code, game, mySlot);
+      }
+      // A finished game is not carried on.
+      if (snap?.t === 'snap' && snap.winner >= 0) forgetGame(code);
     });
     // Closing the tab should disconnect guests right away.
     window.addEventListener('pagehide', () => {
+      // The game as it is right now, for coming back.
+      if (!closed && game.state && game.state.winner < 0) saveGame(code, game, mySlot);
       peer.destroy();
       if (listener !== peer) listener.destroy();
     });
@@ -431,11 +485,20 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
     });
     fresh.on('connection', accept);
     fresh.on('disconnected', () => setTimeout(relisten, 3000));
-    fresh.on('error', () => setTimeout(relisten, 5000));
+    fresh.on('error', (err) => {
+      if (resume && !registered && err.type === 'unavailable-id') return yieldRoom();
+      setTimeout(relisten, 5000);
+    });
     listener = fresh;
   };
   peer.on('disconnected', () => setTimeout(relisten, 1500));
+  /** Carrying on a game, but someone else holds the room already: they host it, so this one goes in as a guest. */
+  const yieldRoom = () => {
+    close('', true);
+    handlers.onMigrate?.(joinGame(code, name, handlers), false);
+  };
   peer.on('error', (err) => {
+    if (resume && !registered && err.type === 'unavailable-id') return yieldRoom();
     // Once the game is set up, nothing here ends it: the room's name is taken back as soon as it can be.
     if (mySlot >= 0) return void setTimeout(relisten, 5000);
     if (err.type === 'unavailable-id') close('That room code is already in use. Pick another or join it.');
@@ -466,6 +529,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       },
       backToLobby() {
         if (!game.state) return;
+        forgetGame(code);
         game.backToLobby();
         controlSlot = mySlot;
         sendLobby();

@@ -48,7 +48,7 @@ import {
   FALLOW_SECONDS,
 } from '@kingsfall/shared';
 import type { PlayerStats } from '@kingsfall/shared';
-import { hostGame, joinGame, normaliseCode, prepareNetwork, RelayMode, Session, setRelayMode } from './net';
+import { hostGame, joinGame, normaliseCode, prepareNetwork, RelayMode, resumeGame, savedGame, Session, setRelayMode } from './net';
 import { loadSprites } from './assets';
 import { clearBuildingCache, drawBuilding } from './buildings';
 import { clearIcons, icon, setIconAge } from './icons';
@@ -1016,6 +1016,7 @@ function onMessage(msg: ServerMessage): void {
   } else if (msg.t === 'start' && map && gameSeed === msg.seed && myOwnSlot === msg.you && !$('top').hidden) {
     // Back in the same game after a lost connection: everything on screen stays as it was
     // (what was explored, the chat, the view); the next snapshot brings it up to date.
+    $('reconnect').hidden = true;
     roster = msg.players;
     watching = msg.watching ?? watching;
     renderPlayers();
@@ -1634,8 +1635,31 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   session = undefined;
   // Relay servers for strict networks, if there are any (a moment at most).
   await prepareNetwork();
-  const handlers = { onMessage, onClose: showLobby, onReconnect: showReconnect, onMigrate: takeOver };
-  session = hosting ? hostGame(code, name, handlers) : joinGame(code, name, handlers, watching);
+  // One fallback at most: when the first way in does not work, the other one is tried.
+  let fallback: ((reason: string) => Session | undefined) | undefined;
+  const handlers = {
+    onMessage, onReconnect: showReconnect, onMigrate: takeOver,
+    onClose: (reason: string) => {
+      const next = fallback?.(reason);
+      fallback = undefined;
+      if (next) session = next;
+      else showLobby(reason);
+    },
+  };
+  const saved = !watching && savedGame(code);
+  if (saved) {
+    // A game of this room was running in this browser: join it if it still runs somewhere (another
+    // player may have taken over hosting), otherwise carry it on from the copy kept here.
+    $('lobby-msg').textContent = 'Getting back into your game…';
+    fallback = (reason) => (reason.startsWith('No game with that code') ? resumeGame(code, name, handlers) : undefined);
+    session = joinGame(code, name, handlers);
+  } else if (hosting) {
+    // The room is taken: most likely the game runs on with someone else hosting, so go in.
+    fallback = (reason) => (reason.startsWith('That room code is already in use') ? joinGame(code, name, handlers) : undefined);
+    session = hostGame(code, name, handlers);
+  } else {
+    session = joinGame(code, name, handlers, watching);
+  }
 });
 $<HTMLInputElement>('room').value = new URLSearchParams(location.search).get('room') ?? '';
 // How to connect, remembered in this browser.
