@@ -31,48 +31,61 @@ function prepare(n: number): void {
   stamp++;
 }
 
-/** Binary heap of [f, index] pairs stored flat. */
+/** Binary heap of (f, index) pairs in typed arrays, kept between searches. */
 class Heap {
-  private a: number[] = [];
-  get size(): number {
-    return this.a.length;
+  private f = new Float64Array(1024);
+  private idx = new Int32Array(1024);
+  size = 0;
+  clear(): void {
+    this.size = 0;
   }
-  push(f: number, idx: number): void {
-    const a = this.a;
-    let i = a.length;
-    a.push(f, idx);
+  push(f: number, index: number): void {
+    if (this.size === this.f.length) {
+      const nf = new Float64Array(this.size * 2);
+      nf.set(this.f);
+      this.f = nf;
+      const ni = new Int32Array(this.size * 2);
+      ni.set(this.idx);
+      this.idx = ni;
+    }
+    const F = this.f;
+    const I = this.idx;
+    let i = this.size++;
     while (i > 0) {
-      const p = ((i / 2 - 1) >> 1) * 2;
-      if (a[p] <= a[i]) break;
-      [a[p], a[i]] = [a[i], a[p]];
-      [a[p + 1], a[i + 1]] = [a[i + 1], a[p + 1]];
+      const p = (i - 1) >> 1;
+      if (F[p] <= f) break;
+      F[i] = F[p];
+      I[i] = I[p];
       i = p;
     }
+    F[i] = f;
+    I[i] = index;
   }
   pop(): number {
-    const a = this.a;
-    const top = a[1];
-    const lastIdx = a.pop()!;
-    const lastF = a.pop()!;
-    if (a.length > 0) {
-      a[0] = lastF;
-      a[1] = lastIdx;
+    const F = this.f;
+    const I = this.idx;
+    const top = I[0];
+    const n = --this.size;
+    if (n > 0) {
+      const f = F[n];
+      const index = I[n];
       let i = 0;
       for (;;) {
-        const l = i * 2 + 2;
-        const r = l + 2;
-        let m = i;
-        if (l < a.length && a[l] < a[m]) m = l;
-        if (r < a.length && a[r] < a[m]) m = r;
-        if (m === i) break;
-        [a[m], a[i]] = [a[i], a[m]];
-        [a[m + 1], a[i + 1]] = [a[i + 1], a[m + 1]];
+        let m = i * 2 + 1;
+        if (m >= n) break;
+        if (m + 1 < n && F[m + 1] < F[m]) m++;
+        if (F[m] >= f) break;
+        F[i] = F[m];
+        I[i] = I[m];
         i = m;
       }
+      F[i] = f;
+      I[i] = index;
     }
     return top;
   }
 }
+const heap = new Heap();
 
 /**
  * A* over the tile grid, 8 directions, never cutting a corner of a blocked tile.
@@ -88,7 +101,7 @@ export function search(
   prepare(n);
   const start = sy * n + sx;
   if (isGoal(sx, sy)) return { path: [], reached: true };
-  const heap = new Heap();
+  heap.clear();
   g[start] = 0;
   from[start] = -1;
   seen[start] = stamp;
@@ -140,6 +153,68 @@ export function search(
 /** Path to a tile, or towards the reachable tile closest to it. */
 export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: number, team = -1): number[] {
   return search(map, sx, sy, (x, y) => x === gx && y === gy, (x, y) => octile(x - gx, y - gy), team).path;
+}
+
+/**
+ * How far every tile is from (gx, gy), walking, for a whole group sent there at once: one search for
+ * all of them instead of one each (see pathDown). Unreachable tiles are Infinity.
+ */
+export function distanceField(map: GameMap, gx: number, gy: number, team = -1): Float32Array {
+  const n = map.size;
+  const dist = new Float32Array(n * n).fill(Infinity);
+  if (gx < 0 || gy < 0 || gx >= n || gy >= n) return dist;
+  heap.clear();
+  dist[gy * n + gx] = 0;
+  heap.push(0, gy * n + gx);
+  while (heap.size > 0) {
+    const cur = heap.pop();
+    const cx = cur % n;
+    const cy = (cur - cx) / n;
+    const d = dist[cur];
+    for (const [dx, dy, cost] of DIRS) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!isWalkable(map, nx, ny, team)) continue;
+      if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy, team) || !isWalkable(map, cx, cy + dy, team))) continue;
+      const ni = ny * n + nx;
+      if (dist[ni] <= d + cost) continue;
+      dist[ni] = d + cost;
+      heap.push(d + cost, ni);
+    }
+  }
+  return dist;
+}
+
+/**
+ * A path from (sx, sy) to (tx, ty) using a distance field towards a spot near (tx, ty): downhill
+ * until close to the target, then a short search for the last steps. Same path as a search would
+ * find, at a fraction of the cost when many units share the field.
+ */
+export function pathDown(map: GameMap, field: Float32Array, sx: number, sy: number, tx: number, ty: number, team = -1): number[] {
+  const n = map.size;
+  const out: number[] = [];
+  let cx = sx;
+  let cy = sy;
+  if (!Number.isFinite(field[cy * n + cx])) return findPath(map, sx, sy, tx, ty, team);
+  for (let guard = 0; guard < n * 4 && Math.max(Math.abs(cx - tx), Math.abs(cy - ty)) > 2; guard++) {
+    let best = -1;
+    let bestD = field[cy * n + cx];
+    for (const [dx, dy] of DIRS) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!isWalkable(map, nx, ny, team)) continue;
+      if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy, team) || !isWalkable(map, cx, cy + dy, team))) continue;
+      const d = field[ny * n + nx];
+      if (d < bestD) [best, bestD] = [ny * n + nx, d];
+    }
+    if (best < 0) break;
+    cx = best % n;
+    cy = (best - cx) / n;
+    out.push(cx, cy);
+    // Past the target, towards the middle of the group: the rest is the short search.
+    if (field[cy * n + cx] <= field[ty * n + tx]) break;
+  }
+  return out.concat(cx === tx && cy === ty ? [] : findPath(map, cx, cy, tx, ty, team));
 }
 
 /**

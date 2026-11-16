@@ -6,7 +6,8 @@ import { ClientMessage, GameHost, MAP_SIZES, POP_LIMITS, ServerMessage, TICK_MS,
 // a PeerJS broker (the public one unless VITE_PEER_HOST is set).
 
 const ID_PREFIX = 'kingsfall-room-';
-const SILENCE_LIMIT_MS = 8000;
+// Generous, so that a slow or crowded connection (a big battle, a long way) is not taken for a lost one.
+const SILENCE_LIMIT_MS = 15000;
 
 /** What only the host of a room can do. */
 export interface HostControls {
@@ -42,6 +43,23 @@ export interface Handlers {
   onReconnect?(reason: string | undefined): void;
   /** The host vanished and this player now hosts the game (or went back to being a guest): the new session. */
   onMigrate?(session: Session, hosting: boolean): void;
+}
+
+/**
+ * Messages travel as JSON text over plain ("raw") data channels: an update for everyone is turned into
+ * text once and the same text goes to every guest, instead of being encoded again for each of them.
+ */
+type Wire = DataConnection;
+function put(conn: Wire, msg: ServerMessage | ClientMessage | string): void {
+  conn.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+}
+function take<T>(data: unknown): T | undefined {
+  if (typeof data !== 'string') return data as T;
+  try {
+    return JSON.parse(data) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 /** How often the host sends a backup of the game to the players who would take over, and in what pieces. */
@@ -110,7 +128,7 @@ interface Resume {
 /** How often a guest tries to get back into a game after losing the connection (it keeps trying until it gives up itself). */
 const RECONNECT_EVERY_MS = 4000;
 /** A guest the host has heard nothing from for this long has lost their connection, even if it never closed. */
-const GUEST_SILENCE_MS = 15000;
+const GUEST_SILENCE_MS = 20000;
 
 /**
  * This browser's key for a room: sent when joining, so that a lost connection, a reload or even a
@@ -246,18 +264,22 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
   const watchers = new Map<DataConnection, string>();
   const updateWatching = () => (game.watching = [...watchers.values()]);
   const toGuests = (make: (slot: number) => ServerMessage) => {
-    for (const [conn, slot] of guests) if (conn.open) conn.send(make(slot));
-    for (const conn of watchers.keys()) if (conn.open) conn.send(make(-1));
+    for (const [conn, slot] of guests) if (conn.open) put(conn, make(slot));
+    for (const conn of watchers.keys()) if (conn.open) put(conn, make(-1));
   };
+  /** The same message to everyone: encoded once. */
   const broadcast = (msg: ServerMessage) => {
     handlers.onMessage(msg);
-    toGuests(() => msg);
+    const text = JSON.stringify(msg);
+    for (const conn of guests.keys()) if (conn.open) put(conn, text);
+    for (const conn of watchers.keys()) if (conn.open) put(conn, text);
   };
   /** To the sender's team only (team chat, map signals): the host sees it only if it is on that team. */
   const toTeam = (from: number, msg: ServerMessage) => {
     const team = game.players.get(from)?.team;
     if (game.players.get(mySlot)?.team === team) handlers.onMessage(msg);
-    for (const [conn, slot] of guests) if (conn.open && game.players.get(slot)?.team === team) conn.send(msg);
+    const text = JSON.stringify(msg);
+    for (const [conn, slot] of guests) if (conn.open && game.players.get(slot)?.team === team) put(conn, text);
   };
   const chat = (from: number, text: unknown, team: unknown) => {
     const clean = cleanChat(text);
@@ -294,7 +316,8 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
     const id = ++backupId;
     for (let i = 0; i < n; i++) {
       const msg: ServerMessage = { t: 'backup', id, i, n, part: text.slice(i * BACKUP_PIECE, (i + 1) * BACKUP_PIECE), heirs, host: mySlot };
-      for (const conn of to) conn.send(msg);
+      const piece = JSON.stringify(msg);
+      for (const conn of to) put(conn, piece);
     }
   };
 
@@ -309,6 +332,8 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       handlers.onMessage(game.startMessage(mySlot));
       const tiles = game.catchUp();
       if (tiles) handlers.onMessage(tiles);
+      const all = game.snapshot(true, true);
+      if (all) handlers.onMessage(all);
       handlers.onMessage(game.playersMessage());
       // Unable to take over the room's name for a long time: the old host is still there after all.
       setTimeout(() => {
@@ -362,7 +387,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
   const accept = (conn: DataConnection) => {
     heard.set(conn, Date.now());
     conn.on('data', (data) => {
-      const msg = data as ClientMessage;
+      const msg = take<ClientMessage>(data);
       heard.set(conn, Date.now());
       if (!msg || typeof msg !== 'object' || msg.t === 'ping') return;
       const slot = guests.get(conn);
@@ -371,9 +396,11 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
         watchers.set(conn, (typeof msg.name === 'string' ? msg.name : '').trim().slice(0, 16) || 'Spectator');
         updateWatching();
         if (game.state) {
-          conn.send(game.startMessage(-1));
+          put(conn, game.startMessage(-1));
           const tiles = game.catchUp();
-          if (tiles) conn.send(tiles);
+          if (tiles) put(conn, tiles);
+          const all = game.snapshot(true, true);
+          if (all) put(conn, all);
           broadcast(game.playersMessage());
         } else sendLobby();
         return;
@@ -394,10 +421,12 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
             other.close();
           }
           guests.set(conn, back.slot);
-          conn.send(game.startMessage(back.slot));
+          put(conn, game.startMessage(back.slot));
           const tiles = game.catchUp();
-          if (tiles) conn.send(tiles);
-          conn.send(game.pauseMessage());
+          if (tiles) put(conn, tiles);
+          const all = game.snapshot(true, true);
+          if (all) put(conn, all);
+          put(conn, game.pauseMessage());
           broadcast(game.playersMessage());
           return;
         }
@@ -405,7 +434,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
         if (player) game.bindToken(msg.token, player.slot);
         if (!player) {
           const message = game.state ? 'That game has already started.' : 'That game is full.';
-          conn.send({ t: 'error', message } satisfies ServerMessage);
+          put(conn, { t: 'error', message } satisfies ServerMessage);
           return;
         }
         guests.set(conn, player.slot);
@@ -605,7 +634,7 @@ export function joinGame(code: string, name: string, handlers: Handlers, watch =
   const watchdog = setInterval(() => {
     if (closed) return;
     // Tell the host this guest is still here (it lets go of guests who fall silent).
-    if (conn?.open && conn !== deaf) conn.send({ t: 'ping' } satisfies ClientMessage);
+    if (conn?.open && conn !== deaf) put(conn, { t: 'ping' } satisfies ClientMessage);
     if (lostAt || Date.now() - lastHeard < SILENCE_LIMIT_MS) return;
     if (playing) return lost(`no word from the host for ${SILENCE_LIMIT_MS / 1000} s`);
     close(joined ? 'The host left the game.' : reached ? BLOCKED : 'No game with that code. Check the code or host a new game.');
@@ -658,7 +687,7 @@ export function joinGame(code: string, name: string, handlers: Handlers, watch =
     retry = setTimeout(attempt, Math.min(20000, RECONNECT_EVERY_MS * 2 + (Date.now() - lostAt) / 10));
   };
   const connect = (p: Peer) => {
-    const c = p.connect(ID_PREFIX + code, { reliable: true, serialization: 'json' });
+    const c = p.connect(ID_PREFIX + code, { reliable: true, serialization: 'raw' });
     conn = c;
     // The host's browser answering at all means the code is right; a failure after that is the network.
     c.on('iceStateChanged', (state) => {
@@ -666,10 +695,11 @@ export function joinGame(code: string, name: string, handlers: Handlers, watch =
       if (state === 'checking' || state === 'connected') reached = true;
       if (state === 'failed' || (state === 'disconnected' && playing)) lost(`network ${state}`);
     });
-    c.on('open', () => c.send({ t: 'join', name, token, watch: watch || undefined } satisfies ClientMessage));
+    c.on('open', () => put(c, { t: 'join', name, token, watch: watch || undefined } satisfies ClientMessage));
     c.on('data', (data) => {
       if (c !== conn || c === deaf) return;
-      const msg = data as ServerMessage;
+      const msg = take<ServerMessage>(data);
+      if (!msg) return;
       lastHeard = Date.now();
       // While coming back, a refusal means the host has not let go of the old connection yet: try again.
       if (msg.t === 'error') return lostAt ? lost('the host is still letting go of the old connection') : close(msg.message);
@@ -732,7 +762,7 @@ export function joinGame(code: string, name: string, handlers: Handlers, watch =
 
   return {
     send: (msg) => {
-      if (conn?.open && conn !== deaf) conn.send(msg);
+      if (conn?.open && conn !== deaf) put(conn, msg);
     },
     close: () => close(''),
   };

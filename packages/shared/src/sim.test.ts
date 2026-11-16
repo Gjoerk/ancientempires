@@ -5,6 +5,14 @@ import {
   TILE_RESOURCE, RESEED_COST, FARM_FOOD, FALLOW_SECONDS, formationSlots, FORMATIONS,
 } from './index';
 
+/** Steps the host until the next update goes out (one every couple of steps). */
+const nextSnap = (host: GameHost) => {
+  for (let i = 0; i < 10; i++) {
+    const snap = host.tick();
+    if (snap) return snap;
+  }
+  return undefined;
+};
 const owned = (s: GameState, slot: number, kind: string): Entity[] =>
   [...s.entities.values()].filter((e) => e.owner === slot && e.kind === kind);
 const attacking = (e: Entity, target: Entity) => e.order.t === 'attack' && e.order.id === target.id;
@@ -674,10 +682,10 @@ test('a building deleted between ticks is reported in the next snapshot, once', 
   const house = spawn(s, 0, 'house', tc.x + 5, tc.y + 5);
   host.tick();
   host.command(0, { type: 'delete', id: house.id });
-  const snap = host.tick();
+  const snap = nextSnap(host);
   assert.ok(snap && snap.t === 'snap');
   assert.equal(snap.deaths.filter((d) => d[0] === 8).length, 1);
-  const after = host.tick();
+  const after = nextSnap(host);
   assert.ok(after && after.t === 'snap' && after.deaths.length === 0);
 });
 
@@ -776,14 +784,14 @@ test('a pause needs everyone to agree, and everyone to continue', () => {
   host.answerPause(1, 'request');
   const asked = host.answerPause(1, 'yes') as { phase: string; waiting: number[] };
   assert.deepEqual([asked.phase, asked.waiting], ['asking', [0]], 'the computer does not get a say');
-  assert.equal(host.tick()?.t, 'snap', 'the game runs while asking');
+  assert.equal(nextSnap(host)?.t, 'snap', 'the game runs while asking');
   assert.equal((host.answerPause(0, 'yes') as { phase: string }).phase, 'paused');
   const tick = s.tick;
   assert.equal(host.tick(), undefined);
   assert.equal(s.tick, tick, 'nothing moves while paused');
   assert.equal((host.answerPause(0, 'yes') as { phase: string; waiting: number[] }).waiting.join(), '1');
   assert.equal((host.answerPause(1, 'yes') as { phase: string }).phase, 'off');
-  assert.equal(host.tick()?.t, 'snap', 'running again');
+  assert.equal(nextSnap(host)?.t, 'snap', 'running again');
   // Someone leaving while the others wait does not leave the game stuck.
   host.answerPause(0, 'request');
   host.answerPause(1, 'yes');
@@ -1182,4 +1190,26 @@ test('a backup of a running game carries on exactly like the game itself', () =>
   assert.equal(look(copy), look(host), 'both play on the same');
   assert.deepEqual([...copy.state!.players.values()].map((p) => p.res), [...host.state!.players.values()].map((p) => p.res));
   assert.ok(text.length < 400_000, `small enough to send: ${text.length} characters`);
+});
+
+test('updates carry only what changed, and a newcomer gets the whole picture', () => {
+  const host = new GameHost('ROOM');
+  host.join('A');
+  host.join('Computer', 'ai');
+  host.start(5);
+  const first = nextSnap(host) as Extract<ReturnType<GameHost['tick']>, { t: 'snap' }>;
+  const all = host.state!.entities.size;
+  assert.ok(first.ents.length > 0);
+  // A villager killed between updates is reported as gone.
+  for (let i = 0; i < 30; i++) host.tick();
+  const tc = [...host.state!.entities.values()].find((e) => e.kind === 'towncenter' && e.owner === 0)!;
+  const v = [...host.state!.entities.values()].find((e) => e.kind === 'villager' && e.owner === 0)!;
+  host.command(0, { type: 'delete', id: v.id });
+  const later = nextSnap(host) as typeof first;
+  assert.ok(later.gone.includes(v.id), 'the villager is gone');
+  assert.ok(later.ents.length < all, `only what changed: ${later.ents.length} of ${all}`);
+  assert.ok(!later.ents.some((e) => e[0] === tc.id), 'the town centre, unchanged, is not sent again');
+  const picture = host.snapshot(true, true) as typeof first;
+  assert.equal(picture.full, true);
+  assert.equal(picture.ents.length, [...host.state!.entities.values()].filter((e) => e.inside < 0).length, 'a newcomer sees everything');
 });

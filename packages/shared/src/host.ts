@@ -28,6 +28,12 @@ function unruns(r: number[], into: Uint8Array): void {
   }
 }
 
+/** An update goes out every this many game steps (5 a second); the screens smooth the movement in between. */
+export const SNAP_EVERY = 2;
+export const SNAP_MS = 1000 / TICK_RATE * SNAP_EVERY;
+/** A full update, everything included, every 10 s: a safety net. */
+const KEYFRAME_TICKS = 10 * TICK_RATE;
+
 export class GameHost {
   /** The running game, or undefined while the room waits in the lobby. */
   state: GameState | undefined;
@@ -152,6 +158,15 @@ export class GameHost {
     if (player && !this.state && Number.isInteger(team) && team >= 0 && team < MAX_TEAMS) player.team = team;
   }
 
+  private playerRows(s: GameState, workers: Map<number, Record<string, number>>, mask: (set: Set<string>) => number): number[][] {
+    return [...s.players.values()].map((p) => [
+      p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
+      p.age, mask(p.techs), mask(p.researching), ...RESOURCES.map((r) => workers.get(p.slot)?.[r] ?? 0),
+      // Whether the town bell has called the villagers in.
+      [...s.entities.values()].some((e) => e.owner === p.slot && e.recall) ? 1 : 0,
+    ]);
+  }
+
   /** How well a computer opponent plays. */
   setLevel(slot: number, level: unknown): void {
     const player = this.players.get(slot);
@@ -169,6 +184,7 @@ export class GameHost {
     }
     placeRelics(this.state);
     this.pause = undefined;
+    this.sent.clear();
   }
 
   /** Ends the running game and sends everyone back to the lobby. */
@@ -244,6 +260,16 @@ export class GameHost {
   }
 
   /** Advances the game one tick and returns the snapshot to send to everyone (nothing while in the lobby). */
+  /** What each entity looked like in the last update sent, to send only what changed. */
+  private sent = new Map<number, string>();
+  /** The events of the game steps since the last update. */
+  private pending = { tiles: [] as [number, number][], amounts: new Map<number, number>(), shots: [] as [number, number][], hits: [] as [number, number][], blessings: [] as [number, number, number][] };
+
+  /**
+   * Advances the game one step (10 a second). Every SNAP_EVERY steps, and at the end, returns the
+   * update to send to everyone: only what changed since the last one, with the events in between;
+   * a full one every KEYFRAME_TICKS. Returns nothing in between, in the lobby, paused or after the end.
+   */
   tick(): ServerMessage | undefined {
     const s = this.state;
     // Paused, or over: once there is a winner the game stands still.
@@ -255,6 +281,20 @@ export class GameHost {
       if ((s.tick + player.slot * 3) % AI_STYLES[level].every === 0) runAi(s, player.slot, level);
     }
     step(s);
+    const p = this.pending;
+    p.tiles.push(...s.tileEvents);
+    for (const [i, a] of s.amountEvents) p.amounts.set(i, a);
+    p.shots.push(...s.shots);
+    p.hits.push(...s.hits);
+    p.blessings.push(...s.blessings);
+    if (s.tick % SNAP_EVERY !== 0 && s.winner < 0) return undefined;
+    return this.snapshot(s.tick % KEYFRAME_TICKS === 0);
+  }
+
+  /** The update for everyone (see tick), or with `full` everything as it is, for someone just coming in. */
+  snapshot(full: boolean, forNewcomer = false): ServerMessage | undefined {
+    const s = this.state;
+    if (!s) return undefined;
     const round = (v: number) => Math.round(v * 100) / 100;
     const ents: EntitySnapshot[] = [];
     const queues: QueueSnapshot[] = [];
@@ -263,6 +303,7 @@ export class GameHost {
     const workers = new Map<number, Record<string, number>>();
     // Fields someone is assigned to, coming and going included.
     const farmed = new Set<number>();
+    const live = new Set<number>();
     for (const e of s.entities.values()) if (e.order.t === 'gather' && e.order.farm >= 0) farmed.add(e.order.farm);
     for (const e of s.entities.values()) {
       if (e.order.t === 'gather') {
@@ -280,14 +321,19 @@ export class GameHost {
             e.fallow !== undefined ? Math.ceil(FALLOW_SECONDS - (s.tick - e.fallow) / TICK_RATE) : e.carry]
           : [(inside > 0 ? 1 : 0) | (hasKingInside(s, e) ? 2 : 0), inside]
         : taskOf(e);
-      ents.push([
+      const ent: EntitySnapshot = [
         e.id, e.owner, KINDS.indexOf(e.kind), round(e.x), round(e.y), Math.ceil(e.hp), activityOf(e),
         // Units: carried amount + 100 * resource + 1000 * building sites still queued.
         building ? Math.floor(e.progress * 100) : e.carry + 100 * RESOURCES.indexOf(e.carryRes) + 1000 * Math.min(9, e.tasks?.length ?? 0) + (e.stance === 'defensive' ? 10000 : 0) + 20000 * FORMATIONS.indexOf(e.formation ?? 'none')
           // Formation 0-4 (× 20000); trebuchets: 1 set up, 2 setting up or packing (× 100000).
           + 100000 * (e.setup ? 2 : e.deployed ? 1 : 0),
         task, target,
-      ]);
+      ];
+      // Only what changed goes out (everything in a full update).
+      const key = ent.join(',');
+      live.add(e.id);
+      if (full || this.sent.get(e.id) !== key) ents.push(ent);
+      if (!forNewcomer) this.sent.set(e.id, key);
       if (e.queue.length > 0) {
         const first = e.queue[0];
         const time = isTech(first) ? TECHS[first].time : DEFS[first as (typeof KINDS)[number]].time;
@@ -295,20 +341,34 @@ export class GameHost {
       }
       if (e.rally) rallies.push([e.id, e.rally[0], e.rally[1]]);
     }
+    // Gone since the last update: dead, or sheltering inside a building.
+    const gone: number[] = [];
+    if (!forNewcomer) {
+      for (const id of this.sent.keys()) {
+        if (live.has(id)) continue;
+        gone.push(id);
+        this.sent.delete(id);
+      }
+    }
+    // A newcomer gets the picture only: the events are for those who saw what came before.
+    if (forNewcomer) {
+      return {
+        t: 'snap', tick: s.tick, full: true, ents, gone: [], queues, players: this.playerRows(s, workers, mask), blessings: [],
+        relics: s.relics.map((r) => [round(r.x), round(r.y), r.carrier, r.monastery, r.foundBy]),
+        tiles: [], amounts: [], shots: [], hits: [], deaths: [], rallies, winner: s.winner,
+      };
+    }
     // The deaths go out with this snapshot; whatever dies from now on goes in the next one.
     const deaths = s.deaths;
     s.deaths = [];
+    const p = this.pending;
+    this.pending = { tiles: [], amounts: new Map(), shots: [], hits: [], blessings: [] };
     return {
-      t: 'snap', tick: s.tick, ents, queues,
-      players: [...s.players.values()].map((p) => [
-        p.slot, p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, p.defeated ? 1 : 0,
-        p.age, mask(p.techs), mask(p.researching), ...RESOURCES.map((r) => workers.get(p.slot)?.[r] ?? 0),
-        // Whether the town bell has called the villagers in.
-        [...s.entities.values()].some((e) => e.owner === p.slot && e.recall) ? 1 : 0,
-      ]),
-      blessings: s.blessings,
+      t: 'snap', tick: s.tick, full: full || undefined, ents, gone, queues,
+      players: this.playerRows(s, workers, mask),
+      blessings: p.blessings,
       relics: s.relics.map((r) => [round(r.x), round(r.y), r.carrier, r.monastery, r.foundBy]),
-      tiles: s.tileEvents, amounts: [...s.amountEvents], shots: s.shots, hits: s.hits, deaths, rallies, winner: s.winner, stats: s.winner >= 0 ? [...s.players.values()].map((p) => [p.slot, p.stats] as [number, typeof p.stats]) : undefined,
+      tiles: p.tiles, amounts: [...p.amounts], shots: p.shots, hits: p.hits, deaths, rallies, winner: s.winner, stats: s.winner >= 0 ? [...s.players.values()].map((p) => [p.slot, p.stats] as [number, typeof p.stats]) : undefined,
     };
   }
 }

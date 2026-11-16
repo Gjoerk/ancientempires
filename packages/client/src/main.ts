@@ -38,6 +38,7 @@ import {
   TECHS,
   Tile,
   TICK_MS,
+  SNAP_MS,
   TILE_RESOURCE,
   TRADE_BUY,
   TRADE_GOODS,
@@ -1066,8 +1067,15 @@ function onMessage(msg: ServerMessage): void {
     }
   } else if (msg.t === 'snap') {
     const now = performance.now();
-    const alpha = Math.min(1, (now - snapTime) / TICK_MS);
+    const alpha = Math.min(1, (now - snapTime) / SNAP_MS);
     const seen = new Set<number>();
+    // Things not in this update did not change: wherever they were heading, they are there now.
+    const changed = new Set(msg.ents.map((e) => e[0]));
+    for (const v of views.values()) {
+      if (changed.has(v.id)) continue;
+      v.px = v.x;
+      v.py = v.y;
+    }
     for (const [id, owner, kindIdx, x, y, hp, act, extra, task, target] of msg.ents) {
       seen.add(id);
       const v = views.get(id);
@@ -1094,8 +1102,11 @@ function onMessage(msg: ServerMessage): void {
         if (owner === me && !isBuilding(created.kind) && msg.tick > 20) play(`trained.${created.kind}`, 300);
       }
     }
-    for (const [id, v] of views) {
-      if (seen.has(id)) continue;
+    // A full update lists everything: whatever is not in it is gone. Otherwise the update says what went.
+    const gone = msg.full ? [...views.keys()].filter((id) => !seen.has(id)) : msg.gone ?? [];
+    for (const id of gone) {
+      const v = views.get(id);
+      if (!v) continue;
       setBlocked(v, 0);
       views.delete(id);
       if (bands.delete(id)) pruneBands();
@@ -3846,7 +3857,7 @@ function frame(now: number): void {
   }
 
   // Everything standing on the ground shares one depth-sorted pass.
-  const alpha = Math.min(1, (now - snapTime) / TICK_MS);
+  const alpha = Math.min(1, (now - snapTime) / SNAP_MS);
   const drawables: { depth: number; draw: () => void }[] = [];
   // Zoomed out, trees and rocks are already part of the ground blocks.
   const far = farView();

@@ -3,7 +3,7 @@ import {
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, markBuilding, Tile, TILE_RESOURCE } from './map';
-import { areaAt, canReach, findPath, findPathToArea, nearestReachable } from './path';
+import { areaAt, canReach, distanceField, findPath, findPathToArea, nearestReachable, pathDown } from './path';
 
 /** Simulation steps per second. The host runs this; guests only draw snapshots. */
 export const TICK_RATE = 10;
@@ -804,6 +804,13 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
   const pace = units.length > 1 && !loose ? Math.min(...units.map((e) => DEFS[e.kind].speed ?? 1)) : undefined;
   const nearby = new Map<string, { spots: [number, number][]; next: number }>();
   const finals = new Map<Entity, [number, number]>();
+  // A bigger group, or one going far, shares a distance field towards the spot instead of a search
+  // each; it is kept for a while, so that troops setting off again after a fight reuse it too.
+  const pathFor = (e: Entity, sx: number, sy: number, tx: number, ty: number, team: number) => {
+    const far = Math.abs(tx - sx) + Math.abs(ty - sy) > 24;
+    const field = units.length >= 6 || far ? fieldTowards(state, Math.floor(x), Math.floor(y), team) : undefined;
+    return field ? pathDown(state.map, field, sx, sy, tx, ty, team) : findPath(state.map, sx, sy, tx, ty, team);
+  };
   for (const e of units) {
     let spot = slots.get(e);
     if (!spot) continue;
@@ -824,7 +831,7 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
       }
       spot = near.spots[near.next++ % near.spots.length];
     }
-    e.path = findPath(state.map, ex, ey, Math.floor(spot[0]), Math.floor(spot[1]), team);
+    e.path = pathFor(e, ex, ey, Math.floor(spot[0]), Math.floor(spot[1]), team);
     e.endAt = spot;
     e.order = { t: 'move' };
     e.pace = pace;
@@ -832,6 +839,25 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
     finals.set(e, spot);
   }
   if (!loose && units.length >= 2) formGroup(state, units, finals, x, y);
+}
+
+/** Distance fields towards recent destinations, per game: dropped when the map changes, or after a while. */
+const fieldCache = new WeakMap<GameState, Map<string, { version: number; tick: number; field: Float32Array }>>();
+const FIELD_KEEP_TICKS = 60 * TICK_RATE;
+function fieldTowards(state: GameState, gx: number, gy: number, team: number): Float32Array {
+  let cache = fieldCache.get(state);
+  if (!cache) fieldCache.set(state, (cache = new Map()));
+  const key = `${team}:${gx},${gy}`;
+  const kept = cache.get(key);
+  if (kept && kept.version === state.map.version && state.tick - kept.tick < FIELD_KEEP_TICKS) return kept.field;
+  // A handful at most, the oldest go first.
+  if (cache.size >= 8) {
+    const oldest = [...cache].sort((a, b) => a[1].tick - b[1].tick)[0];
+    cache.delete(oldest[0]);
+  }
+  const field = distanceField(state.map, gx, gy, team);
+  cache.set(key, { version: state.map.version, tick: state.tick, field });
+  return field;
 }
 
 /** Sends a group off as a block on the march, if it is going far enough for that. */
@@ -1328,10 +1354,45 @@ export function applyCommand(state: GameState, slot: number, cmd: Command): void
 
 // --- simulation --------------------------------------------------------------
 
+/**
+ * Everyone on the map sorted into squares of GRID tiles, made once a game step: "who is near here"
+ * then looks at a few squares instead of everyone on the map, which is what keeps big battles fast.
+ * Buildings are filed by their middle; whoever died since is skipped by the caller.
+ */
+const GRID = 8;
+const grids = new WeakMap<GameState, { tick: number; cells: Map<number, Entity[]> }>();
+function grid(state: GameState): Map<number, Entity[]> {
+  const kept = grids.get(state);
+  if (kept && kept.tick === state.tick) return kept.cells;
+  const cells = new Map<number, Entity[]>();
+  for (const e of state.entities.values()) {
+    if (e.inside >= 0) continue;
+    const [cx, cy] = isBuilding(e) ? centre(e) : [e.x, e.y];
+    const key = Math.floor(cy / GRID) * 1024 + Math.floor(cx / GRID);
+    const list = cells.get(key);
+    if (list) list.push(e);
+    else cells.set(key, [e]);
+  }
+  grids.set(state, { tick: state.tick, cells });
+  return cells;
+}
+/** Everyone whose middle is within about `r` tiles of (x, y) (a little more: the squares are coarse). */
+function* near(state: GameState, x: number, y: number, r: number): Generator<Entity> {
+  const cells = grid(state);
+  // Big buildings reach out from their middle: a few tiles more.
+  const pad = r + 3;
+  for (let gy = Math.floor((y - pad) / GRID); gy <= Math.floor((y + pad) / GRID); gy++) {
+    for (let gx = Math.floor((x - pad) / GRID); gx <= Math.floor((x + pad) / GRID); gx++) {
+      const list = cells.get(gy * 1024 + gx);
+      if (list) for (const e of list) if (state.entities.has(e.id)) yield e;
+    }
+  }
+}
+
 function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefined {
   let best: Entity | undefined;
   let bestScore = Infinity;
-  for (const other of state.entities.values()) {
+  for (const other of near(state, e.x, e.y, reach)) {
     // Only units are picked on sight; buildings are attacked when a player orders it. Siege
     // engines are the other way round: they go only for buildings.
     if (isBuilding(other) !== !!DEFS[e.kind].buildingsOnly || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
@@ -1452,7 +1513,7 @@ function fightBack(state: GameState, victim: Entity, attacker: Entity): void {
     u.order = { t: 'attack', id: attacker.id, auto: true, then, answer: true };
   };
   answer(victim);
-  for (const u of state.entities.values()) {
+  for (const u of near(state, victim.x, victim.y, HELP_RADIUS)) {
     if (u === victim || u.owner !== victim.owner || !isSoldier(u)) continue;
     const radius = u.stance === 'defensive' ? HOLD_RADIUS : HELP_RADIUS;
     if (Math.abs(u.x - victim.x) > radius || Math.abs(u.y - victim.y) > radius || distance(u, victim) > radius) continue;

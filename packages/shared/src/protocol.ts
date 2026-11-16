@@ -80,7 +80,11 @@ export type ServerMessage =
   | {
       t: 'snap';
       tick: number;
+      /** Everything is in it (otherwise only what changed since the last update). */
+      full?: boolean;
       ents: EntitySnapshot[];
+      /** Gone since the last update (dead, or gone inside a building). */
+      gone: number[];
       players: PlayerSnapshot[];
       queues: QueueSnapshot[];
       /** Tiles that changed this tick: [tile index, new tile]. */
