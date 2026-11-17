@@ -58,9 +58,22 @@ export function installCursorLock(target: HTMLElement, wanted: () => boolean): v
     (hovered ?? target).dispatchEvent(new MouseEvent('mousemove', init(ev)));
   };
   // Only real events are caught here; the copies sent on below pass straight through.
+  // When a button goes down or up, some browsers (Firefox among them) send a movement that jumps the
+  // pointer back to where it was locked: all the way from there to the corner of the window. Followed,
+  // it would throw the drawn cursor into the corner and every click would land there. Such jumps are
+  // left out.
+  let pressedAt = -1e9;
+  const bogus = (ev: MouseEvent) => {
+    const big = Math.abs(ev.movementX) + Math.abs(ev.movementY) > 150;
+    if (!big) return false;
+    const toCorner = ev.movementX === -ev.clientX && ev.movementY === -ev.clientY;
+    return toCorner || performance.now() - pressedAt < 40;
+  };
+  for (const type of ['mousedown', 'mouseup'] as const) window.addEventListener(type, () => (pressedAt = performance.now()), true);
   window.addEventListener('mousemove', (ev) => {
     if (!ev.isTrusted || !locked()) return;
     ev.stopImmediatePropagation();
+    if (bogus(ev)) return;
     moveBy(ev.movementX, ev.movementY, ev);
   }, true);
   // Test browsers report no real movement while the pointer is locked, so tests move the drawn cursor directly.
@@ -70,7 +83,9 @@ export function installCursorLock(target: HTMLElement, wanted: () => boolean): v
     window.addEventListener(type, (ev) => {
       if (!ev.isTrusted || !locked()) return;
       ev.stopImmediatePropagation();
-      ev.preventDefault();
+      // Not for pointer events: cancelling a pointerdown also cancels the mousedown and mouseup
+      // that follow it (Firefox keeps to that strictly), and the game listens for those.
+      if (!type.startsWith('pointer')) ev.preventDefault();
       hover(ev);
       const at = hovered ?? target;
       if (type === 'mousedown' && at instanceof HTMLElement && at.matches('input, textarea')) at.focus();

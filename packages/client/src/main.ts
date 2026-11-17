@@ -177,6 +177,12 @@ const prefs = {
   colorblind: false,
   /** Hints for the first games. */
   hints: true,
+  /**
+   * In fullscreen, keep the mouse inside the game (a drawn cursor stands in for it), so that
+   * scrolling at the screen edge cannot slide onto another monitor. Off at first in Firefox, where
+   * clicks did not get through with it.
+   */
+  lockMouse: !/firefox/i.test(navigator.userAgent),
   ...(() => {
     try {
       return JSON.parse(localStorage.getItem('kingsfall.prefs') ?? '{}') as object;
@@ -215,6 +221,7 @@ function openSettings(): void {
   $<HTMLInputElement>('set-edge').checked = prefs.edge;
   $<HTMLInputElement>('set-colorblind').checked = prefs.colorblind;
   $<HTMLInputElement>('set-hints').checked = prefs.hints;
+  $<HTMLInputElement>('set-lock').checked = prefs.lockMouse;
   $<HTMLInputElement>('set-scroll').value = String(prefs.scroll);
   $<HTMLInputElement>('set-ui').value = String(prefs.ui);
   $('set-scroll-v').textContent = `${Math.round(prefs.scroll * 100)}%`;
@@ -2829,7 +2836,7 @@ $('sfx-vol').addEventListener('input', () => {
 $('sfx-vol').addEventListener('change', () => play('order', 0));
 showAudio();
 // In fullscreen the pointer is kept on this screen while playing, so edge scrolling cannot lose it to another monitor.
-installCursorLock(canvas, () => !$('bottom').hidden);
+installCursorLock(canvas, () => !$('bottom').hidden && prefs.lockMouse);
 $('pause-btn').addEventListener('click', () => {
   $('menu').hidden = true;
   session?.send({ t: 'pause', answer: 'request' });
@@ -2864,11 +2871,12 @@ $('chat-to').addEventListener('mousedown', (ev) => {
   teamChat = !teamChat;
   chatPlaceholder();
 });
-for (const [id, key] of [['set-hotkeys', 'hotkeys'], ['set-edge', 'edge'], ['set-colorblind', 'colorblind'], ['set-hints', 'hints']] as const) {
+for (const [id, key] of [['set-hotkeys', 'hotkeys'], ['set-edge', 'edge'], ['set-colorblind', 'colorblind'], ['set-hints', 'hints'], ['set-lock', 'lockMouse']] as const) {
   $<HTMLInputElement>(id).addEventListener('change', (ev) => {
     prefs[key] = (ev.target as HTMLInputElement).checked;
     savePrefs();
     applyPrefs();
+    if (!prefs.lockMouse && document.pointerLockElement) document.exitPointerLock();
   });
 }
 for (const [id, key] of [['set-scroll', 'scroll'], ['set-ui', 'ui']] as const) {
