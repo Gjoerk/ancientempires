@@ -12,7 +12,7 @@ const SIZE = 48;
 // e green, s stone, l light stone, o brown, c cream.
 const PALETTE: Record<string, string> = {
   w: '#e3e7ec', k: '#7a5230', b: '#2a2018', r: '#c8402f', g: '#e0b030', y: '#f7df7a',
-  e: '#5f9a3a', d: '#a86a14', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8', i: '#8fd0ff', j: '#eaf8ff',
+  e: '#5f9a3a', d: '#a86a14', n: '#3d6b25', p: '#7e1f22', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8', i: '#8fd0ff', j: '#eaf8ff',
 };
 
 const GLYPHS: Record<string, string[]> = {
@@ -209,22 +209,20 @@ const GLYPHS: Record<string, string[]> = {
     'kk........',
   ],
   food: [
-    '.......d.......',
-    '......yyd......',
-    '..d...ygd...d..',
-    '.yyd..yyd..yyd.',
-    '.ygd..dgy..ygd.',
-    '.yyd..yyd..yyd.',
-    '.dgy..ygd..dgy.',
-    '..yyd.yyd.yyd..',
-    '...dg.dgd.gd...',
-    '....dgygydd....',
-    '....gdygdyg....',
-    '...ooooooooo...',
-    '....gdygdyg....',
-    '....dgydgyd....',
-    '....gdygdyg....',
-    '.....d.d.d.....',
+    '....nn.nnn....',
+    '..neen.nneen..',
+    '.neen.n..neen.',
+    'nee...rr...een',
+    '..rr.rjrr.rr..',
+    '.rjrrrrrprjrr.',
+    '.rrrp.pp.rrrp.',
+    '..pprr..rrpp..',
+    '...rjrrrjrr...',
+    '.rrrrrprrrprr.',
+    'rjrrpprrpprjrr',
+    'rrrp.rjrr.rrrp',
+    '.pp..rrrp..pp.',
+    '......pp......',
   ],
   wood: [
     '..........',
