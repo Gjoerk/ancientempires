@@ -265,6 +265,23 @@
     #score canvas { width: 100%; margin-top: 10px; background: rgba(0, 0, 0, .25); border-radius: 6px; }
     #score p { margin: 2px 0 0; font-size: 12px; text-align: center; }
     body.spectating #idle { visibility: hidden; }
+    /* Watching: every player's resources, in a small table at the top left. */
+    #specboard { position: fixed; top: 52px; left: 8px; z-index: 5; padding: 6px 8px; max-width: calc(100vw - 16px); box-sizing: border-box;
+      background: rgba(10, 24, 17, .88); border: 1px solid var(--trim); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .45); pointer-events: none; }
+    #specboard[hidden] { display: none; }
+    body.replaying #specboard { top: 104px; }
+    #specboard table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    #specboard th, #specboard td { padding: 2px 6px; text-align: right; white-space: nowrap; }
+    #specboard th img { width: 18px; height: 18px; image-rendering: pixelated; vertical-align: middle; }
+    #specboard th:last-child { font-size: 11px; color: var(--dim); }
+    #specboard td.who { text-align: left; max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+    #specboard tr.out td { opacity: .45; text-decoration: line-through; }
+    /* The legend under the chart on the score screen. */
+    #score .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; font-size: 13px; margin-top: 4px; }
+    #score .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    #score .legend b { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+    #score .legend i { width: 22px; height: 0; display: inline-block; border-top: 3px solid var(--ink); }
+    #score .legend i.dashed { border-top: 2px dashed var(--ink); }
     #replays { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: rgba(0, 0, 0, .45); }
     #replays[hidden] { display: none; }
     #replays h1 { margin: 0; text-align: center; }
@@ -628,6 +645,7 @@
       <button id="replays-close" type="button" class="plain">Close</button>
     </div></div>
   </div>
+  <div id="specboard" hidden></div>
   <div id="replay-bar" hidden>
     <button id="rp-back" type="button" title="Back 30 seconds">−30 s</button>
     <button id="rp-play" type="button">Pause</button>
@@ -777,9 +795,9 @@
         <label class="field">Room code
           <input id="room" placeholder="ABCD" maxlength="8">
         </label>
-        <button id="join-btn" class="plain">Join</button>
         <button id="watch-btn" class="plain" title="Watch the game without playing; the whole map is shown">Watch</button>
       </div>
+      <button id="join-btn" class="plain">Join</button>
       <p id="lobby-msg" role="status"></p>
       <button id="browse-btn" type="button" class="plain">Find open games</button>
       <label class="field">Connection

@@ -1900,7 +1900,8 @@ $<HTMLFormElement>('lobby-form').addEventListener('submit', async (ev) => {
   } catch {
     // Not kept.
   }
-  let code = normaliseCode($<HTMLInputElement>('room').value);
+  // A new game always gets a new code; the code field is only for joining and watching.
+  let code = hosting ? '' : normaliseCode($<HTMLInputElement>('room').value);
   if (!hosting && !code) {
     $('lobby-msg').textContent = 'Enter the room code your host gave you.';
     return;
@@ -3629,7 +3630,20 @@ function updateHints(now: number): void {
 
 function renderHud(): void {
   const p = players.get(me);
-  if (!p) return;
+  if (!p) {
+    // Watching: the players' resources are in their own table; up here just the game time.
+    if (me >= 0 || !map) return;
+    const seconds = Math.floor(gameTick / 10);
+    const signature = `watch|${seconds}`;
+    if (signature === hudSignature) return;
+    hudSignature = signature;
+    const clock = document.createElement('span');
+    clock.className = 'stat';
+    clock.title = 'Game time';
+    clock.append(Object.assign(document.createElement('b'), { textContent: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }));
+    $('resources').replaceChildren(clock);
+    return;
+  }
   const idle = [...views.values()].filter((v) => v.owner === me && v.kind === 'villager' && v.act === 0).length;
   const seconds = Math.floor(gameTick / 10);
   const signature = [p.res.food, p.res.wood, p.res.gold, p.res.stone, p.pop, p.cap, idle, p.defeated, winner, p.age, seconds,
@@ -3696,6 +3710,58 @@ function showEnd(won: boolean): void {
   $('end-wait').hidden = host;
   renderScore();
   $('end').hidden = false;
+}
+
+/** Watching (as a spectator or in a replay): every player's resources, population and age. */
+let specSignature = '';
+function renderSpecBoard(): void {
+  const box = $('specboard');
+  const show = me < 0 && !!map && players.size > 0;
+  box.hidden = !show;
+  if (!show) return;
+  const rows = roster.filter((p) => players.has(p.slot));
+  const signature = rows.map((p) => {
+    const v = players.get(p.slot)!;
+    return [p.slot, p.name, p.team, v.res.food, v.res.wood, v.res.gold, v.res.stone, v.pop, v.cap, v.age, v.defeated].join();
+  }).join('|');
+  if (signature === specSignature) return;
+  specSignature = signature;
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  head.append(document.createElement('th'));
+  for (const id of [...RESOURCES, 'house']) {
+    const th = document.createElement('th');
+    const img = document.createElement('img');
+    img.src = icon(id, 0);
+    img.alt = id === 'house' ? 'Population' : id;
+    img.title = id === 'house' ? 'Population / housing' : `${id[0].toUpperCase()}${id.slice(1)}`;
+    th.append(img);
+    head.append(th);
+  }
+  const ageHead = document.createElement('th');
+  ageHead.textContent = 'Age';
+  head.append(ageHead);
+  table.append(head);
+  for (const p of rows) {
+    const v = players.get(p.slot)!;
+    const tr = document.createElement('tr');
+    if (v.defeated) tr.className = 'out';
+    const who = document.createElement('td');
+    who.className = 'who';
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.setProperty('--gem', `var(--gem-${p.team})`);
+    who.append(chip, p.name);
+    who.title = p.name;
+    tr.append(who);
+    for (const value of [...RESOURCES.map((r) => String(v.res[r] ?? 0)), `${v.pop}/${v.cap}`, ['', 'I', 'II', 'III'][v.age] ?? String(v.age)]) {
+      const td = document.createElement('td');
+      td.textContent = value;
+      tr.append(td);
+    }
+    table.append(tr);
+  }
+  box.replaceChildren(table);
 }
 
 /** The score screen: a line per player, and how villagers and armies grew over the game. */
@@ -3768,10 +3834,30 @@ function renderScore(): void {
     }
   }
   c.setLineDash([]);
+  // What is what: a colour per player, and the two kinds of line.
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  const line = (dashed: boolean, label: string) => {
+    const item = document.createElement('span');
+    const key = document.createElement('i');
+    key.className = dashed ? 'dashed' : 'solid';
+    item.append(key, label);
+    legend.append(item);
+  };
+  line(false, 'Army');
+  line(true, 'Villagers');
+  for (const [slot] of rows) {
+    const p = roster.find((q) => q.slot === slot)!;
+    const item = document.createElement('span');
+    const swatch = document.createElement('b');
+    swatch.style.background = PLAYER_COLORS[slot] ?? '#fff';
+    item.append(swatch, p.name);
+    legend.append(item);
+  }
   const caption = document.createElement('p');
   caption.className = 'dim';
-  caption.textContent = 'Army (solid) and villagers (dashed) over the game';
-  box.append(table, chart, caption);
+  caption.textContent = 'Army and villagers of each player over the game';
+  box.append(table, caption, chart, legend);
 }
 
 let minimapTime = 0;
@@ -4457,6 +4543,7 @@ function frame(now: number): void {
 
   renderPanel();
   renderHud();
+  renderSpecBoard();
   updateHints(performance.now());
   renderIdle();
   renderGroups();
