@@ -286,6 +286,7 @@
     #replay-bar #rp-play { min-width: 70px; }
     #replay-bar input[type=range] { flex: 1; min-width: 60px; accent-color: var(--accent); }
     #rp-time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--accent); }
+    body.spectating #pause-btn, body.spectating #resign-btn { display: none; }
     body.replaying #chat-input, body.replaying #chat-to, body.replaying #pause-btn { display: none; }
     #settings { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: rgba(0, 0, 0, .45); }
     #settings[hidden] { display: none; }
@@ -372,8 +373,9 @@
     /* Room codes in a plain monospaced face where every letter and digit is told apart easily. */
     .code, #room-code, #room { font-family: "Roboto Mono", ui-monospace, Consolas, monospace; font-variant: normal; letter-spacing: .08em; }
     #room, .code { text-transform: uppercase; font-weight: 700; }
-    #room-title .code { font-size: .9em; color: var(--accent); }
-    #room-code { color: var(--accent); }
+    /* The code in the same colour as the word Room before it. */
+    #room-title .code { font-size: .9em; color: inherit; }
+    #room-code, #menu .room-line { color: var(--accent); }
     #room-players { list-style: none; margin: 4px 0; padding: 8px; display: grid; gap: 6px; background: rgba(0, 0, 0, .22); border-radius: 6px;
       border: 1px solid rgba(201, 165, 74, .2); }
     #room-players li { display: flex; align-items: center; gap: 5px; min-width: 0; }
@@ -551,7 +553,8 @@
     <button id="settings-btn" type="button">Settings</button>
     <button id="pause-btn" type="button" title="Ask the other players to pause the game">Request pause</button>
     <button id="resign-btn" type="button">Resign</button>
-    <span class="dim">Room <b id="room-code"></b></span>
+    <button id="leave-game-btn" type="button" title="Back to the main menu">Exit to main menu</button>
+    <span class="room-line">Room <b id="room-code"></b></span>
   </div>
   <div id="bottom" class="bar" hidden>
     <div id="groups" hidden></div>

@@ -1850,6 +1850,19 @@ $('rematch-btn').addEventListener('click', () => {
 });
 $('newgame-btn').addEventListener('click', () => session?.host?.backToLobby());
 $('exit-btn').addEventListener('click', () => session?.close());
+// Out of the game to the main menu, from the in-game menu: at once when only watching (a replay, or as
+// a spectator), after asking when playing.
+$('leave-game-btn').addEventListener('click', () => {
+  $('menu').hidden = true;
+  if (!session) return showLobby('');
+  if (!replay && me >= 0 && winner < 0) {
+    const question = session.host
+      ? 'Leave the game? You are hosting it: another player takes over if they can, otherwise the game ends for everyone.'
+      : 'Leave the game? Your side waits for you; you can come back in with the same room code.';
+    if (!confirm(question)) return;
+  }
+  session.close();
+});
 $('end-look').addEventListener('click', () => ($('end').hidden = true));
 $('end-btn').addEventListener('click', () => {
   if (confirm('End this game for everyone and go back to the lobby?')) session?.host?.backToLobby();
