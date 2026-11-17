@@ -70,11 +70,27 @@ export function installCursorLock(target: HTMLElement, wanted: () => boolean): v
     return toCorner || performance.now() - pressedAt < 40;
   };
   for (const type of ['mousedown', 'mouseup'] as const) window.addEventListener(type, () => (pressedAt = performance.now()), true);
+  // A gaming mouse reports up to a thousand moves a second, and finding what is under the cursor can
+  // make the browser lay out the page again: the moves are added up and passed on once per frame.
+  let pendingX = 0;
+  let pendingY = 0;
+  let pendingEv: MouseEvent | undefined;
+  const flush = () => {
+    if (!pendingEv) return;
+    const ev = pendingEv;
+    pendingEv = undefined;
+    const [dx, dy] = [pendingX, pendingY];
+    pendingX = pendingY = 0;
+    moveBy(dx, dy, ev);
+  };
   window.addEventListener('mousemove', (ev) => {
     if (!ev.isTrusted || !locked()) return;
     ev.stopImmediatePropagation();
     if (bogus(ev)) return;
-    moveBy(ev.movementX, ev.movementY, ev);
+    pendingX += ev.movementX;
+    pendingY += ev.movementY;
+    if (!pendingEv) requestAnimationFrame(flush);
+    pendingEv = ev;
   }, true);
   // Test browsers report no real movement while the pointer is locked, so tests move the drawn cursor directly.
   if (import.meta.env.DEV) Object.assign(window, { __cursorMove: (dx: number, dy: number) => moveBy(dx, dy, new MouseEvent('mousemove')) });
@@ -83,6 +99,8 @@ export function installCursorLock(target: HTMLElement, wanted: () => boolean): v
     window.addEventListener(type, (ev) => {
       if (!ev.isTrusted || !locked()) return;
       ev.stopImmediatePropagation();
+      // Wherever the cursor has got to, before the press or release is passed on.
+      flush();
       // Not for pointer events: cancelling a pointerdown also cancels the mousedown and mouseup
       // that follow it (Firefox keeps to that strictly), and the game listens for those.
       if (!type.startsWith('pointer')) ev.preventDefault();
@@ -99,6 +117,7 @@ export function installCursorLock(target: HTMLElement, wanted: () => boolean): v
     if (!ev.isTrusted || !locked()) return;
     ev.stopImmediatePropagation();
     ev.preventDefault();
+    flush();
     (hovered ?? target).dispatchEvent(new WheelEvent('wheel', { ...init(ev), deltaX: ev.deltaX, deltaY: ev.deltaY, deltaMode: ev.deltaMode }));
   }, { capture: true, passive: false });
 

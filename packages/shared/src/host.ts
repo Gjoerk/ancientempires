@@ -1,5 +1,5 @@
 import { DEFS, FALLOW_SECONDS, isTech, KINDS, POP_MAX, QUEUE_ITEMS, RESOURCES, TECH_IDS, TECHS } from './defs';
-import { generateMap, MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
+import { GameMap, generateMap, MAP_SIZES, MAX_PLAYERS, MAX_TEAMS } from './map';
 import { AI_LEVELS, AI_STYLES, AiLevel, runAi } from './ai';
 import type { EntitySnapshot, GameSettings, PlayerInfo, QueueSnapshot, ServerMessage } from './protocol';
 import { activityOf, FORMATIONS, countInside, hasKingInside, taskOf, addPlayer, applyCommand, Command, createGame, GameState, placeRelics, removePlayer, step, TICK_RATE } from './sim';
@@ -96,7 +96,7 @@ export class GameHost {
   /** Every tile that differs from the start of the game, for someone coming back in. */
   catchUp(): ServerMessage | undefined {
     if (!this.state) return undefined;
-    const start = generateMap(this.state.seed, this.state.map.size, this.state.map.starts.length);
+    const start = this.startMap();
     const now = this.state.map;
     const tiles: [number, number, number][] = [];
     for (let i = 0; i < now.tiles.length; i++) {
@@ -202,6 +202,16 @@ export class GameHost {
     this.sent.clear();
   }
 
+  /** The map as the game began, worked out once per game (to tell what has changed since). */
+  private firstMap?: { seed: number; map: GameMap };
+  private startMap(): GameMap {
+    const s = this.state!;
+    if (this.firstMap?.seed !== s.seed || this.firstMap.map.size !== s.map.size || this.firstMap.map.starts.length !== s.map.starts.length) {
+      this.firstMap = { seed: s.seed, map: generateMap(s.seed, s.map.size, s.map.starts.length) };
+    }
+    return this.firstMap.map;
+  }
+
   /** Ends the running game and sends everyone back to the lobby. */
   backToLobby(): void {
     this.state = undefined;
@@ -221,7 +231,7 @@ export class GameHost {
   backup(): string | undefined {
     const s = this.state;
     if (!s) return undefined;
-    const start = generateMap(s.seed, s.map.size, s.map.starts.length);
+    const start = this.startMap();
     const tiles: [number, number, number][] = [];
     for (let i = 0; i < s.map.tiles.length; i++) {
       if (s.map.tiles[i] !== start.tiles[i] || s.map.amount[i] !== start.amount[i]) tiles.push([i, s.map.tiles[i], s.map.amount[i]]);

@@ -104,8 +104,8 @@ export function savedGame(code: string): Saved | undefined {
   }
   return undefined;
 }
-function saveGame(code: string, game: GameHost, slot: number): void {
-  const text = game.backup();
+function saveGame(code: string, game: GameHost, slot: number, made?: string): void {
+  const text = made ?? game.backup();
   if (!text) return;
   try {
     localStorage.setItem(saveKey(code), JSON.stringify({ at: Date.now(), slot, text } satisfies Saved));
@@ -329,12 +329,11 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
   };
 
   /** Sends a backup of the game to the first two players in line to take over. */
-  const sendBackup = () => {
+  const sendBackup = (text: string) => {
     if (!game.state || game.state.winner >= 0) return;
     const heirs = [...game.players.values()].filter((p) => !p.ai && !p.test && !p.away && p.slot !== mySlot).map((p) => p.slot).sort((a, b) => a - b);
     const to = [...guests].filter(([conn, slot]) => conn.open && heirs.slice(0, 2).includes(slot)).map(([conn]) => conn);
     if (to.length === 0) return;
-    const text = game.backup()!;
     const n = Math.ceil(text.length / BACKUP_PIECE);
     const id = ++backupId;
     for (let i = 0; i < n; i++) {
@@ -397,8 +396,12 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       if (snap) broadcast(snap);
       else if (++ticks % TICK_RATE === 0) toGuests(() => ({ t: 'ping' }));
       if (snap && game.state!.tick % BACKUP_TICKS === 0) {
-        sendBackup();
-        saveGame(code, game, mySlot);
+        // Made once, for the players who would take over and for the copy kept here.
+        const text = game.backup();
+        if (text) {
+          sendBackup(text);
+          saveGame(code, game, mySlot, text);
+        }
       }
       // A finished game is not carried on.
       if (snap?.t === 'snap' && snap.winner >= 0) forgetGame(code);
