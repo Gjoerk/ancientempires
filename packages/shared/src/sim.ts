@@ -16,7 +16,9 @@ export type Order =
   | { t: 'gather'; tile: number; farm: number; res: Res; phase: 'go' | 'work' | 'return'; drop: number }
   | { t: 'build'; id: number }
   /** `then` is where an attack-move continues to once the fight is over. */
-  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean; answer?: boolean; hold?: boolean; march?: boolean }
+  | { t: 'attack'; id: number; auto: boolean; then?: [number, number]; walled?: boolean; answer?: boolean; hold?: boolean; march?: boolean;
+      /** Attacking a building: where it stands, so that once it falls the next one nearby is taken on. */
+      razing?: [number, number] }
   /** Walk to a point, fighting anything met on the way. */
   | { t: 'amove'; x: number; y: number }
   /** Walk to a town centre or castle and go inside (villagers and the king). */
@@ -567,7 +569,7 @@ const SHORT_MOVE = 6;
 export function formationRank(kind: Kind): number {
   if (DEFS[kind].building) return 9;
   if (kind === 'villager' || kind === 'king' || kind === 'monk') return 3;
-  if (DEFS[kind].buildingsOnly) return 2;
+  if (DEFS[kind].buildingsOnly || DEFS[kind].siege) return 2;
   return (DEFS[kind].range ?? 0) > 2 ? 1 : 0;
 }
 
@@ -808,7 +810,9 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
   // No formation: everyone at their own speed, each on their own. Otherwise at the pace of the slowest.
   const loose = groupFormation(units) === 'none';
   // Everyone walks to their spot at their own speed and the formation gathers there.
-  void loose;
+  // In a formation everyone walks at the pace of the slowest, so that the group keeps together;
+  // without one, each at their own speed.
+  const pace = loose || units.length < 2 ? undefined : Math.min(...units.map((u) => DEFS[u.kind].speed ?? Infinity));
   const nearby = new Map<string, { spots: [number, number][]; next: number }>();
   // A bigger group, or one going far, shares a distance field towards the spot instead of a search
   // each; it is kept for a while, so that troops setting off again after a fight reuse it too.
@@ -841,7 +845,7 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
     e.path = pathFor(e, ex, ey, Math.floor(spot[0]), Math.floor(spot[1]), team);
     e.endAt = spot;
     e.order = { t: 'move' };
-    e.pace = undefined;
+    e.pace = pace;
   }
 }
 
@@ -1227,17 +1231,19 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
   let best: Entity | undefined;
   let bestScore = Infinity;
   for (const other of near(state, e.x, e.y, reach)) {
-    // Only units are picked on sight; buildings are attacked when a player orders it. Siege
-    // engines are the other way round: they go only for buildings.
-    if (isBuilding(other) !== !!DEFS[e.kind].buildingsOnly || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
-    if (other.kind === 'farm' && DEFS[e.kind].buildingsOnly) continue;
+    // Only units are picked on sight; buildings are attacked when a player orders it. A ram is the
+    // other way round: it goes only for buildings. A trebuchet takes either, buildings first.
+    const siege = !!DEFS[e.kind].siege;
+    if ((!siege && isBuilding(other) !== !!DEFS[e.kind].buildingsOnly) || !isEnemy(state, other.owner, e.owner) || other.inside >= 0) continue;
+    if (other.kind === 'farm' && (DEFS[e.kind].buildingsOnly || siege)) continue;
     const d = distance(e, other);
-    if (d > reach || d >= bestScore || d < (DEFS[e.kind].minRange ?? 0)) continue;
+    const score = siege && isBuilding(other) ? d - 1000 : d;
+    if (d > reach || score >= bestScore || d < (DEFS[e.kind].minRange ?? 0)) continue;
     // Never pick a fight with someone who cannot be got at (behind a wall, across water), unless
     // they can be shot from here: chasing them would go nowhere.
     if (!isBuilding(e) && d > rangeOf(e.kind, hasTech(state, e.owner)) && !canReach(state.map, Math.floor(e.x), Math.floor(e.y), Math.floor(other.x), Math.floor(other.y), teamOf(state, e.owner))) continue;
     {
-      bestScore = d;
+      bestScore = score;
       best = other;
     }
   }
@@ -1245,11 +1251,11 @@ function findEnemy(state: GameState, e: Entity, reach: number): Entity | undefin
 }
 
 /** The enemy building (not a field) nearest to a point, within `reach` tiles of it. */
-function nearestEnemyBuilding(state: GameState, e: Entity, x: number, y: number, reach: number): Entity | undefined {
+function nearestEnemyBuilding(state: GameState, e: Entity, x: number, y: number, reach: number, skip = -1): Entity | undefined {
   let best: Entity | undefined;
   let bestD = reach;
   for (const b of state.entities.values()) {
-    if (!isBuilding(b) || b.kind === 'farm' || !isEnemy(state, b.owner, e.owner)) continue;
+    if (b.id === skip || !isBuilding(b) || b.kind === 'farm' || !isEnemy(state, b.owner, e.owner)) continue;
     const [cx, cy] = centre(b);
     const d = Math.hypot(cx - x, cy - y) - sizeOf(b) / 2;
     if (d < bestD) [best, bestD] = [b, d];
@@ -1287,10 +1293,16 @@ function countKill(state: GameState, by: Entity, victim: Entity): void {
 
 const SPLASH_SHARE = 0.75;
 
+/** A building still going up has only part of its armour: a wall's foundation is no wall yet. */
+function armourOf(state: GameState, e: Entity): number {
+  const full = armorOf(e.kind, hasTech(state, e.owner));
+  return isBuilding(e) && e.progress < 1 ? Math.floor(full * e.progress) : full;
+}
+
 function strike(state: GameState, e: Entity, target: Entity): void {
   const def = DEFS[e.kind];
   const has = hasTech(state, e.owner);
-  const dmg = Math.max(1, attackOf(e.kind, has) + bonusOf(e.kind, target.kind, has) + relicBonus(state, e) - armorOf(target.kind, hasTech(state, target.owner)));
+  const dmg = Math.max(1, attackOf(e.kind, has) + bonusOf(e.kind, target.kind, has) + relicBonus(state, e) - armourOf(state, target));
   e.cooldown = Math.round(cooldownOf(e.kind, has) * TICK_RATE);
   if ((def.range ?? 0) > 2) state.shots.push([e.id, target.id]);
   else state.hits.push([e.id, target.id]);
@@ -1301,7 +1313,7 @@ function strike(state: GameState, e: Entity, target: Entity): void {
     for (const other of [...state.entities.values()]) {
       if (other === target || isBuilding(other) || other.inside >= 0 || !isEnemy(state, other.owner, e.owner)) continue;
       if (Math.hypot(other.x - cx, other.y - cy) > def.splash) continue;
-      other.hp -= Math.max(1, Math.round((attackOf(e.kind, has) + relicBonus(state, e)) * SPLASH_SHARE) - armorOf(other.kind, hasTech(state, other.owner)));
+      other.hp -= Math.max(1, Math.round((attackOf(e.kind, has) + relicBonus(state, e)) * SPLASH_SHARE) - armourOf(state, other));
       if (other.hp <= 0) {
         if (other.kind === 'king') state.slayers.set(other.owner, e.owner);
         countKill(state, e, other);
@@ -1335,7 +1347,9 @@ function fightBack(state: GameState, victim: Entity, attacker: Entity): void {
     const o = u.order;
     const has = hasTech(state, u.owner);
     let free = o.t === 'idle' || o.t === 'amove';
-    if (o.t === 'attack' && o.auto) {
+    // Tearing down a building: those who come at them are fought off first.
+    if (o.t === 'attack' && o.razing && o.id !== attacker.id) free = true;
+    else if (o.t === 'attack' && o.auto) {
       // A picked fight is dropped for the attacker only when its target is not in reach now.
       const current = state.entities.get(o.id);
       free = o.id !== attacker.id && (!current || distance(u, current) > rangeOf(u.kind, has));
@@ -1344,7 +1358,7 @@ function fightBack(state: GameState, victim: Entity, attacker: Entity): void {
     const d = distance(u, attacker);
     if (d > rangeOf(u.kind, has) && !canReach(state.map, Math.floor(u.x), Math.floor(u.y), Math.floor(attacker.x), Math.floor(attacker.y), teamOf(state, u.owner))) return;
     const then = o.t === 'amove' ? [o.x, o.y] as [number, number] : o.t === 'attack' ? o.then : undefined;
-    u.order = { t: 'attack', id: attacker.id, auto: true, then, answer: true };
+    u.order = { t: 'attack', id: attacker.id, auto: true, then, answer: true, razing: o.t === 'attack' ? o.razing : undefined };
   };
   answer(victim);
   for (const u of near(state, victim.x, victim.y, HELP_RADIUS)) {
@@ -1533,7 +1547,24 @@ function stepBuild(state: GameState, e: Entity, o: Extract<Order, { t: 'build' }
 }
 
 /** Ends a fight: an attack-move carries on to its destination, anything else stands by. */
+/** How far from a building just destroyed troops look for the next one to take on. */
+const RAZE_REACH = 10;
+
 function endAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack' }>): void {
+  // Done with a fight while tearing down buildings (the building fell, or an enemy who came at
+  // them is dealt with): on to the enemies about, or else the nearest building there. One that
+  // could not be got at is left out, or they would try it again and again.
+  if (o.razing && !isBuilding(e)) {
+    const def = DEFS[e.kind];
+    const gaveUp = state.entities.get(o.id);
+    const foe = def.buildingsOnly ? undefined : findEnemy(state, e, def.sight ?? DEFAULT_SIGHT);
+    const next = foe ?? nearestEnemyBuilding(state, e, o.razing[0], o.razing[1], RAZE_REACH, gaveUp && isBuilding(gaveUp) ? o.id : -1);
+    if (next) {
+      e.order = { t: 'attack', id: next.id, auto: true, then: o.then, razing: o.razing };
+      e.path = [];
+      return;
+    }
+  }
   if (o.then && !isBuilding(e)) attackMove(state, [e], o.then[0], o.then[1]);
   else e.order = { t: 'idle' };
 }
@@ -1542,6 +1573,7 @@ function stepAttack(state: GameState, e: Entity, o: Extract<Order, { t: 'attack'
   const def = DEFS[e.kind];
   const target = state.entities.get(o.id);
   if (!target || !isEnemy(state, target.owner, e.owner) || target.inside >= 0) return endAttack(state, e, o);
+  if (isBuilding(target)) o.razing = centre(target);
   const d = distance(e, target);
   // Marching in a block: keep to the ranks until near enough to charge, or to shoot.
   if (o.march) {

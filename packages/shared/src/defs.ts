@@ -39,6 +39,8 @@ export interface KindDef {
   minRange?: number;
   /** Only attacks buildings (siege engines). */
   buildingsOnly?: boolean;
+  /** Siege that goes for buildings first, but can also hit units (weakly). */
+  siege?: boolean;
   /** Seconds to set up before it can shoot, and to pack up again before it can move. */
   setup?: number;
   /** How far it sees, and for soldiers how far they look for enemies on their own. */
@@ -122,7 +124,7 @@ export const DEFS: Record<Kind, KindDef> = {
   trebuchet: {
     label: 'Trebuchet', hp: 120, cost: { wood: 200, gold: 200 }, time: 40, age: 3, speed: 0.9,
     attack: 8, range: 12, minRange: 4, cooldown: 7, armor: 2, sight: 12, vsBuildings: 160, bonus: { wall: 40, gate: 40 },
-    buildingsOnly: true, setup: 4, splash: 0.8,
+    siege: true, setup: 4, splash: 0.8,
   },
   // Thick armour: blades and arrows barely scratch walls, so breaking through takes rams.
   wall: { label: 'Wall', building: true, hp: 700, cost: { stone: 6 }, time: 5, size: 1, armor: 8, sight: 2 },

@@ -1250,3 +1250,99 @@ test('eight players fit on a huge map, each with their own town well apart', () 
   const copy = GameHost.fromBackup(host.backup()!);
   assert.deepEqual(copy.state!.map.starts, s.map.starts);
 });
+
+/** An open patch of grass on the map, `w` by `h` tiles, as far from towns as can be found nearby. */
+const openGround = (s: GameState, w: number, h: number): [number, number] => {
+  const n = s.map.size;
+  for (let y = 4; y < n - h - 4; y++) {
+    for (let x = 4; x < n - w - 4; x++) {
+      let ok = true;
+      for (let v = y; v < y + h && ok; v++) for (let u = x; u < x + w && ok; u++) ok = isWalkable(s.map, u, v) && s.map.footprint[v * n + u] === 0;
+      if (ok) return [x, y];
+    }
+  }
+  throw new Error('no open ground');
+};
+
+test('troops that destroy a building go on to the next one nearby', () => {
+  const s = createGame(77, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  const [x, y] = openGround(s, 16, 8);
+  const first = spawn(s, 1, 'house', x + 6, y + 2);
+  const second = spawn(s, 1, 'house', x + 10, y + 2);
+  first.hp = 5;
+  const men = [0, 1, 2].map((i) => spawn(s, 0, 'swordsman', x + 2, y + 2 + i));
+  applyCommand(s, 0, { type: 'interact', ids: men.map((e) => e.id), target: first.id });
+  for (let i = 0; i < 200 && s.entities.has(first.id); i++) step(s);
+  assert.ok(!s.entities.has(first.id), 'the first house falls');
+  step(s);
+  assert.ok(men.every((e) => e.order.t === 'attack' && e.order.id === second.id), 'and they turn on the next house');
+});
+
+test('a trebuchet can also hit troops, but weakly', () => {
+  const s = createGame(77, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  const [x, y] = openGround(s, 16, 6);
+  const treb = spawn(s, 0, 'trebuchet', x + 1, y + 2);
+  const foe = spawn(s, 1, 'swordsman', x + 9, y + 2);
+  const hp = foe.hp;
+  applyCommand(s, 0, { type: 'interact', ids: [treb.id], target: foe.id });
+  for (let i = 0; i < 160; i++) step(s);
+  assert.ok(foe.hp < hp, 'the stone hurts the swordsman');
+  const none = hasTech(s, 0);
+  const perHit = attackOf('trebuchet', none) - armorOf('swordsman', none);
+  assert.ok(perHit / DEFS.trebuchet.cooldown! < attackOf('swordsman', none) / DEFS.swordsman.cooldown!, 'less than a swordsman would do');
+});
+
+test('a formation walks at the pace of its slowest member', () => {
+  const s = createGame(77, 96);
+  addPlayer(s, 0, 0);
+  const [x, y] = openGround(s, 20, 6);
+  const rider = spawn(s, 0, 'rider', x + 2, y + 2);
+  const foot = spawn(s, 0, 'swordsman', x + 2, y + 3);
+  applyCommand(s, 0, { type: 'formation', ids: [rider.id, foot.id], formation: 'line' });
+  applyCommand(s, 0, { type: 'move', ids: [rider.id, foot.id], x: x + 17, y: y + 3 });
+  assert.equal(rider.pace, DEFS.swordsman.speed, 'the rider keeps to the swordsman');
+  const start = rider.x;
+  for (let i = 0; i < 20; i++) step(s);
+  assert.ok(rider.x - start <= (DEFS.swordsman.speed! * 2) + 0.01, 'and does not run ahead');
+  applyCommand(s, 0, { type: 'formation', ids: [rider.id, foot.id], formation: 'none' });
+  applyCommand(s, 0, { type: 'move', ids: [rider.id, foot.id], x: x + 2, y: y + 3 });
+  assert.equal(rider.pace, undefined, 'without a formation everyone at their own speed');
+});
+
+test('a wall still being built has hardly any armour', () => {
+  const s = createGame(77, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  const [x, y] = openGround(s, 8, 6);
+  const wall = spawn(s, 1, 'wall', x + 4, y + 2, false);
+  wall.progress = 0.2;
+  wall.hp = 100;
+  const man = spawn(s, 0, 'swordsman', x + 3, y + 2);
+  applyCommand(s, 0, { type: 'interact', ids: [man.id], target: wall.id });
+  for (let i = 0; i < 40; i++) step(s);
+  assert.ok(wall.hp <= 100 - 2 * 6, `blows land properly on the foundation (hp ${wall.hp})`);
+});
+
+test('troops tearing down a building fight off whoever comes at them, then carry on', () => {
+  const s = createGame(77, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  const [x, y] = openGround(s, 16, 8);
+  const house = spawn(s, 1, 'house', x + 8, y + 2);
+  const raider = spawn(s, 0, 'swordsman', x + 7, y + 2);
+  applyCommand(s, 0, { type: 'interact', ids: [raider.id], target: house.id });
+  for (let i = 0; i < 10; i++) step(s);
+  const defender = spawn(s, 1, 'villager', x + 6, y + 3);
+  defender.hp = 4;
+  applyCommand(s, 1, { type: 'interact', ids: [defender.id], target: raider.id });
+  for (let i = 0; i < 30 && raider.order.t === 'attack' && raider.order.id === house.id; i++) step(s);
+  assert.ok(raider.order.t === 'attack' && raider.order.id === defender.id, 'the raider turns on the villager hitting him');
+  for (let i = 0; i < 60 && s.entities.has(defender.id); i++) step(s);
+  assert.ok(!s.entities.has(defender.id), 'and deals with him');
+  step(s);
+  assert.ok(raider.order.t === 'attack' && raider.order.id === house.id, 'then goes back to the house');
+});

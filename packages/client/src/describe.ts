@@ -30,7 +30,7 @@ const ROLE: Record<Kind, string> = {
   scout: 'Very fast and sees far. Use it to explore and to raid unguarded villagers.',
   ram: 'Slow siege engine that smashes buildings. Almost harmless to units, and hard to kill with arrows.',
   kingsguard: "The king's own knights, trained at the castle: full plate, a greatsword and a long cape. Slow, but they shrug off arrows and blows and cut down almost anything. Very costly. Masses of spearmen bring them down, and monks can still win them over.",
-  trebuchet: 'Siege engine that hurls great stones at walls and buildings from very far away. It must set up before it can shoot and pack up before it can move again (4 s each), cannot hit anything close by and is helpless against units: keep soldiers with it.',
+  trebuchet: 'Siege engine that hurls great stones at walls and buildings from very far away. It must set up before it can shoot and pack up before it can move again (4 s each), cannot hit anything close by. It goes for buildings first; its stones also hurt troops, but only a little: keep soldiers with it.',
   towncenter: 'Trains villagers, advances the age and takes every resource. Shelters up to 10 villagers and the king.',
   house: 'Gives room for 5 more people. Build more when the population counter turns red.',
   mill: 'Drop-off point for food. Build it next to berry bushes or among your farms.',
