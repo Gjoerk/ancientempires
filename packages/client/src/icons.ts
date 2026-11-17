@@ -13,6 +13,11 @@ const SIZE = 48;
 const PALETTE: Record<string, string> = {
   w: '#e3e7ec', k: '#7a5230', b: '#2a2018', r: '#c8402f', g: '#e0b030', y: '#f7df7a',
   e: '#5f9a3a', d: '#a86a14', n: '#3d6b25', p: '#7e1f22', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8', i: '#8fd0ff', j: '#eaf8ff',
+  // The finer resource icons and the crown: wood, gold, stone, gems and pearls.
+  A: '#f0d49a', C: '#c8965a', D: '#9a6634', E: '#74481f', F: '#4e2e12',
+  Y: '#fff1a0', G: '#f2c23a', H: '#c8891c', I: '#8a5810',
+  W: '#f0f2f4', L: '#c6cad0', S: '#9096a0', T: '#5e646e',
+  R: '#c8302a', U: '#2f6fd4', P: '#fbf3dc', Q: '#cbbd98',
 };
 
 const GLYPHS: Record<string, string[]> = {
@@ -137,16 +142,24 @@ const GLYPHS: Record<string, string[]> = {
     '...lll....',
   ],
   crown: [
-    '....gg....',
-    '...gggg...',
-    '..gggggg..',
-    '....gg....',
-    '....gg....',
-    'y...yy...y',
-    'yy.yyyy.yy',
-    'yyyyyyyyyy',
-    'yrygyygyry',
-    'yyyyyyyyyy',
+    '..........b..........',
+    '.........bPb.........',
+    '....b...bPPQb...b....',
+    '...bPb...bQb...bPb...',
+    '..bPPQb..bGb..bPPQb..',
+    '...bQb...bGb...bQb...',
+    '...bGb..bYGHb..bGb...',
+    '...bGb.bYGGGHb.bGb...',
+    '..bYGHbbYGGGHbbYGHb..',
+    '.bYGGGHYGGGGGHYGGGHb.',
+    '.bYGGGHYGGGGGHYGGGHb.',
+    'bYGGGGGGGGGGGGGGGGGHb',
+    'bYGGGGGGGGGGGGGGGGGHb',
+    'bYYYYYYYYYYYYYYYYYYYb',
+    'bHHHPRHHHPUUHHHPRHHHb',
+    'bHHHRRHYHUUUHYHRRHHHb',
+    'bIIIIIIIIIIIIIIIIIIIb',
+    '.bbbbbbbbbbbbbbbbbbb.',
   ],
   spool: [
     '..kkkkkk..',
@@ -225,40 +238,48 @@ const GLYPHS: Record<string, string[]> = {
     '......pp......',
   ],
   wood: [
-    '..........',
-    '..........',
-    '.kkkkkkkc.',
-    'kookookcoc',
-    'kkkkkkkcoc',
-    'kookookcoc',
-    'kkkkkkk.c.',
-    '.kkkkkk...',
-    '..........',
-    '..........',
+    '...bbbbbbbbbb.',
+    '..bDDDDDDDDCCb',
+    '..bEEEEDEFEACb',
+    '..bEEFEEEEECAb',
+    '..bFFFFFFFFCCb',
+    '.bbbbbbbbbbFb.',
+    'bDDDDDDDDDCCb.',
+    'bEEEEDEFEEACb.',
+    'bEEFEEEEEECAb.',
+    'bFFFFFFFFFCCb.',
+    '.bFbbbbbbbbb..',
+    '..b...........',
   ],
   gold: [
-    '..........',
-    '...gggg...',
-    '..gyyyyg..',
-    '.gyyggyyg.',
-    '.gyygyyyg.',
-    '.gyygyyyg.',
-    '.gyyggyyg.',
-    '..gyyyyg..',
-    '...gggg...',
-    '..........',
+    '......bb......',
+    '....bbHHbb....',
+    '...bHHHHHHb...',
+    '..bHYYYGGGHb..',
+    '.bHYYGGGGGGHb.',
+    '.bHYGYYGGGGHb.',
+    'bHHYGYGGGGGHHb',
+    'bHHGGGGGGGGHHb',
+    '.bHGGGGGGGHHb.',
+    '.bHGGGGGGGHIb.',
+    '..bHGGGGHHIb..',
+    '...bHHHHHIb...',
+    '....bbHHbb....',
+    '......bb......',
   ],
   stone: [
-    '..........',
-    '....ss....',
-    '...sllss..',
-    '..slllsss.',
-    '.sllssssss',
-    '.slsssssss',
-    'ssssssbsss',
-    'sssssbssss',
-    '.ssssssss.',
-    '..........',
+    '.....bbbbb....',
+    '....bSSSSSbb..',
+    '...bLWWLLSSSb.',
+    '..bLWWWLLLSSSb',
+    '.bSLLLLLLLSSSb',
+    '.bSLLLLLSTSSSb',
+    '.bSSLLLSTSSSSb',
+    '.bSSSSSSSTSSTb',
+    '.bbSSSSSSSSSTb',
+    'bLLLSSSSTSTTTb',
+    'bLSLTTTTTTTTTb',
+    '.bbbbbbbbbbbb.',
   ],
   cross: [
     '..........',
@@ -297,6 +318,23 @@ const TECH_ART: Record<TechId, [string, Kind?]> = {
 
 const cache = new Map<string, string>();
 
+/** The crown alone, at a whole number of screen pixels per pixel, for the emblem on the menus. */
+export function crownImage(scale = 3): string {
+  const rows = GLYPHS.crown;
+  const n = Math.max(rows.length, ...rows.map((r) => r.length));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n * scale;
+  const c = cv.getContext('2d')!;
+  const top = Math.floor((n - rows.length) / 2);
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    const color = PALETTE[ch];
+    if (!color) return;
+    c.fillStyle = color;
+    c.fillRect(x * scale, (y + top) * scale, scale, scale);
+  }));
+  return cv.toDataURL();
+}
+
 /** Forget all drawn icons, e.g. after the sprite pack has loaded. */
 export function clearIcons(): void {
   cache.clear();
@@ -313,11 +351,12 @@ export function setIconAge(age: number): void {
 function glyph(c: CanvasRenderingContext2D, name: string, team: string, x: number, y: number, px: number): void {
   const rows = GLYPHS[name];
   if (!rows) return;
-  // Glyphs are drawn on a 10 × 10 grid; a more detailed one is shrunk into the same square.
+  // Glyphs are drawn on a 10 × 10 grid; a more detailed one gets whole pixels of a smaller size,
+  // as large as fit (it may reach a little into the margin round the square).
   const n = Math.max(10, rows.length, ...rows.map((row) => row.length));
-  const p = (px * 10) / n;
-  const ox = x + ((n - Math.max(...rows.map((row) => row.length))) * p) / 2;
-  const oy = y + ((n - rows.length) * p) / 2;
+  const p = n === 10 ? px : Math.max(1, Math.floor((px * 12) / n));
+  const ox = Math.round(x + (px * 10 - Math.max(...rows.map((row) => row.length)) * p) / 2);
+  const oy = Math.round(y + (px * 10 - rows.length * p) / 2);
   const at = (o: number, i: number) => Math.round(o + i * p);
   for (let r = 0; r < rows.length; r++) {
     for (let col = 0; col < rows[r].length; col++) {

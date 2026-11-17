@@ -56,7 +56,7 @@ import { Listing, watchRooms } from './directory';
 import { deleteReplay, downloadReplay, listReplays, loadReplay, readReplayFile, Recorder, Replay, ReplayMeta } from './replay';
 import { loadSprites } from './assets';
 import { clearBuildingCache, drawBuilding } from './buildings';
-import { clearIcons, icon, setIconAge } from './icons';
+import { clearIcons, crownImage, icon, setIconAge } from './icons';
 import { installMenuArt } from './menu-art';
 import { paintGround } from './ground';
 import { Breeze } from './breeze';
@@ -2908,7 +2908,7 @@ $('reconnect-leave').addEventListener('click', () => {
 });
 $('chat-log').addEventListener('wheel', (ev) => ev.stopPropagation(), { passive: true });
 $('menu-btn').addEventListener('click', () => ($('menu').hidden = !$('menu').hidden));
-for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = icon('crown'); $<HTMLImageElement>('hint-icon').src = icon('crown');
+for (const img of document.querySelectorAll<HTMLImageElement>('.card .emblem')) img.src = crownImage(3); $<HTMLImageElement>('hint-icon').src = icon('crown');
 installMenuArt();
 
 // Browsers only allow sound after the player has clicked or pressed a key.
