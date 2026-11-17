@@ -12,7 +12,7 @@ const SIZE = 48;
 // e green, s stone, l light stone, o brown, c cream.
 const PALETTE: Record<string, string> = {
   w: '#e3e7ec', k: '#7a5230', b: '#2a2018', r: '#c8402f', g: '#e0b030', y: '#f7df7a',
-  e: '#5f9a3a', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8', i: '#8fd0ff', j: '#eaf8ff',
+  e: '#5f9a3a', d: '#a86a14', s: '#85898f', l: '#c4c8cf', o: '#5a3b1e', c: '#efe6cf', m: '#9aa0a8', i: '#8fd0ff', j: '#eaf8ff',
 };
 
 const GLYPHS: Record<string, string[]> = {
@@ -209,16 +209,22 @@ const GLYPHS: Record<string, string[]> = {
     'kk........',
   ],
   food: [
-    '.k..g..k..',
-    '..k.y.k...',
-    '..yygyy...',
-    '.yyggyyy..',
-    '..yygyy...',
-    '.yyggyyy..',
-    '..yygyy...',
-    '...ygy....',
-    '.e..g.....',
-    '..eeg.....',
+    '.......d.......',
+    '......yyd......',
+    '..d...ygd...d..',
+    '.yyd..yyd..yyd.',
+    '.ygd..dgy..ygd.',
+    '.yyd..yyd..yyd.',
+    '.dgy..ygd..dgy.',
+    '..yyd.yyd.yyd..',
+    '...dg.dgd.gd...',
+    '....dgygydd....',
+    '....gdygdyg....',
+    '...ooooooooo...',
+    '....gdygdyg....',
+    '....dgydgyd....',
+    '....gdygdyg....',
+    '.....d.d.d.....',
   ],
   wood: [
     '..........',
@@ -309,13 +315,19 @@ export function setIconAge(age: number): void {
 function glyph(c: CanvasRenderingContext2D, name: string, team: string, x: number, y: number, px: number): void {
   const rows = GLYPHS[name];
   if (!rows) return;
+  // Glyphs are drawn on a 10 × 10 grid; a more detailed one is shrunk into the same square.
+  const n = Math.max(10, rows.length, ...rows.map((row) => row.length));
+  const p = (px * 10) / n;
+  const ox = x + ((n - Math.max(...rows.map((row) => row.length))) * p) / 2;
+  const oy = y + ((n - rows.length) * p) / 2;
+  const at = (o: number, i: number) => Math.round(o + i * p);
   for (let r = 0; r < rows.length; r++) {
     for (let col = 0; col < rows[r].length; col++) {
       const ch = rows[r][col];
       const color = ch === 't' ? team : PALETTE[ch];
       if (!color) continue;
       c.fillStyle = color;
-      c.fillRect(x + col * px, y + r * px, px, px);
+      c.fillRect(at(ox, col), at(oy, r), at(ox, col + 1) - at(ox, col), at(oy, r + 1) - at(oy, r));
     }
   }
 }
