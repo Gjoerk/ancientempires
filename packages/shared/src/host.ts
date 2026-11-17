@@ -38,7 +38,7 @@ export class GameHost {
   /** The running game, or undefined while the room waits in the lobby. */
   state: GameState | undefined;
   readonly players = new Map<number, PlayerInfo>();
-  readonly settings: GameSettings = { quick: false, mapSize: 'medium', popLimit: POP_MAX };
+  readonly settings: GameSettings = { quick: false, mapSize: 'medium', popLimit: POP_MAX, speed: 1 };
 
   /**
    * A pause everyone has to agree to: 'asking' while the others decide, then 'paused' until
@@ -266,7 +266,7 @@ export class GameHost {
 
   startMessage(you: number): ServerMessage {
     return { t: 'start', you, room: this.room, seed: this.state!.seed, size: this.state!.map.size, popLimit: this.state!.popLimit, players: [...this.players.values()],
-      watching: [...this.watching] };
+      watching: [...this.watching], speed: this.settings.speed ?? 1 };
   }
 
   playersMessage(): ServerMessage {

@@ -221,6 +221,8 @@ function openSettings(): void {
 const HOTKEYS = 'QWERTYUIOPASDFGZXCVB';
 /** The names of those watching the game. */
 let watching: string[] = [];
+/** Time between updates from the host, shorter at a higher game speed (for smoothing the movement). */
+let snapMs = SNAP_MS;
 /** The seed of the game being played, to tell coming back into it from a new game. */
 let gameSeed = -1;
 /** Buildings that changed hands in this snapshot (old owner → new), and players whose town has been taken. */
@@ -1034,6 +1036,7 @@ function onMessage(msg: ServerMessage): void {
   } else if (msg.t === 'start') {
     resetGame();
     gameSeed = msg.seed;
+    snapMs = SNAP_MS / (msg.speed ?? 1);
     watching = msg.watching ?? [];
     play('start');
     me = myOwnSlot = msg.you;
@@ -1077,7 +1080,7 @@ function onMessage(msg: ServerMessage): void {
     }
   } else if (msg.t === 'snap') {
     const now = performance.now();
-    const alpha = Math.min(1, (now - snapTime) / SNAP_MS);
+    const alpha = Math.min(1, (now - snapTime) / snapMs);
     const seen = new Set<number>();
     // Things not in this update did not change: wherever they were heading, they are there now.
     const changed = new Set(msg.ents.map((e) => e[0]));
@@ -1332,6 +1335,9 @@ function chatPlaceholder(): void {
   const box = $<HTMLInputElement>('chat-input');
   box.placeholder = teamChat ? 'Message to your team · Tab: to everyone' : 'Message to everyone · Tab: to your team only';
   box.classList.toggle('team', teamChat);
+  const to = $('chat-to');
+  to.textContent = teamChat ? 'To my team' : 'To everyone';
+  to.classList.toggle('team', teamChat);
 }
 
 /** Spots allies marked on the map (Alt-click), shown for a few seconds. */
@@ -1401,6 +1407,7 @@ function openChat(): void {
   const box = $<HTMLInputElement>('chat-input');
   const log = $('chat-log');
   box.hidden = false;
+  $('chat-to').hidden = false;
   document.body.classList.add('chatting');
   if (!log.children.length) {
     const empty = document.createElement('div');
@@ -1415,6 +1422,7 @@ function closeChat(): void {
   const box = $<HTMLInputElement>('chat-input');
   box.value = '';
   box.hidden = true;
+  $('chat-to').hidden = true;
   document.body.classList.remove('chatting');
   $('chat-log').querySelector('.empty')?.remove();
   $('chat-log').scrollTop = $('chat-log').scrollHeight;
@@ -1579,6 +1587,9 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
   const popBox = $<HTMLSelectElement>('pop-select');
   popBox.value = String(settings.popLimit);
   popBox.disabled = !hosting;
+  const speedBox = $<HTMLSelectElement>('speed-select');
+  speedBox.value = String(settings.speed ?? 1);
+  speedBox.disabled = !hosting;
   const teams = new Set(roster.map((p) => p.team)).size;
   $('room-hint').textContent = roster.length < 2
     ? 'You are alone. Share the link, or add a computer opponent.'
@@ -1616,6 +1627,7 @@ function switchTeam(to?: number, keepSelection = false): void {
 $('start-btn').addEventListener('click', () => session?.host?.start());
 $('add-ai-btn').addEventListener('click', () => session?.host?.addComputer());
 $('pop-select').addEventListener('change', (ev) => session?.host?.setPopLimit(Number((ev.target as HTMLSelectElement).value)));
+$('speed-select').addEventListener('change', (ev) => session?.host?.setSpeed(Number((ev.target as HTMLSelectElement).value)));
 $('size-select').addEventListener('change', (ev) => session?.host?.setMapSize((ev.target as HTMLSelectElement).value));
 $('quick-box').addEventListener('change', (ev) => session?.host?.setQuickStart((ev.target as HTMLInputElement).checked));
 $('leave-btn').addEventListener('click', () => session?.close());
@@ -2473,6 +2485,12 @@ $('chat-input').addEventListener('blur', () => {
   if (document.body.classList.contains('chatting')) closeChat();
 });
 $('chat-log').addEventListener('mousedown', (ev) => ev.preventDefault());
+// The button switches between everyone and the team; pressing it keeps the box open and focused.
+$('chat-to').addEventListener('mousedown', (ev) => {
+  ev.preventDefault();
+  teamChat = !teamChat;
+  chatPlaceholder();
+});
 for (const [id, key] of [['set-hotkeys', 'hotkeys'], ['set-edge', 'edge'], ['set-colorblind', 'colorblind'], ['set-hints', 'hints']] as const) {
   $<HTMLInputElement>(id).addEventListener('change', (ev) => {
     prefs[key] = (ev.target as HTMLInputElement).checked;
@@ -3881,7 +3899,7 @@ function frame(now: number): void {
   }
 
   // Everything standing on the ground shares one depth-sorted pass.
-  const alpha = Math.min(1, (now - snapTime) / SNAP_MS);
+  const alpha = Math.min(1, (now - snapTime) / snapMs);
   const drawables: { depth: number; draw: () => void }[] = [];
   // Zoomed out, trees and rocks are already part of the ground blocks.
   const far = farView();

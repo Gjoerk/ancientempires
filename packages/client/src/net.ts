@@ -26,6 +26,8 @@ export interface HostControls {
   setQuickStart(on: boolean): void;
   setMapSize(size: string): void;
   setPopLimit(limit: number): void;
+  /** How fast the game runs: 1, 1.5 or 2. */
+  setSpeed(speed: number): void;
   /** Switches which of the host's own players the host's commands go to. */
   control(slot: number): boolean;
 }
@@ -359,7 +361,19 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
         conn.close();
       }
     }, 2000);
-    stopTicker = startTicker(TICK_MS, () => {
+    runTicker();
+    // Closing the tab should disconnect guests right away.
+    window.addEventListener('pagehide', () => {
+      // The game as it is right now, for coming back.
+      if (!closed && game.state && game.state.winner < 0) saveGame(code, game, mySlot);
+      peer.destroy();
+      if (listener !== peer) listener.destroy();
+    });
+  };
+  /** The game's clock: 10 steps a second, quicker at a higher game speed. Restarted when a game starts. */
+  const runTicker = () => {
+    stopTicker?.();
+    stopTicker = startTicker(TICK_MS / (game.settings.speed ?? 1), () => {
       const snap = game.tick();
       if (snap) broadcast(snap);
       else if (++ticks % TICK_RATE === 0) toGuests(() => ({ t: 'ping' }));
@@ -369,13 +383,6 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       }
       // A finished game is not carried on.
       if (snap?.t === 'snap' && snap.winner >= 0) forgetGame(code);
-    });
-    // Closing the tab should disconnect guests right away.
-    window.addEventListener('pagehide', () => {
-      // The game as it is right now, for coming back.
-      if (!closed && game.state && game.state.winner < 0) saveGame(code, game, mySlot);
-      peer.destroy();
-      if (listener !== peer) listener.destroy();
     });
   };
   peer.on('open', () => {
@@ -558,6 +565,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       start() {
         if (game.state || mySlot < 0) return;
         game.start((Math.random() * 0xffffffff) >>> 0);
+        runTicker();
         controlSlot = mySlot;
         handlers.onMessage(game.startMessage(mySlot));
         toGuests((slot) => game.startMessage(slot));
@@ -608,6 +616,11 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
       },
       setLevel(slot, level) {
         game.setLevel(slot, level);
+        sendLobby();
+      },
+      setSpeed(speed) {
+        if (game.state || ![1, 1.5, 2].includes(speed)) return;
+        game.settings.speed = speed;
         sendLobby();
       },
       setPopLimit(limit) {

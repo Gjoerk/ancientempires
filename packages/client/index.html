@@ -279,6 +279,10 @@
     /* Team chat: a green edge, in the log and on the box while writing to the team. */
     #chat-log div.team { border-left: 2px solid #7fd16a; }
     #chat-input.team { border-color: #7fd16a; box-shadow: 0 0 0 1px #7fd16a; }
+    /* Who a message goes to, left of the chat box; the box moves over for it. */
+    #chat-to { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; height: 34px; padding: 0 10px; z-index: 5; zoom: var(--ui, 1); }
+    #chat-to.team { border-color: #7fd16a; color: #b8f0a8; }
+    body.chatting #chat-input { left: 132px; width: min(460px, calc(100vw - 142px)); }
     #chat-input { position: fixed; bottom: calc(var(--bottom-h, 226px) + 10px); left: 10px; width: min(460px, calc(100vw - 20px)); box-sizing: border-box;
       background: var(--page); color: #fff; font-variant: normal; }
     #help { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 22px; line-height: 1.6;
@@ -320,7 +324,8 @@
     /* Room codes in a plain monospaced face where every letter and digit is told apart easily. */
     .code, #room-code, #room { font-family: "Roboto Mono", ui-monospace, Consolas, monospace; font-variant: normal; letter-spacing: .08em; }
     #room, .code { text-transform: uppercase; font-weight: 700; }
-    #room-title .code { font-size: .9em; color: #fff; background: rgba(0, 0, 0, .3); padding: 0 .35em; border-radius: 6px; }
+    #room-title .code { font-size: .9em; color: var(--accent); }
+    #room-code { color: var(--accent); }
     #room-players { list-style: none; margin: 4px 0; padding: 8px; display: grid; gap: 6px; background: rgba(0, 0, 0, .22); border-radius: 6px;
       border: 1px solid rgba(201, 165, 74, .2); }
     #room-players li { display: flex; align-items: center; gap: 5px; min-width: 0; }
@@ -579,6 +584,7 @@
     <div><button id="reconnect-leave" type="button" class="plain">Leave the game</button></div></div>
   <div id="err" hidden role="status" aria-live="polite"></div>
   <div id="chat-log"></div>
+  <button id="chat-to" type="button" hidden title="Who reads it (Tab)">To everyone</button>
   <input id="chat-input" maxlength="140" placeholder="Message to everyone · Tab: to your team only" enterkeyhint="send" hidden>
   <div id="help" class="frame" hidden>
     <h2>Controls</h2>
@@ -601,7 +607,7 @@
     J gives the selected villagers the same job as the villager you gave an order last; if that was a new building, you place another of it<br>
     The bell at the town centre calls every villager into shelter; ring it again to send them back to work<br>
     Shift while placing buildings puts them on the villagers' list: they build one after the other<br>
-    Groups walk in formation at the pace of their slowest member; fields can be walked over.<br>
+    A group sent somewhere gathers there in its formation, those in front taking the front rows; fields can be walked over.<br>
     Soldiers are Aggressive (attack enemy units they see) or Defensive (fight back only when hit); they attack buildings only when told to<br>
     Alt + click on the map or minimap marks a spot for your allies; Space looks at the latest marked spot or attack<br>
     In the chat box Tab switches between everyone and your team only<br>
@@ -644,6 +650,13 @@
           <option value="100">100</option>
           <option value="150">150</option>
           <option value="200">200</option>
+        </select>
+      </label>
+      <label class="check">Game speed
+        <select id="speed-select">
+          <option value="1">Normal</option>
+          <option value="1.5">Fast (1.5×)</option>
+          <option value="2">Very fast (2×)</option>
         </select>
       </label>
       <label class="check"><input id="quick-box" type="checkbox"> Quick start (more resources and villagers)</label>

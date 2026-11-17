@@ -480,7 +480,7 @@ test('soldiers attacking one target surround it instead of stacking up', () => {
   assert.ok(army.every((e) => e.order.t === 'attack' && Math.hypot(e.x - victim.x, e.y - victim.y) < 1.6), 'all in reach');
 });
 
-test('a group moves in formation at the pace of its slowest unit', () => {
+test('a group sent somewhere gathers there in its formation', () => {
   const s = createGame(67);
   addPlayer(s, 0);
   for (let y = 20; y < 60; y++) for (let x = 20; x < 60; x++) s.map.tiles[y * s.map.size + x] = Tile.Grass;
@@ -488,10 +488,7 @@ test('a group moves in formation at the pace of its slowest unit', () => {
   const foot = Array.from({ length: 5 }, (_, i) => spawn(s, 0, 'spearman', 25, 31 + i));
   applyCommand(s, 0, { type: 'formation', ids: [rider.id, ...foot.map((e) => e.id)], formation: 'line' });
   applyCommand(s, 0, { type: 'move', ids: [rider.id, ...foot.map((e) => e.id)], x: 45, y: 33 });
-  run(s, 30);
-  const furthest = Math.max(...foot.map((e) => e.x));
-  assert.ok(rider.x <= furthest + 1.1, `rider ${rider.x.toFixed(1)} stays with the infantry (${furthest.toFixed(1)})`);
-  run(s, 150);
+  run(s, 180);
   // Each on a spot of their own, at least a half tile apart (four fit on a tile).
   const all = [rider, ...foot];
   for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) assert.ok(Math.hypot(all[i].x - all[j].x, all[i].y - all[j].y) >= 0.45);
@@ -1087,12 +1084,10 @@ test('a formation faces the way the player dragged, and breaks up to fight on an
   // Sent south, but told to face west: soldiers end up on the west side of the archers.
   applyCommand(s, 0, { type: 'formation', ids, formation: 'line' });
   applyCommand(s, 0, { type: 'move', ids, x: 31, y: 50, face: [-1, 0] });
-  assert.equal(s.groups.size, 1, 'they march as a block');
   run(s, 300);
   const units = ids.map((id) => s.entities.get(id)!);
   const avg = (k: string) => units.filter((e) => e.kind === k).reduce((a, e) => a + e.x, 0) / 4;
   assert.ok(avg('swordsman') < avg('archer'), `soldiers in front, to the west: ${avg('swordsman')} vs ${avg('archer')}`);
-  assert.equal(s.groups.size, 0);
 
   const t = open();
   const army: number[] = [];
@@ -1103,7 +1098,7 @@ test('a formation faces the way the player dragged, and breaks up to fight on an
   let broke = false;
   for (let i = 0; i < 400 && !broke; i++) {
     step(t);
-    broke = t.groups.size === 0 && army.some((id) => t.entities.get(id)?.order.t === 'attack');
+    broke = army.some((id) => t.entities.get(id)?.order.t === 'attack');
   }
   assert.ok(broke, 'the block breaks up and goes for the enemy');
 });
@@ -1212,4 +1207,26 @@ test('updates carry only what changed, and a newcomer gets the whole picture', (
   const picture = host.snapshot(true, true) as typeof first;
   assert.equal(picture.full, true);
   assert.equal(picture.ents.length, [...host.state!.entities.values()].filter((e) => e.inside < 0).length, 'a newcomer sees everything');
+});
+
+test('an army on the march sent further on keeps going: nobody in front turns back', () => {
+  const s = createGame(5, 96);
+  addPlayer(s, 0, 0);
+  for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+  s.map.blocked.fill(0); s.map.footprint.fill(0); s.map.tiles.fill(Tile.Grass); s.map.version++;
+  spawn(s, 0, 'king', 2, 2);
+  const ids: number[] = [];
+  for (let i = 0; i < 24; i++) ids.push(spawn(s, 0, i < 16 ? 'swordsman' : 'archer', 20 + (i % 6), 30 + Math.floor(i / 6))!.id);
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'line' });
+  applyCommand(s, 0, { type: 'move', ids, x: 22, y: 60 });
+  run(s, 60);
+  // Half way there, strung out: sent on further the same way.
+  const units = ids.map((id) => s.entities.get(id)!);
+  const before = new Map(units.map((e) => [e.id, e.y]));
+  applyCommand(s, 0, { type: 'move', ids, x: 22, y: 80 });
+  run(s, 15);
+  const back = units.filter((e) => e.y < before.get(e.id)! - 0.3);
+  assert.equal(back.length, 0, `turned back: ${back.length}`);
+  run(s, 400);
+  assert.ok(units.every((e) => Math.abs(e.y - 80) < 6), 'all gathered at the spot');
 });
