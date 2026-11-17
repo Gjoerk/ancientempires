@@ -39,6 +39,7 @@ import {
   Tile,
   TICK_MS,
   SNAP_MS,
+  TICK_RATE,
   TILE_RESOURCE,
   TRADE_BUY,
   TRADE_GOODS,
@@ -49,7 +50,9 @@ import {
   FALLOW_SECONDS,
 } from '@kingsfall/shared';
 import type { PlayerStats } from '@kingsfall/shared';
-import { hostGame, joinGame, normaliseCode, prepareNetwork, RelayMode, resumeGame, savedGame, Session, setRelayMode } from './net';
+import { hostGame, joinGame, normaliseCode, prepareNetwork, RelayMode, resumeGame, savedGame, Session, setRelayMode, setRoomsPublic } from './net';
+import { Listing, watchRooms } from './directory';
+import { deleteReplay, downloadReplay, listReplays, loadReplay, readReplayFile, Recorder, Replay, ReplayMeta } from './replay';
 import { loadSprites } from './assets';
 import { clearBuildingCache, drawBuilding } from './buildings';
 import { clearIcons, icon, setIconAge } from './icons';
@@ -261,7 +264,11 @@ let puffs: { x: number; y: number; t: number; big: boolean }[] = [];
 let attackFlash: { id: number; t: number } | undefined;
 /** Where the player was last attacked off screen. */
 let alert: { x: number; y: number; t: number } | undefined;
-const groups = new Map<string, number[]>();
+/** Control groups: the units stored under each number key. */
+const groups = new Map<number, number[]>();
+/** The unit's group number, for the little badge above it. */
+const groupOf = new Map<number, number>();
+let lastGroupPress = { n: 0, t: 0 };
 
 // Fog of war, from the point of view of the player being controlled.
 let visible: Uint8Array = new Uint8Array(0);
@@ -1017,7 +1024,201 @@ function renderPlayers(): void {
   }
 }
 
+// --- replays ------------------------------------------------------------------
+
+/** The game being recorded in this browser. */
+let recorder: Recorder | undefined;
+let recordSaver: ReturnType<typeof setInterval> | undefined;
+
+function record(msg: ServerMessage): void {
+  if (msg.t === 'start') {
+    // Back after a lost connection: the same recording goes on.
+    if (recorder && recorder.seed === msg.seed && !recorder.done) return;
+    finishRecording();
+    recorder = new Recorder(msg, msg.players.find((p) => p.slot === msg.you)?.name ?? 'Spectator');
+    recordSaver = setInterval(() => void recorder?.save().catch(() => undefined), 120000);
+  } else if (msg.t === 'lobby') {
+    finishRecording();
+  } else if (recorder && (msg.t === 'snap' || msg.t === 'players' || msg.t === 'catchup' || (msg.t === 'chat' && !msg.team))) {
+    recorder.add(msg);
+    if (msg.t === 'snap' && msg.winner >= 0) {
+      recorder.setWinners(roster.filter((p) => p.team === msg.winner).map((p) => p.name));
+      finishRecording();
+    }
+  }
+}
+
+/** Keeps the recording in this browser: at the end of the game, on leaving it, and now and then in between. */
+function finishRecording(): void {
+  if (recordSaver) clearInterval(recordSaver);
+  recordSaver = undefined;
+  const rec = recorder;
+  recorder = undefined;
+  void rec?.save().catch((err) => console.warn('Kingsfall: the replay could not be kept', err));
+}
+window.addEventListener('pagehide', () => void recorder?.save().catch(() => undefined));
+
+/** The replay being watched. */
+let replay: { data: Replay; next: number; tick: number; rate: number; paused: boolean; end: number } | undefined;
+
+const fmtTicks = (ticks: number) => {
+  const s = Math.floor(ticks / TICK_RATE);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+function watchReplay(data: Replay): void {
+  session?.close();
+  const end = data.ticks.length ? data.ticks[data.ticks.length - 1] : 0;
+  replay = { data, next: 0, tick: 0, rate: 1, paused: false, end };
+  session = { send: () => undefined, close: stopReplay };
+  $('replays').hidden = true;
+  restartReplay();
+  $('replay-bar').hidden = false;
+  document.body.classList.add('replaying');
+  $<HTMLInputElement>('rp-seek').max = String(end);
+  $<HTMLSelectElement>('rp-rate').value = '1';
+  renderReplayBar();
+}
+
+/** Back to the start of the replay, everything cleared. */
+function restartReplay(): void {
+  if (!replay) return;
+  resetGame();
+  onMessage(replay.data.start);
+  replay.next = 0;
+  replay.tick = 0;
+  setReplayRate(replay.rate);
+}
+
+function setReplayRate(rate: number): void {
+  if (!replay) return;
+  replay.rate = rate;
+  snapMs = SNAP_MS / ((replay.data.start.speed ?? 1) * rate);
+}
+
+/** Feeds in everything up to the replay's current moment. */
+function feedReplay(): void {
+  if (!replay) return;
+  const { data } = replay;
+  while (replay.next < data.msgs.length && data.ticks[replay.next] <= replay.tick) onMessage(data.msgs[replay.next++]);
+}
+
+/** Jumps to a moment: forwards by running through what lies between, backwards from the start. */
+function seekReplay(tick: number): void {
+  if (!replay) return;
+  const target = Math.max(0, Math.min(replay.end, tick));
+  if (target < replay.tick) restartReplay();
+  silence(true);
+  replay.tick = target;
+  feedReplay();
+  silence(winner >= 0);
+  renderReplayBar();
+}
+
+function stopReplay(): void {
+  if (!replay) return;
+  replay = undefined;
+  session = undefined;
+  $('replay-bar').hidden = true;
+  document.body.classList.remove('replaying');
+  showLobby('');
+  void showReplays();
+}
+
+function stepReplay(dt: number): void {
+  if (!replay || replay.paused) return;
+  replay.tick = Math.min(replay.end, replay.tick + dt * TICK_RATE * (replay.data.start.speed ?? 1) * replay.rate);
+  feedReplay();
+  if (replay.tick >= replay.end) replay.paused = true;
+  renderReplayBar();
+}
+
+let replayBarSignature = '';
+function renderReplayBar(): void {
+  if (!replay) return;
+  const signature = `${Math.floor(replay.tick / TICK_RATE)}|${replay.paused}`;
+  if (signature === replayBarSignature) return;
+  replayBarSignature = signature;
+  $('rp-play').textContent = replay.paused ? 'Play' : 'Pause';
+  if (!seekDragging) $<HTMLInputElement>('rp-seek').value = String(Math.round(replay.tick));
+  $('rp-time').textContent = `${fmtTicks(replay.tick)} / ${fmtTicks(replay.end)}`;
+}
+let seekDragging = false;
+$('rp-play').addEventListener('click', () => {
+  if (!replay) return;
+  if (replay.tick >= replay.end) seekReplay(0);
+  replay.paused = !replay.paused;
+  renderReplayBar();
+});
+$('rp-rate').addEventListener('change', (ev) => setReplayRate(Number((ev.target as HTMLSelectElement).value) || 1));
+$('rp-seek').addEventListener('input', () => (seekDragging = true));
+$('rp-seek').addEventListener('change', (ev) => {
+  seekDragging = false;
+  seekReplay(Number((ev.target as HTMLInputElement).value));
+});
+$('rp-back').addEventListener('click', () => replay && seekReplay(replay.tick - 30 * TICK_RATE));
+$('rp-fwd').addEventListener('click', () => replay && seekReplay(replay.tick + 30 * TICK_RATE));
+$('rp-exit').addEventListener('click', stopReplay);
+
+/** The list of replays kept in this browser. */
+async function showReplays(): Promise<void> {
+  const list = $('replay-list');
+  const all = await listReplays();
+  list.replaceChildren();
+  for (const meta of all) list.append(replayRow(meta));
+  $('replay-none').hidden = all.length > 0;
+  $('replays').hidden = false;
+}
+
+function replayRow(meta: ReplayMeta): HTMLLIElement {
+  const li = document.createElement('li');
+  const what = document.createElement('div');
+  what.className = 'who';
+  what.textContent = meta.players.join(', ');
+  const info = document.createElement('div');
+  info.className = 'info';
+  const when = new Date(meta.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const won = meta.winners?.length ? ` · won by ${meta.winners.join(' & ')}` : '';
+  info.textContent = `${when} · ${fmtTicks(meta.ticks)} · room ${meta.room}${won}`;
+  const buttons = document.createElement('div');
+  buttons.className = 'btns';
+  const button = (label: string, cls: string, act: () => void) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', act);
+    buttons.append(b);
+  };
+  button('Watch', 'primary', async () => {
+    const data = await loadReplay(meta.id).catch(() => undefined);
+    if (data) watchReplay(data);
+  });
+  button('Save file', 'plain', () => void downloadReplay(meta));
+  button('Delete', 'plain', async () => {
+    if (!confirm('Delete this replay?')) return;
+    await deleteReplay(meta.id);
+    void showReplays();
+  });
+  li.append(what, info, buttons);
+  return li;
+}
+$('lobby-replays-btn').addEventListener('click', () => void showReplays());
+$('replays-close').addEventListener('click', () => ($('replays').hidden = true));
+$('replay-file').addEventListener('change', async (ev) => {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    watchReplay(await readReplayFile(file));
+  } catch {
+    window.alert('That file is not a Kingsfall replay.');
+  }
+});
+
 function onMessage(msg: ServerMessage): void {
+  if (!replay) record(msg);
   if (msg.t === 'lobby') {
     resetGame();
     roster = msg.players;
@@ -1493,6 +1694,7 @@ function resetGame(): void {
 
 function showLobby(message: string): void {
   if (document.pointerLockElement) document.exitPointerLock();
+  finishRecording();
   session = undefined;
   resetGame();
   $('waiting').style.display = 'none';
@@ -1578,6 +1780,7 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
   $('room-host').hidden = !hosting;
   $('room-wait').hidden = hosting;
   $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= 4;
+  $('public-line').hidden = !hosting;
   const quickBox = $<HTMLInputElement>('quick-box');
   quickBox.checked = settings.quick;
   quickBox.disabled = !hosting;
@@ -1734,6 +1937,75 @@ try {
     }
   });
 }
+// Whether a hosted room is listed for everyone, remembered in this browser.
+{
+  const box = $<HTMLInputElement>('public-box');
+  try {
+    box.checked = localStorage.getItem('kingsfall.public') !== 'no';
+  } catch {
+    // Storage blocked: listed.
+  }
+  setRoomsPublic(box.checked);
+  box.addEventListener('change', () => {
+    setRoomsPublic(box.checked);
+    try {
+      localStorage.setItem('kingsfall.public', box.checked ? 'yes' : 'no');
+    } catch {
+      // Not remembered.
+    }
+  });
+}
+
+// The open games, shown on the start page while it is open.
+const SIZE_NAMES: Record<string, string> = { small: 'Small map', medium: 'Medium map', large: 'Large map' };
+let stopBrowsing: (() => void) | undefined;
+let browseStarted = 0;
+function renderOpenGames(rooms: Listing[]): void {
+  const list = $('open-list');
+  list.replaceChildren();
+  for (const r of rooms) {
+    const li = document.createElement('li');
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.append(Object.assign(document.createElement('span'), { textContent: r.code }), `${r.host}'s game`);
+    const info = document.createElement('div');
+    info.className = 'info';
+    const speed = r.speed !== 1 ? ` · ${r.speed}× speed` : '';
+    info.textContent = `${r.started ? 'Playing' : 'Waiting'} · ${r.players}/${r.max} players · ${SIZE_NAMES[r.mapSize] ?? r.mapSize}${speed}`;
+    const full = r.players >= r.max;
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = r.started || full ? 'plain' : 'primary';
+    go.textContent = r.started || full ? 'Watch' : 'Join';
+    go.addEventListener('click', () => {
+      $<HTMLInputElement>('room').value = r.code;
+      $<HTMLButtonElement>(r.started || full ? 'watch-btn' : 'join-btn').click();
+    });
+    li.append(who, info, go);
+    list.append(li);
+  }
+  const none = $('open-none');
+  none.hidden = rooms.length > 0;
+  none.textContent = Date.now() - browseStarted < 5000 ? 'Looking for open games…' : 'No open games right now. Host one and friends can find it here.';
+}
+let browsing = false;
+setInterval(() => {
+  const open = $('lobby').style.display !== 'none' && !session;
+  if (open && !browsing) {
+    browsing = true;
+    browseStarted = Date.now();
+    renderOpenGames([]);
+    void prepareNetwork().then(() => {
+      if (browsing && !stopBrowsing) stopBrowsing = watchRooms(renderOpenGames);
+    });
+  } else if (!open && browsing) {
+    browsing = false;
+    stopBrowsing?.();
+    stopBrowsing = undefined;
+  }
+  if (open && $('open-list').children.length === 0) renderOpenGames([]);
+}, 1000);
+
 // Enter in the room-code field joins; anywhere else in the form it hosts.
 $('room').addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter') return;
@@ -2327,22 +2599,18 @@ window.addEventListener('keydown', (ev) => {
   if (key === 'delete' || key === 'backspace') {
     for (const id of selected) if (views.get(id)?.owner === me) send({ type: 'delete', id });
   }
-  if (key === ' ' && (alert || lastSignal)) {
+  if (key === ' ' && replay) {
+    ev.preventDefault();
+    $('rp-play').click();
+  } else if (key === ' ' && (alert || lastSignal)) {
     ev.preventDefault();
     // The latest of the last attack on you and the last spot an ally marked.
     const to = !alert || (lastSignal && lastSignal.t > alert.t) ? lastSignal! : alert;
     [cam.x, cam.y] = tileToWorld(to.x, to.y);
   }
-  if (/^Digit[1-9]$/.test(ev.code)) {
-    // Shift+number stores the selection as a group, the number alone recalls it.
-    if (ev.shiftKey) groups.set(ev.code, [...selected].filter((id) => views.get(id)?.owner === me));
-    else if (groups.has(ev.code)) {
-      const alive = groups.get(ev.code)!.filter((id) => views.get(id)?.owner === me);
-      if (alive.length > 0) {
-        selected.clear();
-        for (const id of alive) selected.add(id);
-      }
-    }
+  if (/^Digit[1-9]$/.test(ev.code) && me >= 0) {
+    ev.preventDefault();
+    groupKey(Number(ev.code.slice(5)), ev.shiftKey ? 'set' : ev.altKey ? 'add' : 'pick');
   }
   if (key === 'tab') {
     ev.preventDefault();
@@ -2384,6 +2652,73 @@ $('idle-vil-btn').addEventListener('dblclick', () => {
   for (const v of idle) selected.add(v.id);
 });
 $('idle-mil-btn').addEventListener('click', selectIdleSoldiers);
+
+/** Shift+number stores the selection as a group, Alt+number adds it, the number alone selects the
+ *  group and pressing it twice in a row looks at it. A unit is in one group at a time. */
+function groupKey(n: number, how: 'set' | 'add' | 'pick'): void {
+  const mine = [...selected].filter((id) => views.get(id)?.owner === me);
+  if (how !== 'pick') {
+    if (mine.length === 0) return;
+    const ids = how === 'add' ? [...new Set([...(groups.get(n) ?? []), ...mine])] : mine;
+    for (const [k, list] of groups) if (k !== n) groups.set(k, list.filter((id) => !ids.includes(id)));
+    groups.set(n, ids);
+    refreshGroups();
+    return;
+  }
+  const alive = (groups.get(n) ?? []).filter((id) => views.get(id)?.owner === me);
+  if (alive.length === 0) return;
+  const now = performance.now();
+  const again = lastGroupPress.n === n && now - lastGroupPress.t < 400;
+  lastGroupPress = { n, t: now };
+  selected.clear();
+  selectedTile = -1;
+  for (const id of alive) selected.add(id);
+  if (again) {
+    // The middle of the group, by its median, so a straggler far away doesn't pull the camera off.
+    const xs = alive.map((id) => views.get(id)!.x).sort((a, b) => a - b);
+    const ys = alive.map((id) => views.get(id)!.y).sort((a, b) => a - b);
+    [cam.x, cam.y] = tileToWorld(xs[xs.length >> 1], ys[ys.length >> 1]);
+  }
+}
+
+let groupSignature = '';
+function refreshGroups(): void {
+  groupSignature = '';
+}
+/** The strip of stored groups above the bottom bar, each with its biggest unit kind and size. */
+function renderGroups(): void {
+  groupOf.clear();
+  const parts: string[] = [];
+  for (let n = 1; n <= 9; n++) {
+    const alive = (groups.get(n) ?? []).filter((id) => views.get(id)?.owner === me);
+    if (alive.length === 0) continue;
+    for (const id of alive) groupOf.set(id, n);
+    const count = new Map<string, number>();
+    for (const id of alive) count.set(views.get(id)!.kind, (count.get(views.get(id)!.kind) ?? 0) + 1);
+    const top = [...count].sort((a, b) => b[1] - a[1])[0][0];
+    const on = alive.length > 0 && alive.every((id) => selected.has(id)) && selected.size === alive.length;
+    parts.push(`${n}:${top}:${alive.length}:${on ? 1 : 0}`);
+  }
+  const signature = parts.join('|') + '|' + me;
+  if (signature === groupSignature) return;
+  groupSignature = signature;
+  const box = $('groups');
+  box.replaceChildren();
+  for (const part of parts) {
+    const [n, kind, size, on] = part.split(':');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = on === '1' ? 'on' : '';
+    b.title = `Group ${n}: press ${n} to select it, twice to look at it`;
+    const pic = document.createElement('img');
+    pic.src = icon(kind, me);
+    pic.alt = '';
+    b.append(Object.assign(document.createElement('i'), { textContent: n }), pic, Object.assign(document.createElement('b'), { textContent: size }));
+    b.addEventListener('click', () => groupKey(Number(n), 'pick'));
+    box.append(b);
+  }
+  box.hidden = parts.length === 0;
+}
 
 let idleSignature = '';
 function renderIdle(): void {
@@ -2868,7 +3203,7 @@ function renderPanel(): void {
     card.portrait = icon(top, chosen[0].owner);
     card.group = chosen.slice(0, 30);
     detail = { title: card.name, icon: top, stats: [...counts].map(([k, c]) => [k, `${c} ${many(k, c)}`] as [string, string]),
-      lines: ['Click one to select only it. Shift + 1–9 stores this group, 1–9 brings it back.'] };
+      lines: ['Click one to select only it. Shift + 1–9 stores this group, Alt + 1–9 adds to one, 1–9 selects it, twice looks at it.'] };
   }
   if (!placing && mine.some((v) => v.kind === 'villager')) {
     const housed = housingNow();
@@ -3694,6 +4029,17 @@ function drawUnitView(v: View, x: number, y: number, now: number): void {
   if (now >= v.hurt && now - v.hurt < 160) drawImpact(sx, sy - 13, (now - v.hurt) / 160);
   const full = maxHp(v);
   if (v.hp < full || selected.has(v.id)) bar(sx, sy - Math.max(30, unitHeight(v.kind) + 6), 22, v.hp / full, '#4ad04a');
+  const group = selected.has(v.id) ? groupOf.get(v.id) : undefined;
+  if (group !== undefined) {
+    const gy = sy - Math.max(30, unitHeight(v.kind) + 6) - 3;
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = 'rgba(0,0,0,.7)';
+    ctx.fillText(String(group), sx + 12, gy + 1);
+    ctx.fillStyle = '#f2d36b';
+    ctx.fillText(String(group), sx + 11, gy);
+  }
 }
 
 /** A map generated for the background of the start menu and waiting room, with a small town on it. */
@@ -3781,6 +4127,7 @@ function frame(now: number): void {
   ctx.fillRect(0, 0, viewW(), viewH());
   if (!map) return drawLobbyScene(now);
   if (!map) return;
+  stepReplay(dt);
   updateCamera(dt);
   if (explored.length !== map.size * map.size) explored = new Uint8Array(map.size * map.size);
   updateWorkOffsets(now, dt);
@@ -4066,6 +4413,7 @@ function frame(now: number): void {
   renderHud();
   updateHints(performance.now());
   renderIdle();
+  renderGroups();
   renderMinimap();
 }
 document.documentElement.style.setProperty('--lock-icon', `url(${icon('lock')})`);

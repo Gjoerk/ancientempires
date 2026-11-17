@@ -99,7 +99,7 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
   const blob = (tile: Tile, cx: number, cy: number, r: number, density: number, keepOut: number) => {
     for (let y = Math.floor(cy - r); y <= cy + r; y++) {
       for (let x = Math.floor(cx - r); x <= cx + r; x++) {
-        if (x < 0 || y < 0 || x >= size || y >= size || nearStart(x, y, keepOut)) continue;
+        if (x < 0 || y < 0 || x >= size || y >= size || nearStart(x, y, keepOut) || tiles[y * size + x] === Tile.Water) continue;
         const d = Math.hypot(x - cx, y - cy) / r;
         if (d <= 1 && rand() < density * (1.25 - d)) tiles[y * size + x] = tile;
       }
@@ -108,7 +108,50 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
 
   // The amount of scenery grows with the area of the map.
   const area = (size * size) / (80 * 80);
-  for (let i = 0; i < Math.round(9 * area); i++) blob(Tile.Water, rand() * size, rand() * size, 3 + rand() * 3, 1, 15);
+  // Water: a few big lakes and some small ponds, each one solid with a smooth, wobbly shore, kept
+  // apart from each other and from the towns so they never wall anybody in.
+  const pools: [number, number, number][] = [];
+  const pool = (r: number, keepOut: number) => {
+    for (let tries = 0; tries < 60; tries++) {
+      const cx = r + 2 + rand() * (size - 2 * r - 4);
+      const cy = r + 2 + rand() * (size - 2 * r - 4);
+      if (nearStart(cx, cy, keepOut + r)) continue;
+      if (pools.some(([px, py, pr]) => Math.hypot(px - cx, py - cy) < pr + r + 7)) continue;
+      pools.push([cx, cy, r]);
+      // The shore's distance from the centre wanders with the angle, by a few gentle waves.
+      const waves = [0, 1, 2].map((k) => [k + 2, rand() * Math.PI * 2, (0.18 - k * 0.05) * (0.6 + rand() * 0.8)]);
+      const stretch = 0.75 + rand() * 0.5;
+      const tilt = rand() * Math.PI;
+      for (let y = Math.floor(cy - r * 1.6); y <= cy + r * 1.6; y++) {
+        for (let x = Math.floor(cx - r * 1.6); x <= cx + r * 1.6; x++) {
+          if (x < 1 || y < 1 || x >= size - 1 || y >= size - 1 || nearStart(x, y, keepOut)) continue;
+          const dx = x + 0.5 - cx;
+          const dy = y + 0.5 - cy;
+          const u = dx * Math.cos(tilt) + dy * Math.sin(tilt);
+          const v = (-dx * Math.sin(tilt) + dy * Math.cos(tilt)) / stretch;
+          const a = Math.atan2(v, u);
+          const edge = r * (1 + waves.reduce((sum, [k, phase, amp]) => sum + Math.sin(a * k + phase) * amp, 0));
+          if (Math.hypot(u, v) <= edge) tiles[y * size + x] = Tile.Water;
+        }
+      }
+      return;
+    }
+  };
+  for (let i = 0; i < Math.round(1.2 * area); i++) pool(7 + rand() * 4, 15);
+  for (let i = 0; i < Math.round(3 * area); i++) pool(1.8 + rand() * 1.8, 13);
+  // Smooth the shores: no lone puddle tiles, no single dry tiles inside a lake.
+  for (let pass = 0; pass < 2; pass++) {
+    const was = tiles.slice();
+    for (let y = 1; y < size - 1; y++) {
+      for (let x = 1; x < size - 1; x++) {
+        let wet = 0;
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) if ((ox || oy) && was[(y + oy) * size + x + ox] === Tile.Water) wet++;
+        const i = y * size + x;
+        if (was[i] === Tile.Water && wet <= 2) tiles[i] = Tile.Grass;
+        else if (was[i] !== Tile.Water && wet >= 6 && !nearStart(x, y, 13)) tiles[i] = Tile.Water;
+      }
+    }
+  }
   for (let i = 0; i < Math.round(52 * area); i++) blob(Tile.Forest, rand() * size, rand() * size, 2 + rand() * 3, 0.8, 9);
   for (let i = 0; i < Math.round(10 * area); i++) blob(Tile.Gold, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
   for (let i = 0; i < Math.round(9 * area); i++) blob(Tile.Stone, 6 + rand() * (size - 12), 6 + rand() * (size - 12), 1.5, 0.8, 12);
@@ -123,7 +166,7 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
       const [dx, dy] = [[1, 0], [-1, 0], [0, 1], [0, -1]][Math.floor(rand() * 4)];
       const x = bx + dx;
       const y = by + dy;
-      if (x < 1 || y < 1 || x >= size - 1 || y >= size - 1 || nearStart(x, y, BASE_RADIUS) || tiles[y * size + x] === tile) continue;
+      if (x < 1 || y < 1 || x >= size - 1 || y >= size - 1 || nearStart(x, y, BASE_RADIUS) || tiles[y * size + x] === tile || tiles[y * size + x] === Tile.Water) continue;
       tiles[y * size + x] = tile;
       cells.push([x, y]);
     }

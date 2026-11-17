@@ -1,11 +1,20 @@
 import { Peer, DataConnection, PeerOptions } from 'peerjs';
-import { ClientMessage, GameHost, MAP_SIZES, POP_LIMITS, ServerMessage, TICK_MS, TICK_RATE } from '@kingsfall/shared';
+import { ClientMessage, GameHost, MAP_SIZES, MAX_PLAYERS, POP_LIMITS, ServerMessage, TICK_MS, TICK_RATE } from '@kingsfall/shared';
 
 // There is no game server. One player's browser hosts the game and the others
 // connect to it directly over WebRTC. Only the initial handshake goes through
 // a PeerJS broker (the public one unless VITE_PEER_HOST is set).
 
+import { listRoom, roomChanged } from './directory';
+
 const ID_PREFIX = 'kingsfall-room-';
+
+/** Whether rooms hosted here show up in the list of open games on the start page. */
+let publicRooms = true;
+export function setRoomsPublic(on: boolean): void {
+  publicRooms = on;
+  roomChanged();
+}
 // Generous, so that a slow or crowded connection (a big battle, a long way) is not taken for a lost one.
 const SILENCE_LIMIT_MS = 15000;
 
@@ -213,7 +222,7 @@ export async function prepareNetwork(): Promise<void> {
   }
 }
 
-function peerOptions(): PeerOptions {
+export function peerOptions(): PeerOptions {
   const host = import.meta.env.VITE_PEER_HOST as string | undefined;
   const config = iceServers && relayMode !== 'off'
     ? { config: { iceServers, iceTransportPolicy: relayMode === 'always' ? 'relay' as const : 'all' as const } }
@@ -297,12 +306,22 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
     toTeam(from, { t: 'signal', from, x: x as number, y: y as number });
   };
   const sendLobby = () => {
+    roomChanged();
     handlers.onMessage(game.lobbyMessage(mySlot, mySlot));
     toGuests((slot) => game.lobbyMessage(slot, mySlot));
   };
+  // In the list of open games while in the waiting room or playing (a finished game drops out).
+  const unlist = listRoom(() => {
+    if (!registered || closed || !publicRooms || (game.state && game.state.winner >= 0)) return undefined;
+    return {
+      code, host: game.players.get(mySlot)?.name ?? '', players: [...game.players.values()].filter((p) => !p.away).length, max: MAX_PLAYERS,
+      started: !!game.state, mapSize: game.settings.mapSize, speed: game.settings.speed ?? 1,
+    };
+  });
   const close = (reason: string, quietly = false) => {
     if (closed) return;
     closed = true;
+    unlist();
     stopTicker?.();
     peer.destroy();
     if (listener !== peer) listener.destroy();
@@ -387,6 +406,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
   };
   peer.on('open', () => {
     registered = true;
+    roomChanged();
     // Also emitted again after the link to the matchmaking service came back: set up only once.
     if (mySlot < 0) setup();
   });
@@ -523,6 +543,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
     const fresh = new Peer(ID_PREFIX + code, peerOptions());
     fresh.on('open', () => {
       registered = true;
+      roomChanged();
       if (resume) broadcast({ t: 'chat', from: mySlot, text: '(the host left: I am hosting the game now)' });
     });
     fresh.on('connection', accept);
@@ -569,6 +590,7 @@ export function hostGame(code: string, name: string, handlers: Handlers, resume?
         controlSlot = mySlot;
         handlers.onMessage(game.startMessage(mySlot));
         toGuests((slot) => game.startMessage(slot));
+        roomChanged();
       },
       backToLobby() {
         if (!game.state) return;
