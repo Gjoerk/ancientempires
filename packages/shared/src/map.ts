@@ -2,9 +2,9 @@ import type { Res } from './defs';
 
 export const MAP_SIZE = 80;
 /** Map sizes the host can choose from, in tiles along one edge. */
-export const MAP_SIZES = { small: 96, medium: 128, large: 160 } as const;
+export const MAP_SIZES = { small: 96, medium: 128, large: 160, huge: 208 } as const;
 export type MapSizeName = keyof typeof MAP_SIZES;
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 8;
 /** Teams to choose from in the lobby; each has its own colour. */
 export const MAX_TEAMS = 8;
 /** Radius around each start tile kept free for the town centre and castle. */
@@ -77,7 +77,8 @@ export function isWalkable(map: GameMap, tx: number, ty: number, team = -1): boo
   return map.tiles[i] === Tile.Grass && (map.blocked[i] === 0 || (team >= 0 && map.gate[i] === team + 1));
 }
 
-export function generateMap(seed: number, size = MAP_SIZE): GameMap {
+/** A map with `towns` starting places (at least as many as the highest player slot needs). */
+export function generateMap(seed: number, size = MAP_SIZE, towns = 4): GameMap {
   const rand = mulberry32(seed);
   const tiles = new Uint8Array(size * size);
   // Towns go anywhere on the map, at random, as long as they keep a fair distance from each other;
@@ -85,8 +86,9 @@ export function generateMap(seed: number, size = MAP_SIZE): GameMap {
   const inset = 14;
   const room = size - 1 - inset * 2;
   const starts: [number, number][] = [];
-  let apart = size * 0.5;
-  for (let tries = 0; starts.length < 4; tries++) {
+  // Four towns stand half the map apart; more of them a little closer.
+  let apart = size / Math.sqrt(towns);
+  for (let tries = 0; starts.length < towns; tries++) {
     if (tries > 0 && tries % 300 === 0) {
       apart *= 0.95;
       starts.length = 0;

@@ -3,7 +3,7 @@ import {
   QUEUE_MAX, QUICK_RESOURCES, rangeOf, Res, RESOURCES, START_RESOURCES, TechId, TECHS, TRADE_BUY, TRADE_SELL,
 } from './defs';
 import { GameMap, generateMap, inBounds, isWalkable, markBuilding, Tile, TILE_RESOURCE } from './map';
-import { areaAt, canReach, distanceField, findPath, findPathToArea, nearestReachable, pathDown } from './path';
+import { areaAt, canReach, distanceField, findPath, findPathToArea, nearestReachable, pathDown, tileOpened } from './path';
 
 /** Simulation steps per second. The host runs this; guests only draw snapshots. */
 export const TICK_RATE = 10;
@@ -209,10 +209,10 @@ const sizeOf = (e: Entity) => DEFS[e.kind].size ?? 1;
 const rectOf = (e: Entity): Rect => ({ x: e.x, y: e.y, s: sizeOf(e) });
 const tileRect = (map: GameMap, tile: number): Rect => ({ x: tile % map.size, y: Math.floor(tile / map.size), s: 1 });
 
-export function createGame(seed: number, size?: number, popLimit = POP_MAX): GameState {
+export function createGame(seed: number, size?: number, popLimit = POP_MAX, towns = 4): GameState {
   return {
     popLimit, blessings: [],
-    tick: 0, seed, map: generateMap(seed, size), entities: new Map(), players: new Map(), nextId: 1,
+    tick: 0, seed, map: generateMap(seed, size, towns), entities: new Map(), players: new Map(), nextId: 1,
     changedTiles: new Map(), tileEvents: [], amountEvents: new Map(), shots: [], hits: [], deaths: [], contested: false, winner: -1, slayers: new Map(), ai: new Map(), occupied: new Map(), relics: [],
   };
 }
@@ -254,7 +254,15 @@ export function spawn(state: GameState, owner: number, kind: Kind, tx: number, t
 }
 
 function setBlocked(map: GameMap, e: Entity, value: number): void {
-  markBuilding(map, e.x, e.y, sizeOf(e), DEFS[e.kind].walkable === true, value);
+  if (value !== 0) return markBuilding(map, e.x, e.y, sizeOf(e), DEFS[e.kind].walkable === true, value);
+  // Cleared one tile at a time, so that the walking areas can be patched as each opens up.
+  const size = sizeOf(e);
+  for (let y = e.y; y < e.y + size; y++) {
+    for (let x = e.x; x < e.x + size; x++) {
+      markBuilding(map, x, y, 1, DEFS[e.kind].walkable === true, 0);
+      if (inBounds(map, x, y)) tileOpened(map, y * map.size + x);
+    }
+  }
 }
 
 function kill(state: GameState, e: Entity): void {
@@ -804,9 +812,10 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
   const nearby = new Map<string, { spots: [number, number][]; next: number }>();
   // A bigger group, or one going far, shares a distance field towards the spot instead of a search
   // each; it is kept for a while, so that troops setting off again after a fight reuse it too.
+  const groupTiles = units.map((u) => Math.floor(u.y) * state.map.size + Math.floor(u.x));
   const pathFor = (e: Entity, sx: number, sy: number, tx: number, ty: number, team: number) => {
     const far = Math.abs(tx - sx) + Math.abs(ty - sy) > 24;
-    const field = units.length >= 6 || far ? fieldTowards(state, Math.floor(x), Math.floor(y), team) : undefined;
+    const field = units.length >= 6 || far ? fieldTowards(state, Math.floor(x), Math.floor(y), team, groupTiles) : undefined;
     return field ? pathDown(state.map, field, sx, sy, tx, ty, team) : findPath(state.map, sx, sy, tx, ty, team);
   };
   for (const e of units) {
@@ -839,7 +848,7 @@ function moveUnits(state: GameState, units: Entity[], x: number, y: number, face
 /** Distance fields towards recent destinations, per game: dropped when the map changes, or after a while. */
 const fieldCache = new WeakMap<GameState, Map<string, { version: number; tick: number; field: Float32Array }>>();
 const FIELD_KEEP_TICKS = 60 * TICK_RATE;
-function fieldTowards(state: GameState, gx: number, gy: number, team: number): Float32Array {
+function fieldTowards(state: GameState, gx: number, gy: number, team: number, from?: number[]): Float32Array {
   let cache = fieldCache.get(state);
   if (!cache) fieldCache.set(state, (cache = new Map()));
   const key = `${team}:${gx},${gy}`;
@@ -850,7 +859,7 @@ function fieldTowards(state: GameState, gx: number, gy: number, team: number): F
     const oldest = [...cache].sort((a, b) => a[1].tick - b[1].tick)[0];
     cache.delete(oldest[0]);
   }
-  const field = distanceField(state.map, gx, gy, team);
+  const field = distanceField(state.map, gx, gy, team, from);
   cache.set(key, { version: state.map.version, tick: state.tick, field });
   return field;
 }
@@ -1349,6 +1358,7 @@ function fightBack(state: GameState, victim: Entity, attacker: Entity): void {
 function depleteTile(state: GameState, tile: number): void {
   state.map.tiles[tile] = Tile.Grass;
   state.map.version++;
+  tileOpened(state.map, tile);
   state.changedTiles.set(tile, Tile.Grass);
   state.tileEvents.push([tile, Tile.Grass]);
 }

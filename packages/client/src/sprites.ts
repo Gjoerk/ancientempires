@@ -15,7 +15,7 @@ export function setColorblind(on: boolean): void {
 
 /** Each player's colour, by slot: the colour of their team, set when a game starts. */
 export const TEAM_NAMES = ['Blue', 'Red', 'Green', 'Yellow', 'Purple', 'Orange', 'Teal', 'Pink'];
-export const PLAYER_COLORS = TEAM_COLORS.slice(0, 4);
+export const PLAYER_COLORS = TEAM_COLORS.slice(0, 8);
 
 /** Gives every player their team's colour; `teams` is the team of each slot. */
 export function setPlayerColors(teams: Map<number, number>, force = false): void {

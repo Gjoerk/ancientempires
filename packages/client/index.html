@@ -69,7 +69,12 @@
     .stat.age b { color: var(--accent); min-width: 0; }
     .stat:not(:has(img)) { padding: 0 10px; }
     .stat b { line-height: 1; }
-    #players { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    #players { margin-left: auto; display: flex; gap: 14px; align-items: center; min-width: 0; overflow: hidden; }
+    #players .pl { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+    #players .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #players.many { gap: 8px; font-size: 13px; }
+    #players.many .pl { gap: 3px; }
+    #players.many .nm { max-width: 92px; }
     /* Each player's gem from the menu, in their colour. */
     .chip { display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; background: var(--gem) center / 14px 14px no-repeat; }
     #menu-btn { flex: none; position: sticky; right: 0; }
@@ -346,7 +351,10 @@
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 2px 6px rgba(0, 0, 0, .5); }
     .card button.plain { background: rgba(0, 0, 0, .25); border: 1px solid rgba(201, 165, 74, .45); color: var(--ink); font-size: 14px; box-shadow: none; }
     .card .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
-    #open-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 210px; overflow-y: auto; }
+    #open-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 55vh; overflow-y: auto; }
+    #open-list:empty { display: none; }
+    #browse-msg { margin: 0; color: var(--accent); min-height: 0; }
+    #browse-msg:empty { display: none; }
     #open-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 6px 8px;
       background: rgba(0, 0, 0, .22); border: 1px solid rgba(201, 165, 74, .3); border-radius: 4px; }
     #open-list .who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -486,6 +494,9 @@
     #music input[type=range] { width: 80px; accent-color: var(--accent); cursor: pointer; }
     #music .grp.off input { opacity: .45; }
     @media (max-width: 700px) { #music input[type=range] { width: 52px; } }
+    /* Many players: the names get the room, the volume sliders shrink. */
+    #top.many #music input[type=range] { display: none; }
+    #top.many #music { gap: 4px; }
     /* The end of a game: who won, and what next. */
     #pause { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 41; width: min(380px, calc(100vw - 32px)); padding: 20px 22px; text-align: center; }
     #pause h2 { margin: 0 0 6px; font-family: var(--title-font, var(--font)); font-size: 26px; color: var(--accent); }
@@ -705,6 +716,7 @@
           <option value="small">Small (96 × 96)</option>
           <option value="medium">Medium (128 × 128)</option>
           <option value="large">Large (160 × 160)</option>
+          <option value="huge">Huge (208 × 208), for 6 to 8 players</option>
         </select>
       </label>
       <label class="check">Population limit
@@ -733,6 +745,20 @@
       <button id="leave-btn" type="button" class="plain">Leave</button>
     </div></div>
   </div>
+  <div id="browse" class="screen" style="display:none">
+    <div class="card-wrap"><div class="card">
+      <h1 class="title">Open games</h1>
+      <div class="rule"></div>
+      <p class="dim">Games whose host listed them. Join one that is waiting for players, or watch one already playing.</p>
+      <label class="field">Your name
+        <input id="browse-name" maxlength="16">
+      </label>
+      <ul id="open-list"></ul>
+      <p id="open-none" class="dim">Looking for open games…</p>
+      <p id="browse-msg" role="status"></p>
+      <button id="browse-back" type="button" class="plain">Back</button>
+    </div></div>
+  </div>
   <div id="lobby">
     <div class="card-wrap"><form id="lobby-form" class="card" autocomplete="off">
       <img class="emblem" alt="">
@@ -751,11 +777,7 @@
         <button id="watch-btn" class="plain" title="Watch the game without playing; the whole map is shown">Watch</button>
       </div>
       <p id="lobby-msg" role="status"></p>
-      <div id="open-games">
-        <div class="or">open games</div>
-        <ul id="open-list"></ul>
-        <p id="open-none" class="dim">Looking for open games…</p>
-      </div>
+      <button id="browse-btn" type="button" class="plain">Find open games</button>
       <label class="field">Connection
         <select id="relay-select" title="How players connect to each other">
           <option value="auto">Automatic: direct, Cloudflare relay only if needed</option>

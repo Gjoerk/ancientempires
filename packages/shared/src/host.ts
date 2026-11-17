@@ -96,7 +96,7 @@ export class GameHost {
   /** Every tile that differs from the start of the game, for someone coming back in. */
   catchUp(): ServerMessage | undefined {
     if (!this.state) return undefined;
-    const start = generateMap(this.state.seed, this.state.map.size);
+    const start = generateMap(this.state.seed, this.state.map.size, this.state.map.starts.length);
     const now = this.state.map;
     const tiles: [number, number, number][] = [];
     for (let i = 0; i < now.tiles.length; i++) {
@@ -188,7 +188,9 @@ export class GameHost {
 
   /** Starts a fresh game with everyone who is in the lobby. */
   start(seed: number): void {
-    this.state = createGame(seed, MAP_SIZES[this.settings.mapSize], this.settings.popLimit);
+    // A town for every slot in use; four at least, so that a small game has room to spread out.
+    const towns = Math.max(4, ...[...this.players.keys()].map((slot) => slot + 1));
+    this.state = createGame(seed, MAP_SIZES[this.settings.mapSize], this.settings.popLimit, towns);
     for (const slot of [...this.players.keys()].sort()) {
       const info = this.players.get(slot)!;
       addPlayer(this.state, slot, info.team, this.settings.quick);
@@ -219,7 +221,7 @@ export class GameHost {
   backup(): string | undefined {
     const s = this.state;
     if (!s) return undefined;
-    const start = generateMap(s.seed, s.map.size);
+    const start = generateMap(s.seed, s.map.size, s.map.starts.length);
     const tiles: [number, number, number][] = [];
     for (let i = 0; i < s.map.tiles.length; i++) {
       if (s.map.tiles[i] !== start.tiles[i] || s.map.amount[i] !== start.amount[i]) tiles.push([i, s.map.tiles[i], s.map.amount[i]]);
@@ -229,7 +231,7 @@ export class GameHost {
     const data = {
       v: 1, room: this.room, settings: this.settings, players: [...this.players.values()], tokens: [...this.tokens], banned: [...this.banned],
       state: rest, changed: [...changedTiles],
-      map: { size: map.size, version: map.version, tiles, blocked: runs(map.blocked), footprint: runs(map.footprint), gate: runs(map.gate) },
+      map: { size: map.size, towns: map.starts.length, version: map.version, tiles, blocked: runs(map.blocked), footprint: runs(map.footprint), gate: runs(map.gate) },
     };
     return JSON.stringify(data, (_, v) => (v instanceof Map ? { $map: [...v] } : v instanceof Set ? { $set: [...v] } : v));
   }
@@ -242,7 +244,7 @@ export class GameHost {
     for (const p of data.players as PlayerInfo[]) host.players.set(p.slot, p);
     host.tokens = new Map(data.tokens);
     host.banned = new Set(data.banned ?? []);
-    const map = generateMap(data.state.seed, data.map.size);
+    const map = generateMap(data.state.seed, data.map.size, data.map.towns ?? 4);
     for (const [i, tile, amount] of data.map.tiles as [number, number, number][]) {
       map.tiles[i] = tile;
       map.amount[i] = amount;
@@ -265,7 +267,7 @@ export class GameHost {
   }
 
   startMessage(you: number): ServerMessage {
-    return { t: 'start', you, room: this.room, seed: this.state!.seed, size: this.state!.map.size, popLimit: this.state!.popLimit, players: [...this.players.values()],
+    return { t: 'start', you, room: this.room, seed: this.state!.seed, size: this.state!.map.size, towns: this.state!.map.starts.length, popLimit: this.state!.popLimit, players: [...this.players.values()],
       watching: [...this.watching], speed: this.settings.speed ?? 1 };
   }
 

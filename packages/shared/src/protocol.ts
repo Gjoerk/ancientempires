@@ -66,7 +66,7 @@ export type ServerMessage =
   /** `you` is -1 for a spectator; `watching` names the spectators. */
   | { t: 'lobby'; you: number; host: number; room: string; players: PlayerInfo[]; settings: GameSettings; watching?: string[] }
   /** The host started the game. */
-  | { t: 'start'; you: number; room: string; seed: number; size: number; popLimit: number; players: PlayerInfo[]; watching?: string[]; speed?: number }
+  | { t: 'start'; you: number; room: string; seed: number; size: number; towns?: number; popLimit: number; players: PlayerInfo[]; watching?: string[]; speed?: number }
   | { t: 'players'; players: PlayerInfo[]; watching?: string[] }
   /** `from` is -1 for a spectator, who is then named. */
   | { t: 'chat'; from: number; text: string; team?: boolean; name?: string }

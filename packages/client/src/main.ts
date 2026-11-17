@@ -20,6 +20,7 @@ import {
   maxHpOf,
   PlayerInfo,
   QUEUE_ITEMS,
+  MAX_PLAYERS,
   MAX_TEAMS,
   Res,
   RELIC_ATTACK,
@@ -999,15 +1000,22 @@ function renderPlayers(): void {
   renderKickList();
   const el = $('players');
   el.textContent = '';
+  // Many players: shorter names, cut off where needed (the whole name shows on hover).
+  el.classList.toggle('many', roster.length > 4);
+  $('top').classList.toggle('many', roster.length > 4);
   for (const p of roster) {
+    const item = document.createElement('span');
+    item.className = 'pl';
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.style.setProperty('--gem', `var(--gem-${p.team})`);
     const label = document.createElement('span');
+    label.className = 'nm';
     label.textContent = p.name + (p.slot === me ? (p.slot === myOwnSlot ? ' (you)' : ' (playing)') : '') + (p.away ? ' (connection lost)' : '');
-    label.style.marginRight = '14px';
+    item.title = label.textContent;
     if (players.get(p.slot)?.defeated) label.style.textDecoration = 'line-through';
-    el.append(chip, label);
+    item.append(chip, label);
+    el.append(item);
   }
   if (myOwnSlot < 0 && session) {
     const you = document.createElement('b');
@@ -1244,7 +1252,7 @@ function onMessage(msg: ServerMessage): void {
     // A spectator sees the whole map, and has no buttons of their own.
     revealAll = msg.you < 0;
     document.body.classList.toggle('spectating', msg.you < 0);
-    map = generateMap(msg.seed, msg.size);
+    map = generateMap(msg.seed, msg.size, msg.towns ?? 4);
     popLimit = msg.popLimit;
     buildTerrain(map);
     roster = msg.players;
@@ -1779,7 +1787,7 @@ function renderRoom(room: string, you: number, host: number, settings: GameSetti
   }
   $('room-host').hidden = !hosting;
   $('room-wait').hidden = hosting;
-  $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= 4;
+  $<HTMLButtonElement>('add-ai-btn').disabled = roster.length >= MAX_PLAYERS;
   $('public-line').hidden = !hosting;
   const quickBox = $<HTMLInputElement>('quick-box');
   quickBox.checked = settings.quick;
@@ -1957,7 +1965,7 @@ try {
 }
 
 // The open games, shown on the start page while it is open.
-const SIZE_NAMES: Record<string, string> = { small: 'Small map', medium: 'Medium map', large: 'Large map' };
+const SIZE_NAMES: Record<string, string> = { small: 'Small map', medium: 'Medium map', large: 'Large map', huge: 'Huge map' };
 let stopBrowsing: (() => void) | undefined;
 let browseStarted = 0;
 function renderOpenGames(rooms: Listing[]): void {
@@ -1978,7 +1986,13 @@ function renderOpenGames(rooms: Listing[]): void {
     go.className = r.started || full ? 'plain' : 'primary';
     go.textContent = r.started || full ? 'Watch' : 'Join';
     go.addEventListener('click', () => {
+      if (!$<HTMLInputElement>('name').value.trim()) {
+        $('browse-msg').textContent = 'Enter your name first.';
+        $('browse-name').focus();
+        return;
+      }
       $<HTMLInputElement>('room').value = r.code;
+      closeBrowse();
       $<HTMLButtonElement>(r.started || full ? 'watch-btn' : 'join-btn').click();
     });
     li.append(who, info, go);
@@ -1989,21 +2003,32 @@ function renderOpenGames(rooms: Listing[]): void {
   none.textContent = Date.now() - browseStarted < 5000 ? 'Looking for open games…' : 'No open games right now. Host one and friends can find it here.';
 }
 let browsing = false;
+/** The page of open games, opened from the start menu; it looks for games only while it is open. */
+function openBrowse(): void {
+  $('lobby').style.display = 'none';
+  $('browse').style.display = '';
+  $('browse-msg').textContent = '';
+  $<HTMLInputElement>('browse-name').value = $<HTMLInputElement>('name').value;
+  browsing = true;
+  browseStarted = Date.now();
+  renderOpenGames([]);
+  void prepareNetwork().then(() => {
+    if (browsing && !stopBrowsing) stopBrowsing = watchRooms(renderOpenGames);
+  });
+}
+function closeBrowse(back = true): void {
+  browsing = false;
+  stopBrowsing?.();
+  stopBrowsing = undefined;
+  $('browse').style.display = 'none';
+  if (back) $('lobby').style.display = '';
+}
+$('browse-btn').addEventListener('click', openBrowse);
+$('browse-name').addEventListener('input', () => ($<HTMLInputElement>('name').value = $<HTMLInputElement>('browse-name').value));
+$('browse-back').addEventListener('click', () => closeBrowse());
+// The "Looking…" line turns into "nothing open" after a few seconds.
 setInterval(() => {
-  const open = $('lobby').style.display !== 'none' && !session;
-  if (open && !browsing) {
-    browsing = true;
-    browseStarted = Date.now();
-    renderOpenGames([]);
-    void prepareNetwork().then(() => {
-      if (browsing && !stopBrowsing) stopBrowsing = watchRooms(renderOpenGames);
-    });
-  } else if (!open && browsing) {
-    browsing = false;
-    stopBrowsing?.();
-    stopBrowsing = undefined;
-  }
-  if (open && $('open-list').children.length === 0) renderOpenGames([]);
+  if (browsing && $('open-list').children.length === 0) renderOpenGames([]);
 }, 1000);
 
 // Enter in the room-code field joins; anywhere else in the form it hosts.

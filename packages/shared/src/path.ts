@@ -159,18 +159,30 @@ export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: n
  * How far every tile is from (gx, gy), walking, for a whole group sent there at once: one search for
  * all of them instead of one each (see pathDown). Unreachable tiles are Infinity.
  */
-export function distanceField(map: GameMap, gx: number, gy: number, team = -1): Float32Array {
+export function distanceField(map: GameMap, gx: number, gy: number, team = -1, until?: number[]): Float32Array {
   const n = map.size;
   const dist = new Float32Array(n * n).fill(Infinity);
   if (gx < 0 || gy < 0 || gx >= n || gy >= n) return dist;
   heap.clear();
   dist[gy * n + gx] = 0;
   heap.push(0, gy * n + gx);
+  // With `until` given, the field only spreads a little beyond the farthest of those tiles that can
+  // be reached: on a big map most of it is never needed. (Elsewhere a path falls back to a search.)
+  let waiting = until ? new Set(until.filter((i) => i >= 0 && i < n * n && areaAt(map, i % n, (i / n) | 0, team) === areaAt(map, gx, gy, team))) : undefined;
+  let stopAt = Infinity;
   while (heap.size > 0) {
     const cur = heap.pop();
     const cx = cur % n;
     const cy = (cur - cx) / n;
     const d = dist[cur];
+    if (d > stopAt) break;
+    if (waiting) {
+      waiting.delete(cur);
+      if (waiting.size === 0) {
+        waiting = undefined;
+        stopAt = d + 12;
+      }
+    }
     for (const [dx, dy, cost] of DIRS) {
       const nx = cx + dx;
       const ny = cy + dy;
@@ -235,28 +247,40 @@ export function findPathToArea(
     const dy = Math.max(ay - y, 0, y - (ay + s - 1));
     return Math.max(0, octile(dx, dy) - (inside ? 0 : 1));
   };
+  // Nothing to walk to next to it (a tree deep in a forest, a mine across water): say so at once,
+  // instead of a search that goes through all of the map that can be reached before giving up.
+  if (!inside && reach === 1 && !canReach(map, sx, sy, ax, ay, team, s)) return { path: [], reached: false };
   return search(map, sx, sy, isGoal, h, team);
 }
 
 // Walking areas: every walkable tile is labelled with the connected area it belongs to, per team
 // (a team walks through its own gates). Asking whether a unit can get somewhere at all is then
 // instant, instead of a search that floods the whole map before giving up.
-const areas = new WeakMap<GameMap, { version: number; byTeam: Map<number, Int32Array> }>();
+const areas = new WeakMap<GameMap, { version: number; byTeam: Map<number, { labels: Int32Array; next: number }>; gated: Set<number> }>();
 
-function areaLabels(map: GameMap, team: number): Int32Array {
+function areaCache(map: GameMap) {
   let cache = areas.get(map);
   if (!cache || cache.version !== map.version) {
-    cache = { version: map.version, byTeam: new Map() };
+    // The teams with gates of their own: every other team walks the map exactly as one without gates does.
+    const gated = new Set<number>();
+    for (let i = 0; i < map.gate.length; i++) if (map.gate[i]) gated.add(map.gate[i] - 1);
+    cache = { version: map.version, byTeam: new Map(), gated };
     areas.set(map, cache);
   }
-  let labels = cache.byTeam.get(team);
-  if (labels) return labels;
+  return cache;
+}
+
+function areaLabels(map: GameMap, team: number): Int32Array {
+  const cache = areaCache(map);
+  const key = cache.gated.has(team) ? team : -1;
+  const kept = cache.byTeam.get(key);
+  if (kept) return kept.labels;
   const n = map.size;
-  labels = new Int32Array(n * n);
+  const labels = new Int32Array(n * n);
   const queue = new Int32Array(n * n);
   let next = 0;
   for (let i = 0; i < n * n; i++) {
-    if (labels[i] !== 0 || !isWalkable(map, i % n, (i / n) | 0, team)) continue;
+    if (labels[i] !== 0 || !isWalkable(map, i % n, (i / n) | 0, key)) continue;
     next++;
     labels[i] = next;
     let head = 0;
@@ -269,8 +293,8 @@ function areaLabels(map: GameMap, team: number): Int32Array {
       for (const [dx, dy] of DIRS) {
         const nx = cx + dx;
         const ny = cy + dy;
-        if (!isWalkable(map, nx, ny, team)) continue;
-        if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy, team) || !isWalkable(map, cx, cy + dy, team))) continue;
+        if (!isWalkable(map, nx, ny, key)) continue;
+        if (dx !== 0 && dy !== 0 && (!isWalkable(map, cx + dx, cy, key) || !isWalkable(map, cx, cy + dy, key))) continue;
         const ni = ny * n + nx;
         if (labels[ni] !== 0) continue;
         labels[ni] = next;
@@ -278,8 +302,36 @@ function areaLabels(map: GameMap, team: number): Int32Array {
       }
     }
   }
-  cache.byTeam.set(team, labels);
+  cache.byTeam.set(key, { labels, next });
   return labels;
+}
+
+/**
+ * Call right after the map's version went up because one tile became walkable (a tree felled, a
+ * building gone): the walking areas are patched instead of worked out again for the whole map. A
+ * tile that joins two areas into one still needs the whole map gone through.
+ */
+export function tileOpened(map: GameMap, i: number): void {
+  const cache = areas.get(map);
+  if (!cache || cache.version !== map.version - 1) return;
+  const n = map.size;
+  const x = i % n;
+  const y = (i - x) / n;
+  for (const [key, area] of cache.byTeam) {
+    if (!isWalkable(map, x, y, key)) continue;
+    let joined = 0;
+    for (const [dx, dy] of DIRS) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!isWalkable(map, nx, ny, key)) continue;
+      if (dx !== 0 && dy !== 0 && (!isWalkable(map, x + dx, y, key) || !isWalkable(map, x, y + dy, key))) continue;
+      const label = area.labels[ny * n + nx];
+      if (joined === 0) joined = label;
+      else if (label !== joined) return;
+    }
+    area.labels[i] = joined || ++area.next;
+  }
+  cache.version = map.version;
 }
 
 /** The walking area a tile belongs to, or 0 where nobody can stand. */

@@ -1230,3 +1230,23 @@ test('an army on the march sent further on keeps going: nobody in front turns ba
   run(s, 400);
   assert.ok(units.every((e) => Math.abs(e.y - 80) < 6), 'all gathered at the spot');
 });
+
+test('eight players fit on a huge map, each with their own town well apart', () => {
+  const host = new GameHost('EIGHT');
+  for (let i = 0; i < 8; i++) assert.ok(host.join('P' + i), `player ${i + 1} gets in`);
+  assert.equal(host.join('P9'), undefined, 'a ninth does not');
+  host.settings.mapSize = 'huge';
+  host.start(4242);
+  const s = host.state!;
+  assert.equal(s.map.size, 208);
+  assert.equal(s.map.starts.length, 8);
+  for (let slot = 0; slot < 8; slot++) assert.equal(owned(s, slot, 'towncenter').length, 1, `player ${slot} has a town centre`);
+  for (const [i, a] of s.map.starts.entries()) {
+    for (const b of s.map.starts.slice(i + 1)) assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) > 40, 'towns stay apart');
+  }
+  const msg = host.startMessage(0);
+  assert.ok(msg.t === 'start' && msg.towns === 8, 'the start message says how many towns the map has');
+  // The same map comes out of a backup.
+  const copy = GameHost.fromBackup(host.backup()!);
+  assert.deepEqual(copy.state!.map.starts, s.map.starts);
+});
