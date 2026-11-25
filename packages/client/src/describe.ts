@@ -141,7 +141,7 @@ export function describeAction(id: string): Detail {
         'Quickest through woods and narrow ground, but the group arrives strung out.'] };
     }
     const [title, line] = text[f] ?? text.line;
-    return { title: `${title} formation`, icon: id, stats: [], lines: [line, 'Everyone walks straight to their place at the destination and the formation gathers there: those in front take the front rows. Right-click and drag to choose which way it faces.'] };
+    return { title: `${title} formation`, icon: id, stats: [], lines: [line, 'Sent some way off, the group forms up and marches there as one block at the pace of its slowest member; stragglers hurry to their places. Set upon on the way, it stops and fights (on defensive, only those in reach turn). Right-click and drag to choose which way it faces at the end.'] };
   }
   if (id === 'back') {
     return { title: 'Back', icon: id, stats: [], lines: ['Puts the building away without placing it, and brings back the menu from before (same as Esc or right-click).'] };

@@ -1346,3 +1346,83 @@ test('troops tearing down a building fight off whoever comes at them, then carry
   step(s);
   assert.ok(raider.order.t === 'attack' && raider.order.id === house.id, 'then goes back to the house');
 });
+
+/** A 96-tile map of open grass with two players, each with only a king far off in a corner. */
+const marchField = () => {
+  const s = createGame(5, 96);
+  addPlayer(s, 0, 0);
+  addPlayer(s, 1, 1);
+  for (const e of [...s.entities.values()]) s.entities.delete(e.id);
+  s.map.blocked.fill(0); s.map.footprint.fill(0); s.map.tiles.fill(Tile.Grass); s.map.version++;
+  spawn(s, 0, 'king', 2, 2);
+  spawn(s, 1, 'king', 93, 93);
+  return s;
+};
+
+test('a formation marches as one block: it forms up, keeps its shape, and stragglers catch up', () => {
+  const s = marchField();
+  const units: Entity[] = [];
+  for (let i = 0; i < 6; i++) units.push(spawn(s, 0, 'swordsman', 20 + (i % 3), 40 + Math.floor(i / 3)));
+  for (let i = 0; i < 4; i++) units.push(spawn(s, 0, 'archer', 18 + (i % 2), 40 + Math.floor(i / 2)));
+  // Two riders well off to the side, and one in front.
+  units.push(spawn(s, 0, 'rider', 12, 28), spawn(s, 0, 'rider', 10, 52), spawn(s, 0, 'rider', 30, 41));
+  const ids = units.map((e) => e.id);
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'line' });
+  applyCommand(s, 0, { type: 'move', ids, x: 80, y: 41 });
+  assert.ok(units.every((e) => e.block !== undefined), 'all in one block');
+  const centre = () => [units.reduce((a, e) => a + e.x, 0) / units.length, units.reduce((a, e) => a + e.y, 0) / units.length];
+  run(s, 150);
+  // On the way: a tight block, soldiers in front (east) of the archers.
+  const [cx, cy] = centre();
+  assert.ok(cx > 30 && cx < 70, `on the way: ${cx.toFixed(1)}`);
+  for (const e of units) assert.ok(Math.hypot(e.x - cx, e.y - cy) < 5, `${e.kind} keeps its place: ${(e.x - cx).toFixed(1)}, ${(e.y - cy).toFixed(1)}`);
+  const avg = (k: string) => units.filter((e) => e.kind === k).reduce((a, e) => a + e.x, 0) / units.filter((e) => e.kind === k).length;
+  assert.ok(avg('swordsman') > avg('archer'), 'soldiers in front');
+  // Nobody runs off ahead: the riders keep to the swordsmen's pace.
+  const xs = units.map((e) => e.x);
+  run(s, 10);
+  units.forEach((e, i) => assert.ok(e.x - xs[i] <= DEFS.swordsman.speed! + 0.3, `${e.kind} keeps pace`));
+  run(s, 400);
+  assert.ok(units.every((e) => e.order.t === 'idle' && e.block === undefined && Math.hypot(e.x - 80, e.y - 41) < 5), 'all there, standing');
+});
+
+test('a block squeezes through a gap in a wood and spreads out again', () => {
+  const s = marchField();
+  for (let y = 0; y < 96; y++) if (y < 40 || y > 41) for (const x of [45, 46]) s.map.tiles[y * 96 + x] = Tile.Forest;
+  s.map.version++;
+  const units: Entity[] = [];
+  for (let i = 0; i < 12; i++) units.push(spawn(s, 0, 'spearman', 25 + (i % 4), 30 + Math.floor(i / 4) * 2));
+  const ids = units.map((e) => e.id);
+  applyCommand(s, 0, { type: 'formation', ids, formation: 'line' });
+  applyCommand(s, 0, { type: 'move', ids, x: 70, y: 44 });
+  let width = 0;
+  for (let i = 0; i < 700; i++) {
+    step(s);
+    for (const e of units) assert.ok(isWalkable(s.map, Math.floor(e.x), Math.floor(e.y)), 'never walks into the trees');
+    if (units.every((e) => e.x > 55)) width = Math.max(width, Math.max(...units.map((e) => e.y)) - Math.min(...units.map((e) => e.y)));
+  }
+  assert.ok(width > 3, `spread out again past the gap: ${width.toFixed(1)}`);
+  assert.ok(units.every((e) => Math.hypot(e.x - 70, e.y - 44) < 6), 'all got there');
+});
+
+test('a block set upon on the march: aggressive, it stops to fight; defensive, only those in reach turn', () => {
+  for (const stance of ['aggressive', 'defensive'] as const) {
+    const s = marchField();
+    const units: Entity[] = [];
+    for (let i = 0; i < 8; i++) units.push(spawn(s, 0, 'swordsman', 20 + (i % 4), 40 + Math.floor(i / 4)));
+    const ids = units.map((e) => e.id);
+    applyCommand(s, 0, { type: 'formation', ids, formation: 'line' });
+    applyCommand(s, 0, { type: 'stance', ids, stance });
+    applyCommand(s, 0, { type: 'move', ids, x: 80, y: 41 });
+    run(s, 40);
+    // An enemy archer shoots at the block from out of the swordsmen's reach.
+    const [cx, cy] = [units.reduce((a, e) => a + e.x, 0) / 8, units.reduce((a, e) => a + e.y, 0) / 8];
+    const archer = spawn(s, 1, 'archer', Math.floor(cx), Math.floor(cy) + 5);
+    applyCommand(s, 1, { type: 'interact', ids: [archer.id], target: units[0].id });
+    for (let i = 0; i < 40 && units.every((e) => e.order.t === 'move'); i++) step(s);
+    step(s);
+    const fighting = units.filter((e) => e.order.t === 'attack').length;
+    if (stance === 'aggressive') assert.equal(fighting, 8, 'the whole block turns on the archer');
+    else assert.equal(fighting, 0, 'nobody is in reach of it: the block marches on');
+  }
+});
